@@ -1,26 +1,101 @@
 @import "tailwindcss";
 
+/*
+ * FMS design tokens — per docs/FMS_Design_Instructions.md:
+ * premium/TallyPrime credibility, dense ledgers, serif headers,
+ * tabular figures for all numbers, one debit/credit color pair everywhere.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f4f3ef; /* paper */
+  --surface: #ffffff;
+  --foreground: #1c2430; /* ink */
+  --muted: #5c6672;
+  --line: #d9d6cf;
+  --line-strong: #b8b4aa;
+
+  --sidebar: #1b2733;
+  --sidebar-ink: #cfd6dd;
+
+  --debit: #b3261e; /* outflow / debit side — the only red in the app */
+  --credit: #1a6b45; /* inflow / credit side — the only green in the app */
+  --accent: #1e4d8c;
+
+  /* Active company tag — set per company on <body data-company>. */
+  --company: #1e4d8c;
+  --company-ink: #ffffff;
+}
+
+[data-company="BFM"] {
+  --company: #1e4d8c; /* deep blue */
+}
+[data-company="B2B"] {
+  --company: #7a4a12; /* dark amber-brown — unmistakably different from BFM */
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-ink: var(--sidebar-ink);
+  --color-debit: var(--debit);
+  --color-credit: var(--credit);
+  --color-accent: var(--accent);
+  --color-company: var(--company);
+  --color-company-ink: var(--company-ink);
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-slab);
+  --font-mono: var(--font-jbmono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 14px;
+}
+
+/* Statement/section headers get the formal-document serif weight. */
+.heading {
+  font-family: var(--font-slab), Georgia, serif;
+  letter-spacing: 0.01em;
+}
+
+/* All numeric data: tabular figures, right alignment handled per-cell. */
+.num {
+  font-family: var(--font-jbmono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Dense ledger table baseline. */
+.ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.ledger-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line-strong);
+  background: #edece7;
+}
+.ledger-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.ledger-table tr:hover td {
+  background: #f8f7f4;
+}
+.ledger-table th.num-col,
+.ledger-table td.num-col {
+  text-align: right;
 }

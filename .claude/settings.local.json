@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Program Files/**)",
+      "Bash(docker --version)",
+      "Bash(mkdir -p docs)",
+      "Bash(mv FMS_Claude_Code_Build_Spec.md FMS_Design_Instructions.md docs/)",
+      "Bash(npx --yes create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --no-import-alias --use-npm --skip-install)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\({deps:p.dependencies, dev:p.devDependencies},null,1\\)\\)\")",
+      "Bash(npm install *)",
+      "Bash(npx prisma *)",
+      "Bash(node -e ' *)",
+      "Bash(printf '\\\\n.pgdata\\\\n.env\\\\n')",
+      "Bash(node scripts/dev-db.mjs)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(npx eslint *)"
+    ]
+  }
+}
