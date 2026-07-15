@@ -14,7 +14,9 @@
       "Bash(node scripts/dev-db.mjs)",
       "Bash(npm run *)",
       "Bash(npx tsc *)",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(npx tsx -e ' *)",
+      "Bash(npx tsx *)"
     ]
   }
 }
