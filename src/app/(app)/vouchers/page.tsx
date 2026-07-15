@@ -1,8 +1,6 @@
 import Link from "next/link";
 
 const COMING = [
-  { label: "Delivery Note", note: "Phase 3" },
-  { label: "Settlement", note: "Phase 3" },
   { label: "Direct Sale", note: "Phase 4" },
   { label: "Expense", note: "Phase 5" },
 ];
@@ -20,6 +18,18 @@ export default function VouchersPage() {
           <div className="text-muted text-[12px]">
             Society, private and local purchases. Adds stock, posts to the
             seller&apos;s ledger.
+          </div>
+        </Link>
+        <Link
+          href="/vouchers/deliveries"
+          className="block px-4 py-3 hover:bg-background border-b border-line"
+        >
+          <div className="font-semibold text-[14px]">
+            Delivery Note &amp; Settlement
+          </div>
+          <div className="text-muted text-[12px]">
+            Dispatch stock to factory, market, mill or local buyers; settle
+            with accepted / returned / spoiled splits.
           </div>
         </Link>
         {COMING.map((c) => (
