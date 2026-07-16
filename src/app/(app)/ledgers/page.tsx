@@ -1,9 +1,21 @@
 import Link from "next/link";
 
-const COMING = [
-  { label: "Party Ledgers", note: "Phase 5" },
-  { label: "Expense Ledgers", note: "Phase 5" },
-  { label: "Day Book", note: "Phase 5" },
+const ITEMS = [
+  {
+    href: "/ledgers/day-book",
+    label: "Day Book",
+    desc: "The daily row — purchase, expenses, rent, sale, P/F — plus the COGS-matched true profit.",
+  },
+  {
+    href: "/ledgers/parties",
+    label: "Party Ledgers",
+    desc: "Statement and outstanding balance for every party.",
+  },
+  {
+    href: "/ledgers/expenses",
+    label: "Expense Ledgers",
+    desc: "One mini ledger per category — loaders, ice, rent, fuel and the rest.",
+  },
 ];
 
 export default function LedgersPage() {
@@ -11,9 +23,19 @@ export default function LedgersPage() {
     <div>
       <h1 className="heading text-xl font-semibold mb-4">Ledgers</h1>
       <div className="max-w-md border border-line bg-surface">
+        {ITEMS.map((i) => (
+          <Link
+            key={i.href}
+            href={i.href}
+            className="block px-4 py-3 hover:bg-background border-b border-line"
+          >
+            <div className="font-semibold text-[14px]">{i.label}</div>
+            <div className="text-muted text-[12px]">{i.desc}</div>
+          </Link>
+        ))}
         <Link
           href="/ledgers/owner-reserve"
-          className="block px-4 py-3 hover:bg-background border-b border-line"
+          className="block px-4 py-3 hover:bg-background"
         >
           <div className="font-semibold text-[14px]">
             Owner Reserve Account{" "}
@@ -25,15 +47,6 @@ export default function LedgersPage() {
             Running balance of amounts withheld on market bills.
           </div>
         </Link>
-        {COMING.map((c) => (
-          <div
-            key={c.label}
-            className="px-4 py-3 border-b border-line last:border-b-0 opacity-50"
-          >
-            <div className="font-semibold text-[14px]">{c.label}</div>
-            <div className="text-muted text-[12px]">Arrives in {c.note}.</div>
-          </div>
-        ))}
       </div>
     </div>
   );

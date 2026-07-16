@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-const COMING = [{ label: "Expense", note: "Phase 5" }];
+const COMING: { label: string; note: string }[] = [];
 
 export default function VouchersPage() {
   return (
@@ -37,6 +37,15 @@ export default function VouchersPage() {
           <div className="text-muted text-[12px]">
             Quick local sale — stock sold and paid in one step, no delivery
             note.
+          </div>
+        </Link>
+        <Link
+          href="/vouchers/expenses"
+          className="block px-4 py-3 hover:bg-background border-b border-line"
+        >
+          <div className="font-semibold text-[14px]">Expense</div>
+          <div className="text-muted text-[12px]">
+            Loaders, workers, ice, canteen, rent, transport, fuel, misc.
           </div>
         </Link>
         {COMING.map((c) => (
