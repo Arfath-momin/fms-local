@@ -73,6 +73,12 @@ export default async function PartyStatementPage({
           <p className="text-muted text-[13px]">
             {PARTY_TYPE_LABELS[party.type]} · statement for {company.name}
           </p>
+          <a
+            href={`/ledgers/parties/${party.id}/export`}
+            className="inline-block mt-1 text-accent text-[12px] underline underline-offset-2"
+          >
+            Export statement (CSV)
+          </a>
         </div>
         <div className="text-right">
           <div className="text-[12px] uppercase tracking-wide text-muted font-semibold">
