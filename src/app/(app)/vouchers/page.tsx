@@ -1,9 +1,6 @@
 import Link from "next/link";
 
-const COMING = [
-  { label: "Direct Sale", note: "Phase 4" },
-  { label: "Expense", note: "Phase 5" },
-];
+const COMING = [{ label: "Expense", note: "Phase 5" }];
 
 export default function VouchersPage() {
   return (
@@ -30,6 +27,16 @@ export default function VouchersPage() {
           <div className="text-muted text-[12px]">
             Dispatch stock to factory, market, mill or local buyers; settle
             with accepted / returned / spoiled splits.
+          </div>
+        </Link>
+        <Link
+          href="/vouchers/direct-sales"
+          className="block px-4 py-3 hover:bg-background border-b border-line"
+        >
+          <div className="font-semibold text-[14px]">Direct Sale</div>
+          <div className="text-muted text-[12px]">
+            Quick local sale — stock sold and paid in one step, no delivery
+            note.
           </div>
         </Link>
         {COMING.map((c) => (
