@@ -3,20 +3,30 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
-import { fmtMoney, toInputDate } from "@/lib/format";
+import { isDayClosed } from "@/lib/dayclose";
+import { getFlaggedIds } from "@/lib/errorflag";
+import { getAvgCostMap } from "@/lib/report";
+import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { closeDay } from "./actions";
 
 const ZERO = new Prisma.Decimal(0);
 
 async function computeDayBook(companyId: string, date: Date) {
-  const [purchaseAgg, expenseGroups, settlements, directSaleAgg, soldMoves, lossMoves, purchaseCost] =
+  // Flagged-error vouchers never count in totals (spec §2 ErrorFlag).
+  const [flaggedPurchases, flaggedSales, flaggedExpenses] = await Promise.all([
+    getFlaggedIds("PURCHASE"),
+    getFlaggedIds("DIRECT_SALE"),
+    getFlaggedIds("EXPENSE"),
+  ]);
+  const [purchaseAgg, expenseGroups, settlements, directSaleAgg, soldMoves, lossMoves, avgCost] =
     await Promise.all([
       prisma.purchase.aggregate({
-        where: { companyId, date },
+        where: { companyId, date, id: { notIn: flaggedPurchases } },
         _sum: { amount: true },
       }),
       prisma.expense.groupBy({
         by: ["category"],
-        where: { companyId, date },
+        where: { companyId, date, id: { notIn: flaggedExpenses } },
         _sum: { amount: true },
       }),
       prisma.settlement.findMany({
@@ -24,7 +34,7 @@ async function computeDayBook(companyId: string, date: Date) {
         include: { deliveryNote: { select: { rate: true } } },
       }),
       prisma.directSale.aggregate({
-        where: { companyId, date },
+        where: { companyId, date, id: { notIn: flaggedSales } },
         _sum: { amount: true },
       }),
       prisma.stockMovement.groupBy({
@@ -37,12 +47,7 @@ async function computeDayBook(companyId: string, date: Date) {
         where: { companyId, date, state: "LOSS", direction: "IN" },
         _sum: { qtyKg: true },
       }),
-      // Weighted average purchase cost per fish type, up to this date.
-      prisma.purchase.groupBy({
-        by: ["fishType"],
-        where: { companyId, date: { lte: date } },
-        _sum: { amount: true, qtyKg: true },
-      }),
+      getAvgCostMap(companyId, date),
     ]);
 
   const purchase = purchaseAgg._sum.amount ?? ZERO;
@@ -67,13 +72,6 @@ async function computeDayBook(companyId: string, date: Date) {
     .reduce((acc, s) => acc.add(s.qtyAccepted.mul(s.deliveryNote.rate)), ZERO)
     .add(directSaleAgg._sum.amount ?? ZERO);
 
-  const avgCost = new Map<string, Prisma.Decimal>();
-  for (const g of purchaseCost) {
-    const qty = g._sum.qtyKg ?? ZERO;
-    if (qty.greaterThan(0)) {
-      avgCost.set(g.fishType, (g._sum.amount ?? ZERO).div(qty));
-    }
-  }
   const costOf = (groups: typeof soldMoves) =>
     groups.reduce((acc, g) => {
       const cost = avgCost.get(g.fishType);
@@ -92,7 +90,7 @@ export default async function DayBookPage({
 }: {
   searchParams: Promise<{ date?: string }>;
 }) {
-  await requireSession();
+  const session = await requireSession();
   const company = await getActiveCompany();
 
   const raw = (await searchParams).date;
@@ -101,7 +99,12 @@ export default async function DayBookPage({
       ? new Date(raw)
       : new Date(toInputDate(new Date()));
 
-  const d = await computeDayBook(company.id, date);
+  const [d, closed] = await Promise.all([
+    computeDayBook(company.id, date),
+    isDayClosed(company.id, date),
+  ]);
+  const isMerchant = session.role === "MERCHANT";
+  const isFuture = date.getTime() > new Date(toInputDate(new Date())).getTime();
   const pfCls = (v: Prisma.Decimal) =>
     v.greaterThan(0) ? "text-credit" : v.lessThan(0) ? "text-debit" : "";
 
@@ -134,6 +137,31 @@ export default async function DayBookPage({
           </button>
         </form>
       </div>
+
+      {closed ? (
+        <div className="border border-line-strong bg-[#edece7] px-4 py-2.5 mb-3 flex items-center gap-2 text-[13px]">
+          <span aria-hidden>🔒</span>
+          <span className="font-semibold">
+            This day is closed — entries are final.
+          </span>
+          <span className="text-muted">
+            Corrections go through the error-flag flow on each voucher.
+          </span>
+        </div>
+      ) : (
+        isMerchant &&
+        !isFuture && (
+          <form action={closeDay} className="mb-3">
+            <input type="hidden" name="date" value={toInputDate(date)} />
+            <button
+              type="submit"
+              className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
+            >
+              🔒 Close Day — lock all entries for {fmtDate(date)}
+            </button>
+          </form>
+        )
+      )}
 
       {/* The familiar daily row — cash snapshot, primary (design doc #7) */}
       <div className="border border-line-strong bg-surface">

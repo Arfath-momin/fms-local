@@ -2,18 +2,28 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
-import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { getClosedDateSet } from "@/lib/dayclose";
+import { getFlagsFor } from "@/lib/errorflag";
+import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
+import { CorrectedBadge, LockMark } from "../../lock-mark";
 
 export default async function DirectSalesPage() {
   const session = await requireSession();
   const isMerchant = session.role === "MERCHANT";
   const company = await getActiveCompany();
 
-  const sales = await prisma.directSale.findMany({
-    where: { companyId: company.id },
-    include: { party: { select: { name: true } } },
-    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-  });
+  const [sales, closedDates] = await Promise.all([
+    prisma.directSale.findMany({
+      where: { companyId: company.id },
+      include: { party: { select: { name: true } } },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    }),
+    getClosedDateSet(company.id),
+  ]);
+  const flags = await getFlagsFor(
+    "DIRECT_SALE",
+    sales.map((s) => s.id)
+  );
 
   return (
     <div>
@@ -55,28 +65,46 @@ export default async function DirectSalesPage() {
               </tr>
             </thead>
             <tbody>
-              {sales.map((s) => (
-                <tr key={s.id}>
-                  <td className="whitespace-nowrap">{fmtDate(s.date)}</td>
-                  <td className="font-medium">{s.party.name}</td>
-                  <td>{s.fishType}</td>
-                  <td className="num-col num">{fmtKg(s.qtyKg)}</td>
-                  <td className="num-col num">{fmtMoney(s.rate)}</td>
-                  <td className="num-col num text-credit">
-                    {fmtMoney(s.amount)}
-                  </td>
-                  {isMerchant && (
-                    <td>
-                      <Link
-                        href={`/vouchers/direct-sales/${s.id}`}
-                        className="text-accent underline underline-offset-2 text-[12px]"
-                      >
-                        Edit
-                      </Link>
+              {sales.map((s) => {
+                const flag = flags.get(s.id);
+                const struck = flag ? "line-through opacity-60" : "";
+                return (
+                  <tr key={s.id}>
+                    <td className="whitespace-nowrap">
+                      {fmtDate(s.date)}
+                      <LockMark closed={closedDates.has(toInputDate(s.date))} />
                     </td>
-                  )}
-                </tr>
-              ))}
+                    <td className="font-medium">
+                      <span className={struck}>{s.party.name}</span>
+                      {flag && (
+                        <CorrectedBadge
+                          href={
+                            flag.correctingEntryId
+                              ? `/vouchers/direct-sales/${flag.correctingEntryId}`
+                              : null
+                          }
+                        />
+                      )}
+                    </td>
+                    <td className={struck}>{s.fishType}</td>
+                    <td className={`num-col num ${struck}`}>{fmtKg(s.qtyKg)}</td>
+                    <td className={`num-col num ${struck}`}>{fmtMoney(s.rate)}</td>
+                    <td className={`num-col num text-credit ${struck}`}>
+                      {fmtMoney(s.amount)}
+                    </td>
+                    {isMerchant && (
+                      <td>
+                        <Link
+                          href={`/vouchers/direct-sales/${s.id}`}
+                          className="text-accent underline underline-offset-2 text-[12px]"
+                        >
+                          {flag ? "View" : "Edit"}
+                        </Link>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

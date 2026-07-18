@@ -19,6 +19,7 @@ export function DirectSaleForm({
   fishOptions,
   initial,
   submitLabel,
+  reasonField,
 }: {
   action: (
     prev: DirectSaleFormState,
@@ -35,6 +36,7 @@ export function DirectSaleForm({
     date: string;
   };
   submitLabel: string;
+  reasonField?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<
     DirectSaleFormState,
@@ -192,6 +194,15 @@ export function DirectSaleForm({
           />
         </div>
       </div>
+
+      {reasonField && (
+        <div>
+          <label htmlFor="reason" className={labelCls}>
+            Reason for correction (optional)
+          </label>
+          <input id="reason" name="reason" className={inputCls} />
+        </div>
+      )}
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}
 

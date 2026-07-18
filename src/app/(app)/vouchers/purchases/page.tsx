@@ -2,7 +2,10 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
-import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { getClosedDateSet } from "@/lib/dayclose";
+import { getFlagsFor } from "@/lib/errorflag";
+import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
+import { CorrectedBadge, LockMark } from "../../lock-mark";
 
 const TYPE_LABELS = { SOCIETY: "Society", PRIVATE: "Private", LOCAL: "Local" };
 
@@ -11,11 +14,18 @@ export default async function PurchasesPage() {
   const isMerchant = session.role === "MERCHANT";
   const company = await getActiveCompany();
 
-  const purchases = await prisma.purchase.findMany({
-    where: { companyId: company.id },
-    include: { party: { select: { name: true } } },
-    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-  });
+  const [purchases, closedDates] = await Promise.all([
+    prisma.purchase.findMany({
+      where: { companyId: company.id },
+      include: { party: { select: { name: true } } },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    }),
+    getClosedDateSet(company.id),
+  ]);
+  const flags = await getFlagsFor(
+    "PURCHASE",
+    purchases.map((p) => p.id)
+  );
 
   return (
     <div>
@@ -58,29 +68,47 @@ export default async function PurchasesPage() {
               </tr>
             </thead>
             <tbody>
-              {purchases.map((p) => (
-                <tr key={p.id}>
-                  <td className="whitespace-nowrap">{fmtDate(p.date)}</td>
-                  <td className="num">{p.invoiceNumber}</td>
-                  <td className="font-medium">{p.party.name}</td>
-                  <td>{TYPE_LABELS[p.type]}</td>
-                  <td>{p.fishType}</td>
-                  <td className="num-col num">{fmtKg(p.qtyKg)}</td>
-                  <td className="num-col num text-debit">
-                    {fmtMoney(p.amount)}
-                  </td>
-                  {isMerchant && (
-                    <td>
-                      <Link
-                        href={`/vouchers/purchases/${p.id}`}
-                        className="text-accent underline underline-offset-2 text-[12px]"
-                      >
-                        Edit
-                      </Link>
+              {purchases.map((p) => {
+                const flag = flags.get(p.id);
+                const struck = flag ? "line-through opacity-60" : "";
+                return (
+                  <tr key={p.id}>
+                    <td className="whitespace-nowrap">
+                      {fmtDate(p.date)}
+                      <LockMark closed={closedDates.has(toInputDate(p.date))} />
                     </td>
-                  )}
-                </tr>
-              ))}
+                    <td className={`num ${struck}`}>{p.invoiceNumber}</td>
+                    <td className="font-medium">
+                      <span className={struck}>{p.party.name}</span>
+                      {flag && (
+                        <CorrectedBadge
+                          href={
+                            flag.correctingEntryId
+                              ? `/vouchers/purchases/${flag.correctingEntryId}`
+                              : null
+                          }
+                        />
+                      )}
+                    </td>
+                    <td className={struck}>{TYPE_LABELS[p.type]}</td>
+                    <td className={struck}>{p.fishType}</td>
+                    <td className={`num-col num ${struck}`}>{fmtKg(p.qtyKg)}</td>
+                    <td className={`num-col num text-debit ${struck}`}>
+                      {fmtMoney(p.amount)}
+                    </td>
+                    {isMerchant && (
+                      <td>
+                        <Link
+                          href={`/vouchers/purchases/${p.id}`}
+                          className="text-accent underline underline-offset-2 text-[12px]"
+                        >
+                          {flag ? "View" : "Edit"}
+                        </Link>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

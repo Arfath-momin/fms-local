@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
+import { getFlagsFor } from "@/lib/errorflag";
 import { fmtDate, fmtMoney } from "@/lib/format";
 
 export default async function ExpenseCategoryPage({
@@ -24,8 +25,12 @@ export default async function ExpenseCategoryPage({
     where: { companyId: company.id, category },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   });
+  const flags = await getFlagsFor(
+    "EXPENSE",
+    expenses.map((e) => e.id)
+  );
   const total = expenses.reduce(
-    (acc, e) => acc.add(e.amount),
+    (acc, e) => (flags.has(e.id) ? acc : acc.add(e.amount)),
     new Prisma.Decimal(0)
   );
 
@@ -68,11 +73,13 @@ export default async function ExpenseCategoryPage({
               </tr>
             </thead>
             <tbody>
-              {expenses.map((e) => (
+              {expenses.map((e) => {
+                const struck = flags.has(e.id) ? "line-through opacity-60" : "";
+                return (
                 <tr key={e.id}>
                   <td className="whitespace-nowrap">{fmtDate(e.date)}</td>
-                  <td className="text-muted">{e.notes ?? "—"}</td>
-                  <td className="num-col num text-debit">
+                  <td className={`text-muted ${struck}`}>{e.notes ?? "—"}</td>
+                  <td className={`num-col num text-debit ${struck}`}>
                     {fmtMoney(e.amount)}
                   </td>
                   {isMerchant && (
@@ -86,7 +93,8 @@ export default async function ExpenseCategoryPage({
                     </td>
                   )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

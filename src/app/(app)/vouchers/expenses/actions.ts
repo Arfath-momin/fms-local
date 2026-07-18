@@ -65,6 +65,50 @@ export async function createExpense(
   redirect("/vouchers/expenses");
 }
 
+/** Closed-day correction: flag original, create linked replacement. */
+export async function correctExpense(
+  expenseId: string,
+  _prev: ExpenseFormState,
+  formData: FormData
+): Promise<ExpenseFormState> {
+  await requireMerchant();
+  const parsed = parse(formData);
+  if ("error" in parsed) return { error: parsed.error };
+  const reason = String(formData.get("reason") ?? "").trim();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const original = await tx.expense.findUnique({ where: { id: expenseId } });
+      if (!original) throw new Error("Expense not found.");
+
+      const already = await tx.errorFlag.findUnique({
+        where: { linkedType_linkedId: { linkedType: "EXPENSE", linkedId: expenseId } },
+      });
+      if (already) throw new Error("This expense has already been corrected.");
+
+      const flag = await tx.errorFlag.create({
+        data: {
+          linkedType: "EXPENSE",
+          linkedId: expenseId,
+          reason: reason || null,
+        },
+      });
+      const replacement = await tx.expense.create({
+        data: { companyId: original.companyId, ...parsed.data },
+      });
+      await tx.errorFlag.update({
+        where: { id: flag.id },
+        data: { correctingEntryId: replacement.id },
+      });
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not save correction." };
+  }
+
+  revalidatePath("/vouchers/expenses");
+  redirect("/vouchers/expenses");
+}
+
 export async function updateExpense(
   expenseId: string,
   _prev: ExpenseFormState,

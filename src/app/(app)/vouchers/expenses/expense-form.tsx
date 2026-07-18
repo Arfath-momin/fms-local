@@ -25,6 +25,7 @@ export function ExpenseForm({
   action,
   initial,
   submitLabel,
+  reasonField,
 }: {
   action: (
     prev: ExpenseFormState,
@@ -37,6 +38,7 @@ export function ExpenseForm({
     notes: string | null;
   };
   submitLabel: string;
+  reasonField?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<
     ExpenseFormState,
@@ -108,6 +110,15 @@ export function ExpenseForm({
           className={inputCls}
         />
       </div>
+
+      {reasonField && (
+        <div>
+          <label htmlFor="reason" className={labelCls}>
+            Reason for correction (optional)
+          </label>
+          <input id="reason" name="reason" className={inputCls} />
+        </div>
+      )}
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}
 

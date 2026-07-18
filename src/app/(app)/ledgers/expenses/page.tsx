@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
+import { getFlaggedIds } from "@/lib/errorflag";
 import { fmtMoney } from "@/lib/format";
 
 // Each category is its own mini ledger (spec §2 Expense).
@@ -13,7 +14,10 @@ export default async function ExpenseLedgersPage() {
 
   const groups = await prisma.expense.groupBy({
     by: ["category"],
-    where: { companyId: company.id },
+    where: {
+      companyId: company.id,
+      id: { notIn: await getFlaggedIds("EXPENSE") },
+    },
     _sum: { amount: true },
     _count: true,
   });

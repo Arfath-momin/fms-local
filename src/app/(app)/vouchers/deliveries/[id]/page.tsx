@@ -7,6 +7,9 @@ import { ledgerDelta } from "@/lib/ledger";
 import { CHANNEL_LABELS } from "@/lib/delivery";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { StatusBadge } from "../status-badge";
+import { getAttachments } from "@/lib/attachments";
+import { uploadAttachment } from "../../../attachments/actions";
+import { AttachmentPanel } from "../../../attachments/attachment-panel";
 
 export default async function DeliveryNotePage({
   params,
@@ -199,6 +202,20 @@ export default async function DeliveryNotePage({
           )}
         </div>
       </div>
+
+      <AttachmentPanel
+        attachments={(await getAttachments("DELIVERY_NOTE", note.id)).map(
+          (a) => ({ id: a.id, uploadedAt: a.uploadedAt.toISOString() })
+        )}
+        action={uploadAttachment.bind(
+          null,
+          "DELIVERY_NOTE",
+          note.id,
+          note.companyId,
+          `/vouchers/deliveries/${note.id}`
+        )}
+        canUpload={isMerchant}
+      />
 
       {isMerchant && note.status === "PENDING" && (
         <p className="mt-3 text-[13px]">

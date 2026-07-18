@@ -3,17 +3,27 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { getClosedDateSet } from "@/lib/dayclose";
+import { getFlagsFor } from "@/lib/errorflag";
+import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { CorrectedBadge, LockMark } from "../../lock-mark";
 
 export default async function ExpensesPage() {
   const session = await requireSession();
   const isMerchant = session.role === "MERCHANT";
   const company = await getActiveCompany();
 
-  const expenses = await prisma.expense.findMany({
-    where: { companyId: company.id },
-    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-  });
+  const [expenses, closedDates] = await Promise.all([
+    prisma.expense.findMany({
+      where: { companyId: company.id },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    }),
+    getClosedDateSet(company.id),
+  ]);
+  const flags = await getFlagsFor(
+    "EXPENSE",
+    expenses.map((e) => e.id)
+  );
 
   return (
     <div>
@@ -53,28 +63,46 @@ export default async function ExpensesPage() {
               </tr>
             </thead>
             <tbody>
-              {expenses.map((e) => (
-                <tr key={e.id}>
-                  <td className="whitespace-nowrap">{fmtDate(e.date)}</td>
-                  <td className="font-medium">
-                    {EXPENSE_CATEGORY_LABELS[e.category]}
-                  </td>
-                  <td className="text-muted">{e.notes ?? "—"}</td>
-                  <td className="num-col num text-debit">
-                    {fmtMoney(e.amount)}
-                  </td>
-                  {isMerchant && (
-                    <td>
-                      <Link
-                        href={`/vouchers/expenses/${e.id}`}
-                        className="text-accent underline underline-offset-2 text-[12px]"
-                      >
-                        Edit
-                      </Link>
+              {expenses.map((e) => {
+                const flag = flags.get(e.id);
+                const struck = flag ? "line-through opacity-60" : "";
+                return (
+                  <tr key={e.id}>
+                    <td className="whitespace-nowrap">
+                      {fmtDate(e.date)}
+                      <LockMark closed={closedDates.has(toInputDate(e.date))} />
                     </td>
-                  )}
-                </tr>
-              ))}
+                    <td className="font-medium">
+                      <span className={struck}>
+                        {EXPENSE_CATEGORY_LABELS[e.category]}
+                      </span>
+                      {flag && (
+                        <CorrectedBadge
+                          href={
+                            flag.correctingEntryId
+                              ? `/vouchers/expenses/${flag.correctingEntryId}`
+                              : null
+                          }
+                        />
+                      )}
+                    </td>
+                    <td className={`text-muted ${struck}`}>{e.notes ?? "—"}</td>
+                    <td className={`num-col num text-debit ${struck}`}>
+                      {fmtMoney(e.amount)}
+                    </td>
+                    {isMerchant && (
+                      <td>
+                        <Link
+                          href={`/vouchers/expenses/${e.id}`}
+                          className="text-accent underline underline-offset-2 text-[12px]"
+                        >
+                          {flag ? "View" : "Edit"}
+                        </Link>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { getFlaggedIds } from "@/lib/errorflag";
 
 const ZERO = new Prisma.Decimal(0);
 
@@ -14,7 +15,11 @@ export async function getAvgCostMap(
 ): Promise<Map<string, Prisma.Decimal>> {
   const groups = await prisma.purchase.groupBy({
     by: ["fishType"],
-    where: { companyId, date: { lte: upTo } },
+    where: {
+      companyId,
+      date: { lte: upTo },
+      id: { notIn: await getFlaggedIds("PURCHASE") },
+    },
     _sum: { amount: true, qtyKg: true },
   });
   const map = new Map<string, Prisma.Decimal>();
@@ -64,6 +69,12 @@ export async function computePnL(
   to: Date
 ): Promise<PnL> {
   const dateRange = { gte: from, lte: to };
+  // Flagged-error vouchers stay visible in lists but never count in totals
+  // (spec §2 ErrorFlag).
+  const [flaggedSales, flaggedExpenses] = await Promise.all([
+    getFlaggedIds("DIRECT_SALE"),
+    getFlaggedIds("EXPENSE"),
+  ]);
   const [settlements, directSaleAgg, soldMoves, lossMoves, expenseGroups, avgCost] =
     await Promise.all([
       prisma.settlement.findMany({
@@ -71,7 +82,7 @@ export async function computePnL(
         include: { deliveryNote: { select: { rate: true } } },
       }),
       prisma.directSale.aggregate({
-        where: { companyId, date: dateRange },
+        where: { companyId, date: dateRange, id: { notIn: flaggedSales } },
         _sum: { amount: true },
       }),
       prisma.stockMovement.groupBy({
@@ -86,7 +97,7 @@ export async function computePnL(
       }),
       prisma.expense.groupBy({
         by: ["category"],
-        where: { companyId, date: dateRange },
+        where: { companyId, date: dateRange, id: { notIn: flaggedExpenses } },
         _sum: { amount: true },
       }),
       getAvgCostMap(companyId, to),

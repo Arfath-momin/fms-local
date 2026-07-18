@@ -24,6 +24,7 @@ export function PurchaseForm({
   fishTypes,
   initial,
   submitLabel,
+  reasonField,
 }: {
   action: (
     prev: PurchaseFormState,
@@ -41,6 +42,7 @@ export function PurchaseForm({
     date: string;
   };
   submitLabel: string;
+  reasonField?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<
     PurchaseFormState,
@@ -175,6 +177,15 @@ export function PurchaseForm({
           />
         </div>
       </div>
+
+      {reasonField && (
+        <div>
+          <label htmlFor="reason" className={labelCls}>
+            Reason for correction (optional)
+          </label>
+          <input id="reason" name="reason" className={inputCls} />
+        </div>
+      )}
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}
 

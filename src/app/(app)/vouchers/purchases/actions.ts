@@ -162,6 +162,98 @@ export async function createPurchase(
 }
 
 /**
+ * Closed-day correction (spec §2 ErrorFlag): flags the original purchase
+ * (kept, never deleted), replaces its stock/ledger effect rows with the
+ * correction's, and links the replacement. This path deliberately skips the
+ * day-open guard — it IS the sanctioned way to fix a closed day.
+ */
+export async function correctPurchase(
+  purchaseId: string,
+  _prev: PurchaseFormState,
+  formData: FormData
+): Promise<PurchaseFormState> {
+  await requireMerchant();
+  const parsed = parse(formData);
+  if ("error" in parsed) return { error: parsed.error };
+  const d = parsed.data;
+  const reason = String(formData.get("reason") ?? "").trim();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const original = await tx.purchase.findUnique({
+        where: { id: purchaseId },
+      });
+      if (!original) throw new Error("Purchase not found.");
+
+      const already = await tx.errorFlag.findUnique({
+        where: { linkedType_linkedId: { linkedType: "PURCHASE", linkedId: purchaseId } },
+      });
+      if (already) throw new Error("This purchase has already been corrected.");
+
+      const flag = await tx.errorFlag.create({
+        data: {
+          linkedType: "PURCHASE",
+          linkedId: purchaseId,
+          reason: reason || null,
+        },
+      });
+
+      await tx.stockMovement.deleteMany({
+        where: { sourceType: "PURCHASE", sourceId: purchaseId },
+      });
+      await tx.ledgerEntry.deleteMany({
+        where: {
+          sourceId: purchaseId,
+          sourceType: { in: ["PURCHASE", "PAYMENT"] },
+        },
+      });
+
+      // Same invoice number as the original would collide with the flagged
+      // record's unique constraint — suffix the correction.
+      const invoiceNumber =
+        (d.invoiceNumber || original.invoiceNumber) === original.invoiceNumber
+          ? `${original.invoiceNumber}/C`
+          : d.invoiceNumber;
+
+      const replacement = await tx.purchase.create({
+        data: {
+          companyId: original.companyId,
+          partyId: d.partyId,
+          type: d.type,
+          invoiceNumber,
+          fishType: d.fishType,
+          qtyKg: d.qtyKg,
+          amount: d.amount,
+          date: d.date,
+        },
+      });
+      await postPurchaseEffects(tx, replacement);
+
+      for (const fishType of new Set([original.fishType, replacement.fishType])) {
+        const net = await getNetQty(tx, original.companyId, fishType, "AVAILABLE");
+        if (net.isNegative()) {
+          throw new Error(
+            `Cannot correct: available stock of ${fishType} would go negative — some of this purchase was already dispatched or sold.`
+          );
+        }
+      }
+
+      await tx.errorFlag.update({
+        where: { id: flag.id },
+        data: { correctingEntryId: replacement.id },
+      });
+    });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
+      return { error: "This invoice number already exists for this company." };
+    return { error: e instanceof Error ? e.message : "Could not save correction." };
+  }
+
+  revalidatePath("/vouchers/purchases");
+  redirect("/vouchers/purchases");
+}
+
+/**
  * Direct edits are allowed only while the day is open (spec §2 DayClose).
  * The edit re-posts the purchase's stock and ledger effects atomically, and
  * refuses if the change would drive available stock negative (e.g. qty was

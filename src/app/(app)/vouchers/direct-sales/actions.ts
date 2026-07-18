@@ -145,6 +145,70 @@ export async function createDirectSale(
   redirect("/vouchers/direct-sales");
 }
 
+/** Closed-day correction — see correctPurchase for the pattern. */
+export async function correctDirectSale(
+  saleId: string,
+  _prev: DirectSaleFormState,
+  formData: FormData
+): Promise<DirectSaleFormState> {
+  await requireMerchant();
+  const parsed = parse(formData);
+  if ("error" in parsed) return { error: parsed.error };
+  const d = parsed.data;
+  const reason = String(formData.get("reason") ?? "").trim();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const original = await tx.directSale.findUnique({ where: { id: saleId } });
+      if (!original) throw new Error("Sale not found.");
+
+      const already = await tx.errorFlag.findUnique({
+        where: { linkedType_linkedId: { linkedType: "DIRECT_SALE", linkedId: saleId } },
+      });
+      if (already) throw new Error("This sale has already been corrected.");
+
+      const flag = await tx.errorFlag.create({
+        data: {
+          linkedType: "DIRECT_SALE",
+          linkedId: saleId,
+          reason: reason || null,
+        },
+      });
+
+      await tx.stockMovement.deleteMany({
+        where: { sourceType: "DIRECT_SALE", sourceId: saleId },
+      });
+      await tx.ledgerEntry.deleteMany({
+        where: { sourceId: saleId, sourceType: { in: ["SALE", "PAYMENT"] } },
+      });
+
+      const replacement = await tx.directSale.create({
+        data: { companyId: original.companyId, ...d },
+      });
+      await postDirectSaleEffects(tx, replacement);
+
+      for (const fishType of new Set([original.fishType, d.fishType])) {
+        const net = await getNetQty(tx, original.companyId, fishType, "AVAILABLE");
+        if (net.isNegative()) {
+          throw new Error(
+            `Cannot correct: available stock of ${fishType} would go negative.`
+          );
+        }
+      }
+
+      await tx.errorFlag.update({
+        where: { id: flag.id },
+        data: { correctingEntryId: replacement.id },
+      });
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not save correction." };
+  }
+
+  revalidatePath("/vouchers/direct-sales");
+  redirect("/vouchers/direct-sales");
+}
+
 /** Open-day edit: re-posts stock and ledger effects atomically. */
 export async function updateDirectSale(
   saleId: string,

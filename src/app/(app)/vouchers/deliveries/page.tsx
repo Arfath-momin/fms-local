@@ -3,19 +3,24 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { CHANNEL_LABELS, PENDING_WARN_DAYS } from "@/lib/delivery";
-import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { getClosedDateSet } from "@/lib/dayclose";
+import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
 import { StatusBadge, daysSince } from "./status-badge";
+import { LockMark } from "../../lock-mark";
 
 export default async function DeliveriesPage() {
   const session = await requireSession();
   const isMerchant = session.role === "MERCHANT";
   const company = await getActiveCompany();
 
-  const notes = await prisma.deliveryNote.findMany({
-    where: { companyId: company.id },
-    include: { party: { select: { name: true } } },
-    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-  });
+  const [notes, closedDates] = await Promise.all([
+    prisma.deliveryNote.findMany({
+      where: { companyId: company.id },
+      include: { party: { select: { name: true } } },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    }),
+    getClosedDateSet(company.id),
+  ]);
 
   return (
     <div>
@@ -64,7 +69,10 @@ export default async function DeliveriesPage() {
                   n.status !== "SETTLED" && age >= PENDING_WARN_DAYS;
                 return (
                   <tr key={n.id}>
-                    <td className="whitespace-nowrap">{fmtDate(n.date)}</td>
+                    <td className="whitespace-nowrap">
+                      {fmtDate(n.date)}
+                      <LockMark closed={closedDates.has(toInputDate(n.date))} />
+                    </td>
                     <td className="font-medium">{n.party.name}</td>
                     <td>{CHANNEL_LABELS[n.channel]}</td>
                     <td>{n.fishType}</td>
