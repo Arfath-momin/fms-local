@@ -6,6 +6,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireMerchant } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
+import { DIRECT_SALE_BUYER_TYPES } from "@/lib/party";
 import { assertDayOpen } from "@/lib/dayclose";
 import { postLedgerEntry } from "@/lib/ledger";
 import { getNetQty, postStockMovement } from "@/lib/stock";
@@ -124,6 +125,11 @@ export async function createDirectSale(
   try {
     await prisma.$transaction(async (tx) => {
       await assertDayOpen(tx, company.id, d.date);
+
+      const party = await tx.party.findUnique({ where: { id: d.partyId } });
+      if (!party || !DIRECT_SALE_BUYER_TYPES.includes(party.type)) {
+        throw new Error("Direct sales can only go to local buyer parties.");
+      }
 
       const available = await getNetQty(tx, company.id, d.fishType, "AVAILABLE");
       if (available.lessThan(d.qtyKg)) {

@@ -11,6 +11,7 @@ import { assertDayOpen } from "@/lib/dayclose";
 import { postLedgerEntry } from "@/lib/ledger";
 import { getNetQty, postStockMovement } from "@/lib/stock";
 import { getSettledTotals, postOwnerReserveEntry } from "@/lib/delivery";
+import { CHANNEL_BUYER_TYPE } from "@/lib/party";
 
 export type DeliveryFormState = { error: string } | null;
 export type SettlementFormState = { error: string } | null;
@@ -80,6 +81,11 @@ export async function createDelivery(
   try {
     await prisma.$transaction(async (tx) => {
       await assertDayOpen(tx, company.id, d.date);
+
+      const party = await tx.party.findUnique({ where: { id: d.partyId } });
+      if (!party || party.type !== CHANNEL_BUYER_TYPE[d.channel]) {
+        throw new Error("That party cannot buy through this channel.");
+      }
 
       const available = await getNetQty(tx, company.id, d.fishType, "AVAILABLE");
       if (available.lessThan(d.qtySent)) {

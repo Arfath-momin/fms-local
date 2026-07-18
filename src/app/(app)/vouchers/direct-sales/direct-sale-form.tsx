@@ -4,6 +4,7 @@ import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { DirectSaleFormState } from "./actions";
 import type { PartyType } from "@/generated/prisma/enums";
+import { DIRECT_SALE_BUYER_TYPES } from "@/lib/party";
 
 export type BuyerOption = { id: string; name: string; type: PartyType };
 export type FishOption = { fishType: string; available: string };
@@ -58,12 +59,16 @@ export function DirectSaleForm({
   }, [qty, rate]);
   const amountValue = amountTouched ? amount : computed;
 
-  const { locals, others } = useMemo(
-    () => ({
-      locals: buyers.filter((b) => b.type === "LOCAL_BUYER"),
-      others: buyers.filter((b) => b.type !== "LOCAL_BUYER"),
-    }),
-    [buyers]
+  // Direct sales are the local quick path — local buyers only. An existing
+  // sale's buyer stays selectable even if its type no longer matches.
+  const localBuyers = useMemo(
+    () =>
+      buyers.filter(
+        (b) =>
+          DIRECT_SALE_BUYER_TYPES.includes(b.type) ||
+          b.id === initial?.partyId
+      ),
+    [buyers, initial?.partyId]
   );
 
   const selectedFish = fishOptions.find((f) => f.fishType === fishType);
@@ -85,25 +90,21 @@ export function DirectSaleForm({
             <option value="" disabled>
               Select buyer…
             </option>
-            {locals.length > 0 && (
-              <optgroup label="Local buyers">
-                {locals.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {others.length > 0 && (
-              <optgroup label="Other parties">
-                {others.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
+            {localBuyers.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
           </select>
+          {localBuyers.length === 0 && (
+            <p className="text-debit text-[12px] mt-1">
+              No local buyer parties yet.{" "}
+              <Link href="/masters" className="underline underline-offset-2">
+                Add one in Masters
+              </Link>
+              .
+            </p>
+          )}
         </div>
         <div>
           <label htmlFor="date" className={labelCls}>

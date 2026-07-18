@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { PurchaseFormState } from "./actions";
 import type { PartyType, PurchaseType } from "@/generated/prisma/enums";
+import { PURCHASE_SELLER_TYPES } from "@/lib/party";
 
 export type PartyOption = { id: string; name: string; type: PartyType };
 
@@ -51,6 +52,15 @@ export function PurchaseForm({
   const [type, setType] = useState<PurchaseType>(initial?.type ?? "SOCIETY");
 
   const today = new Date().toISOString().slice(0, 10);
+
+  // Only seller-side parties, per purchase type. An existing entry's party
+  // stays selectable even if its type no longer matches.
+  const sellers = useMemo(() => {
+    const allowed = PURCHASE_SELLER_TYPES[type];
+    return parties.filter(
+      (p) => allowed.includes(p.type) || p.id === initial?.partyId
+    );
+  }, [parties, type, initial?.partyId]);
 
   return (
     <form action={formAction} className="max-w-lg space-y-4">
@@ -103,12 +113,21 @@ export function PurchaseForm({
           <option value="" disabled>
             Select party…
           </option>
-          {parties.map((p) => (
+          {sellers.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
             </option>
           ))}
         </select>
+        {sellers.length === 0 && (
+          <p className="text-debit text-[12px] mt-1">
+            No parties of the right type for this purchase.{" "}
+            <Link href="/masters" className="underline underline-offset-2">
+              Add one in Masters
+            </Link>
+            .
+          </p>
+        )}
       </div>
 
       <div>

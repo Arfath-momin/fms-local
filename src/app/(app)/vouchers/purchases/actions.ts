@@ -7,6 +7,7 @@ import type { PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireMerchant } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
+import { PURCHASE_SELLER_TYPES } from "@/lib/party";
 import { assertDayOpen } from "@/lib/dayclose";
 import { postLedgerEntry } from "@/lib/ledger";
 import { getNetQty, postStockMovement } from "@/lib/stock";
@@ -135,6 +136,14 @@ export async function createPurchase(
   try {
     await prisma.$transaction(async (tx) => {
       await assertDayOpen(tx, company.id, d.date);
+
+      const party = await tx.party.findUnique({ where: { id: d.partyId } });
+      if (!party || !PURCHASE_SELLER_TYPES[d.type].includes(party.type)) {
+        throw new Error(
+          "That party cannot be a seller for this purchase type."
+        );
+      }
+
       const invoiceNumber =
         d.invoiceNumber || (await nextLocalInvoice(tx, company.id));
       const purchase = await tx.purchase.create({

@@ -4,6 +4,7 @@ import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { DeliveryFormState } from "./actions";
 import type { DeliveryChannel, PartyType } from "@/generated/prisma/enums";
+import { CHANNEL_BUYER_TYPE } from "@/lib/party";
 
 export type BuyerOption = { id: string; name: string; type: PartyType };
 export type FishOption = { fishType: string; available: string };
@@ -14,15 +15,6 @@ const CHANNEL_OPTIONS: { value: DeliveryChannel; label: string }[] = [
   { value: "FISH_MILL", label: "Fish Mill" },
   { value: "LOCAL_SALE", label: "Local Sale" },
 ];
-
-// Which party type usually buys through each channel — used only to order
-// the buyer dropdown, never to restrict it.
-const SUGGESTED_TYPE: Record<DeliveryChannel, PartyType> = {
-  FACTORY: "FACTORY",
-  MARKET: "MARKET_BUYER",
-  FISH_MILL: "FISH_MILL",
-  LOCAL_SALE: "LOCAL_BUYER",
-};
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -70,13 +62,14 @@ export function DeliveryForm({
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const { suggested, others } = useMemo(() => {
-    const want = SUGGESTED_TYPE[channel];
-    return {
-      suggested: buyers.filter((b) => b.type === want),
-      others: buyers.filter((b) => b.type !== want),
-    };
-  }, [buyers, channel]);
+  // Only the buyer type that matches the channel. An existing note's buyer
+  // stays selectable even if its type no longer matches.
+  const channelBuyers = useMemo(() => {
+    const want = CHANNEL_BUYER_TYPE[channel];
+    return buyers.filter(
+      (b) => b.type === want || b.id === initial?.partyId
+    );
+  }, [buyers, channel, initial?.partyId]);
 
   const expected =
     Number(qty) > 0 && Number(rate) > 0 ? Number(qty) * Number(rate) : null;
@@ -133,25 +126,21 @@ export function DeliveryForm({
           <option value="" disabled>
             Select buyer…
           </option>
-          {suggested.length > 0 && (
-            <optgroup label="Suggested for this channel">
-              {suggested.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          {others.length > 0 && (
-            <optgroup label="Other parties">
-              {others.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
+          {channelBuyers.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
         </select>
+        {channelBuyers.length === 0 && (
+          <p className="text-debit text-[12px] mt-1">
+            No buyers of the right type for this channel.{" "}
+            <Link href="/masters" className="underline underline-offset-2">
+              Add one in Masters
+            </Link>
+            .
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-4">
