@@ -153,6 +153,96 @@ export async function computePnL(
   };
 }
 
+export type DayBook = {
+  purchase: Prisma.Decimal;
+  expenses: Prisma.Decimal;
+  rent: Prisma.Decimal;
+  cashSale: Prisma.Decimal;
+  cashPf: Prisma.Decimal;
+  accrualRevenue: Prisma.Decimal;
+  cogs: Prisma.Decimal;
+  spoilage: Prisma.Decimal;
+  truePf: Prisma.Decimal;
+};
+
+/** One day's figures — powers both the Day Book screen and dashboard tiles. */
+export async function computeDayBook(
+  companyId: string,
+  date: Date
+): Promise<DayBook> {
+  // Flagged-error vouchers never count in totals (spec §2 ErrorFlag).
+  const [flaggedPurchases, flaggedSales, flaggedExpenses] = await Promise.all([
+    getFlaggedIds("PURCHASE"),
+    getFlaggedIds("DIRECT_SALE"),
+    getFlaggedIds("EXPENSE"),
+  ]);
+  const [purchaseAgg, expenseGroups, settlements, directSaleAgg, soldMoves, lossMoves, avgCost] =
+    await Promise.all([
+      prisma.purchase.aggregate({
+        where: { companyId, date, id: { notIn: flaggedPurchases } },
+        _sum: { amount: true },
+      }),
+      prisma.expense.groupBy({
+        by: ["category"],
+        where: { companyId, date, id: { notIn: flaggedExpenses } },
+        _sum: { amount: true },
+      }),
+      prisma.settlement.findMany({
+        where: { date, deliveryNote: { companyId } },
+        include: { deliveryNote: { select: { rate: true } } },
+      }),
+      prisma.directSale.aggregate({
+        where: { companyId, date, id: { notIn: flaggedSales } },
+        _sum: { amount: true },
+      }),
+      prisma.stockMovement.groupBy({
+        by: ["fishType"],
+        where: { companyId, date, state: "SOLD", direction: "IN" },
+        _sum: { qtyKg: true },
+      }),
+      prisma.stockMovement.groupBy({
+        by: ["fishType"],
+        where: { companyId, date, state: "LOSS", direction: "IN" },
+        _sum: { qtyKg: true },
+      }),
+      getAvgCostMap(companyId, date),
+    ]);
+
+  const purchase = purchaseAgg._sum.amount ?? ZERO;
+
+  let rent = ZERO;
+  let expenses = ZERO;
+  for (const g of expenseGroups) {
+    const sum = g._sum.amount ?? ZERO;
+    if (g.category === "RENT") rent = rent.add(sum);
+    else expenses = expenses.add(sum);
+  }
+
+  // Cash view: what actually came in today.
+  const cashSale = settlements
+    .reduce((acc, s) => acc.add(s.amountReceived), ZERO)
+    .add(directSaleAgg._sum.amount ?? ZERO);
+  const cashPf = cashSale.sub(purchase).sub(expenses).sub(rent);
+
+  // Accrual view: value earned today at locked rates (variance debt is
+  // still revenue receivable), matched against the cost of what was sold.
+  const accrualRevenue = settlements
+    .reduce((acc, s) => acc.add(s.qtyAccepted.mul(s.deliveryNote.rate)), ZERO)
+    .add(directSaleAgg._sum.amount ?? ZERO);
+
+  const costOf = (groups: typeof soldMoves) =>
+    groups.reduce((acc, g) => {
+      const cost = avgCost.get(g.fishType);
+      return cost ? acc.add((g._sum.qtyKg ?? ZERO).mul(cost)) : acc;
+    }, ZERO);
+  const cogs = costOf(soldMoves);
+  const spoilage = costOf(lossMoves);
+
+  const truePf = accrualRevenue.sub(cogs).sub(spoilage).sub(expenses).sub(rent);
+
+  return { purchase, expenses, rent, cashSale, cashPf, accrualRevenue, cogs, spoilage, truePf };
+}
+
 export type BalanceSheet = {
   stockRows: { fishType: string; qty: Prisma.Decimal; value: Prisma.Decimal }[];
   stockValue: Prisma.Decimal;
