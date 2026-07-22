@@ -10,8 +10,7 @@ import { fmtDate, fmtMoney } from "@/lib/format";
 const SOURCE_LABELS = {
   PURCHASE: "Purchase",
   SALE: "Sale",
-  SETTLEMENT: "Settlement received",
-  PRICE_VARIANCE: "Price variance debt",
+  EXPENSE: "Expense",
   PAYMENT: "Payment",
 };
 
@@ -33,9 +32,9 @@ export default async function PartyStatementPage({
   });
 
   // Resolve source links for drill-down: settlements point at their delivery
-  // note; purchases and direct sales point at their own voucher pages.
+  // note; purchases and expenses point at their own voucher pages.
   const sourceIds = [...new Set(entries.map((e) => e.sourceId))];
-  const [settlements, purchases, directSales] = await Promise.all([
+  const [settlements, purchases, expenses] = await Promise.all([
     prisma.settlement.findMany({
       where: { id: { in: sourceIds } },
       select: { id: true, deliveryNoteId: true },
@@ -44,15 +43,14 @@ export default async function PartyStatementPage({
       where: { id: { in: sourceIds } },
       select: { id: true },
     }),
-    prisma.directSale.findMany({
+    prisma.expense.findMany({
       where: { id: { in: sourceIds } },
       select: { id: true },
     }),
   ]);
   const links = new Map<string, string>();
   for (const p of purchases) links.set(p.id, `/vouchers/purchases/${p.id}`);
-  for (const d of directSales)
-    links.set(d.id, `/vouchers/direct-sales/${d.id}`);
+  for (const e of expenses) links.set(e.id, `/vouchers/expenses/${e.id}`);
   for (const s of settlements)
     links.set(s.id, `/vouchers/deliveries/${s.deliveryNoteId}`);
 
@@ -137,11 +135,6 @@ export default async function PartyStatementPage({
                         </Link>
                       ) : (
                         label
-                      )}
-                      {e.sourceType === "PRICE_VARIANCE" && (
-                        <span className="ml-2 text-[10px] uppercase tracking-wide border border-debit text-debit px-1 py-0.5 font-semibold">
-                          short paid
-                        </span>
                       )}
                     </td>
                     <td className="num-col num text-debit">

@@ -4,10 +4,15 @@ import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { getClosedDateSet } from "@/lib/dayclose";
 import { getFlagsFor } from "@/lib/errorflag";
-import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
+import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { CorrectedBadge, LockMark } from "../../lock-mark";
 
-const TYPE_LABELS = { SOCIETY: "Society", PRIVATE: "Private", LOCAL: "Local" };
+const TYPE_LABELS = {
+  SOCIETY: "Society",
+  KFDC: "KFDC",
+  PRIVATE: "Private",
+  LOCAL: "Local",
+};
 
 export default async function PurchasesPage() {
   const session = await requireSession();
@@ -17,7 +22,10 @@ export default async function PurchasesPage() {
   const [purchases, closedDates] = await Promise.all([
     prisma.purchase.findMany({
       where: { companyId: company.id },
-      include: { party: { select: { name: true } } },
+      include: {
+        party: { select: { name: true } },
+        _count: { select: { lines: true } },
+      },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     }),
     getClosedDateSet(company.id),
@@ -33,8 +41,7 @@ export default async function PurchasesPage() {
         <div>
           <h1 className="heading text-xl font-semibold">Purchases</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · every purchase adds stock and posts to the
-            seller&apos;s ledger.
+            {company.name} · each purchase posts to the boat/seller ledger.
           </p>
         </div>
         {isMerchant && (
@@ -58,12 +65,10 @@ export default async function PurchasesPage() {
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Invoice</th>
-                <th>Party</th>
+                <th>Boat / Seller</th>
                 <th>Type</th>
-                <th>Fish</th>
-                <th className="num-col">Qty</th>
-                <th className="num-col">Amount</th>
+                <th className="num-col">Total</th>
+                <th>Paid</th>
                 {isMerchant && <th className="w-16"></th>}
               </tr>
             </thead>
@@ -77,9 +82,14 @@ export default async function PurchasesPage() {
                       {fmtDate(p.date)}
                       <LockMark closed={closedDates.has(toInputDate(p.date))} />
                     </td>
-                    <td className={`num ${struck}`}>{p.invoiceNumber}</td>
                     <td className="font-medium">
                       <span className={struck}>{p.party.name}</span>
+                      {p.type === "LOCAL" && p._count.lines > 0 && (
+                        <span className="text-muted text-[12px]">
+                          {" "}
+                          · {p._count.lines} item{p._count.lines > 1 ? "s" : ""}
+                        </span>
+                      )}
                       {flag && (
                         <CorrectedBadge
                           href={
@@ -91,10 +101,17 @@ export default async function PurchasesPage() {
                       )}
                     </td>
                     <td className={struck}>{TYPE_LABELS[p.type]}</td>
-                    <td className={struck}>{p.fishType}</td>
-                    <td className={`num-col num ${struck}`}>{fmtKg(p.qtyKg)}</td>
                     <td className={`num-col num text-debit ${struck}`}>
                       {fmtMoney(p.amount)}
+                    </td>
+                    <td className={struck}>
+                      {p.paid ? (
+                        <span className="text-muted text-[12px]">Paid</span>
+                      ) : (
+                        <span className="text-debit text-[12px] font-semibold">
+                          Outstanding
+                        </span>
+                      )}
                     </td>
                     {isMerchant && (
                       <td>

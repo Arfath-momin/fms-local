@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { ledgerDelta } from "@/lib/ledger";
 import { CHANNEL_LABELS } from "@/lib/delivery";
-import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney } from "@/lib/format";
 import { StatusBadge } from "../status-badge";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
@@ -29,8 +29,8 @@ export default async function DeliveryNotePage({
   });
   if (!note) notFound();
 
-  // Previous outstanding balance (spec §5): the party's balance from
-  // everything EXCEPT this note's own settlements.
+  // Previous outstanding balance: the buyer's balance from everything EXCEPT
+  // this note's own settlements.
   const [lastEntry, ownEntries] = await Promise.all([
     prisma.ledgerEntry.findFirst({
       where: { companyId: note.companyId, partyId: note.partyId },
@@ -51,11 +51,9 @@ export default async function DeliveryNotePage({
   for (const e of ownEntries) ownEffect = ownEffect.add(ledgerDelta(e.type, e.amount));
   const previousBalance = currentBalance.sub(ownEffect);
 
-  const settled = note.settlements.reduce(
-    (acc, s) => acc.add(s.qtyAccepted).add(s.qtyReturned).add(s.qtySpoiled),
-    new Prisma.Decimal(0)
+  const settlementImages = await Promise.all(
+    note.settlements.map((s) => getAttachments("SETTLEMENT", s.id))
   );
-  const remaining = note.qtySent.sub(settled);
 
   return (
     <div className="max-w-3xl">
@@ -67,18 +65,17 @@ export default async function DeliveryNotePage({
       </Link>
 
       <div className="border border-line-strong bg-surface mt-2">
-        {/* Document header */}
         <div className="px-6 py-4 border-b border-line flex items-start justify-between">
           <div>
             <h1 className="heading text-lg font-semibold">Delivery Note</h1>
             <p className="text-muted text-[13px]">
-              {fmtDate(note.date)} · {CHANNEL_LABELS[note.channel]}
+              {fmtDate(note.date)} · {CHANNEL_LABELS[note.channel]} · Vehicle{" "}
+              <span className="num">{note.vehicleNo}</span>
             </p>
           </div>
           <StatusBadge status={note.status} />
         </div>
 
-        {/* Party + previous balance — the hard UI requirement (spec §5) */}
         <div className="px-6 py-4 border-b border-line flex items-center justify-between">
           <div>
             <div className="text-[12px] uppercase tracking-wide text-muted font-semibold">
@@ -105,108 +102,84 @@ export default async function DeliveryNotePage({
           </div>
         </div>
 
-        {/* Note line */}
-        <div className="px-6 py-4 border-b border-line">
-          <table className="ledger-table">
-            <thead>
-              <tr>
-                <th>Fish Type</th>
-                <th className="num-col">Qty Sent</th>
-                <th className="num-col">Rate (locked)</th>
-                <th className="num-col">Expected Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="font-medium">{note.fishType}</td>
-                <td className="num-col num">{fmtKg(note.qtySent)}</td>
-                <td className="num-col num">{fmtMoney(note.rate)}</td>
-                <td className="num-col num font-semibold">
-                  {fmtMoney(note.expectedValue)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* Settlements */}
         <div className="px-6 py-4">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="heading text-[15px] font-semibold">Settlements</h2>
+            <h2 className="heading text-[15px] font-semibold">Settlement</h2>
             {isMerchant && note.status !== "SETTLED" && (
               <Link
                 href={`/vouchers/deliveries/${note.id}/settle`}
                 className="bg-accent text-white px-3 py-1.5 text-[12px] font-semibold"
               >
-                New Settlement
+                Settle (add bill)
               </Link>
             )}
           </div>
 
           {note.settlements.length === 0 ? (
             <p className="text-muted text-[13px]">
-              No settlements yet — the full {fmtKg(note.qtySent)} is still in
-              transit.
+              Not settled yet — no bill recorded.
             </p>
           ) : (
             <table className="ledger-table">
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th className="num-col">Accepted</th>
-                  <th className="num-col">Returned</th>
-                  <th className="num-col">Spoiled</th>
-                  <th className="num-col">Expected</th>
+                  <th className="num-col">Total Amount</th>
                   <th className="num-col">Received</th>
-                  <th className="num-col">Variance</th>
+                  <th>Balance</th>
+                  <th>Bill Image</th>
                 </tr>
               </thead>
               <tbody>
-                {note.settlements.map((s) => {
-                  const expected = s.qtyAccepted.mul(note.rate);
-                  const paid = s.gross ?? s.amountReceived;
-                  const variance = expected.sub(paid);
+                {note.settlements.map((s, i) => {
+                  const settleBalance = s.amount.sub(s.amountReceived);
                   return (
-                    <tr key={s.id}>
-                      <td className="whitespace-nowrap">{fmtDate(s.date)}</td>
-                      <td className="num-col num">{fmtKg(s.qtyAccepted)}</td>
-                      <td className="num-col num">{fmtKg(s.qtyReturned)}</td>
-                      <td className="num-col num text-debit">
-                        {fmtKg(s.qtySpoiled)}
-                      </td>
-                      <td className="num-col num">{fmtMoney(expected)}</td>
-                      <td className="num-col num text-credit">
-                        {fmtMoney(s.amountReceived)}
-                      </td>
-                      <td className="num-col num">
-                        {variance.greaterThan(0) ? (
-                          <span className="text-debit font-semibold">
-                            {fmtMoney(variance)}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                    </tr>
+                  <tr key={s.id}>
+                    <td className="whitespace-nowrap">{fmtDate(s.date)}</td>
+                    <td className="num-col num text-credit font-semibold">
+                      {fmtMoney(s.amount)}
+                    </td>
+                    <td className="num-col num">{fmtMoney(s.amountReceived)}</td>
+                    <td>
+                      {settleBalance.greaterThan(0) ? (
+                        <span className="text-debit text-[12px] font-semibold">
+                          {fmtMoney(settleBalance)}
+                        </span>
+                      ) : (
+                        <span className="text-muted text-[12px]">Settled</span>
+                      )}
+                    </td>
+                    <td>
+                      {settlementImages[i].length === 0 ? (
+                        <span className="text-muted text-[12px]">—</span>
+                      ) : (
+                        settlementImages[i].map((a) => (
+                          <a
+                            key={a.id}
+                            href={`/api/attachments/${a.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent underline underline-offset-2 text-[12px] mr-2"
+                          >
+                            view
+                          </a>
+                        ))
+                      )}
+                    </td>
+                  </tr>
                   );
                 })}
               </tbody>
             </table>
           )}
-
-          {remaining.greaterThan(0) && note.settlements.length > 0 && (
-            <p className="text-[13px] mt-2">
-              <span className="font-semibold num">{fmtKg(remaining)}</span>{" "}
-              still unsettled.
-            </p>
-          )}
         </div>
       </div>
 
       <AttachmentPanel
-        attachments={(await getAttachments("DELIVERY_NOTE", note.id)).map(
-          (a) => ({ id: a.id, uploadedAt: a.uploadedAt.toISOString() })
-        )}
+        attachments={(await getAttachments("DELIVERY_NOTE", note.id)).map((a) => ({
+          id: a.id,
+          uploadedAt: a.uploadedAt.toISOString(),
+        }))}
         action={uploadAttachment.bind(
           null,
           "DELIVERY_NOTE",
@@ -225,9 +198,7 @@ export default async function DeliveryNotePage({
           >
             Edit this delivery note
           </Link>{" "}
-          <span className="text-muted">
-            (possible only until the first settlement)
-          </span>
+          <span className="text-muted">(possible only until it is settled)</span>
         </p>
       )}
     </div>

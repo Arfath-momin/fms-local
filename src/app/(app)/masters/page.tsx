@@ -4,13 +4,13 @@ import { requireSession } from "@/lib/session";
 import { PARTY_TYPES, PARTY_TYPE_PLURALS } from "@/lib/party";
 
 const TYPE_DESCRIPTIONS: Record<string, string> = {
-  SOCIETY: "Fishermen societies we purchase from.",
-  PRIVATE_SELLER: "Individual sellers we purchase from.",
-  BOAT: "Boats we purchase from directly.",
-  MARKET_BUYER: "Market agents who buy on commission.",
+  BOAT: "Boats — Society / KFDC / Private purchases are tracked per boat.",
+  LOCAL_SELLER: "Local purchase sellers.",
+  MARKET_BUYER: "Market buyers.",
   FACTORY: "Factories buying by delivery note.",
   FISH_MILL: "Fish mills buying by delivery note.",
-  LOCAL_BUYER: "Local buyers — direct sales and local delivery.",
+  LOCAL_BUYER: "Local buyers.",
+  EXPENSE_VENDOR: "Ice plants, landlords and other expense vendors.",
 };
 
 export default async function MastersPage() {

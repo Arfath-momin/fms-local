@@ -1,7 +1,12 @@
-// FMS schema — derived from docs/FMS_Claude_Code_Build_Spec.md §2.
+// FMS schema — simplified 3-module model (Purchase / Expense / Sale).
+// The app is a ledger: totals are entered, the bill image carries the detail,
+// and each party (boat, seller, buyer, expense vendor) gets an auto-built
+// running ledger. No inventory/stock accounting — Profit = Sale − (Purchase +
+// Expense).
+//
 // All primary keys are UUIDs generated client-side (Prisma @default(uuid())
-// runs in the client, not the database) — required by spec §1 for future
-// offline support. Never switch these to autoincrement.
+// runs in the client, not the database) — kept for future offline support.
+// Never switch these to autoincrement.
 
 generator client {
   provider = "prisma-client"
@@ -37,34 +42,31 @@ model Company {
   name      String   @unique // "BFM" / "B2B"
   createdAt DateTime @default(now()) @map("created_at")
 
-  // Counter for LOC-AUTO-#### invoice numbers on LOCAL purchases (spec §2 Purchase).
-  localInvoiceSeq Int @default(0) @map("local_invoice_seq")
-
-  purchases          Purchase[]
-  stockMovements     StockMovement[]
-  deliveryNotes      DeliveryNote[]
-  directSales        DirectSale[]
-  ownerReserveEntries OwnerReserveEntry[]
-  expenses           Expense[]
-  ledgerEntries      LedgerEntry[]
-  attachments        Attachment[]
-  dayCloses          DayClose[]
+  purchases     Purchase[]
+  deliveryNotes DeliveryNote[]
+  expenses      Expense[]
+  ledgerEntries LedgerEntry[]
+  attachments   Attachment[]
+  dayCloses     DayClose[]
 
   @@map("companies")
 }
 
+// Every ledger is keyed to a Party. Boat/seller names are typed on the
+// purchase and resolved to a Party (find-or-create by name+type); buyers and
+// expense vendors work the same way. Global, NOT company-scoped — shared
+// across BFM and B2B. Balances are never stored here; they are derived from
+// LedgerEntry per company.
 enum PartyType {
-  SOCIETY
-  PRIVATE_SELLER
-  BOAT
+  BOAT // Society / KFDC / Private purchases are tracked per boat
+  LOCAL_SELLER // "Name" on a Local purchase
   MARKET_BUYER
   FACTORY
   FISH_MILL
   LOCAL_BUYER
+  EXPENSE_VENDOR // ice plant, landlord, loaders group, etc.
 }
 
-// Global, NOT company-scoped (spec §2) — shared across BFM and B2B.
-// Balances are never stored here; they are derived from LedgerEntry per company.
 model Party {
   id          String    @id @default(uuid())
   name        String
@@ -74,115 +76,117 @@ model Party {
 
   purchases     Purchase[]
   deliveryNotes DeliveryNote[]
-  directSales   DirectSale[]
+  expenses      Expense[]
   ledgerEntries LedgerEntry[]
 
+  @@unique([name, type])
   @@map("parties")
 }
 
-// ---------- Purchases & Stock ----------
+// ---------- Purchases ----------
 
 enum PurchaseType {
   SOCIETY
+  KFDC
   PRIVATE
   LOCAL
 }
 
+// Society / KFDC / Private: party is the boat, amount is the grand total, and
+// the fish breakdown lives in the attached bill image. Local: party is the
+// seller ("Name"), amount is the sum of its line items.
 model Purchase {
-  id            String       @id @default(uuid())
-  companyId     String       @map("company_id")
-  partyId       String       @map("party_id")
-  type          PurchaseType
-  invoiceNumber String       @map("invoice_number") // required; LOC-AUTO-#### auto-sequence for LOCAL
-  fishType      String       @map("fish_type")
-  qtyKg         Decimal      @map("qty_kg") @db.Decimal(12, 3)
-  amount        Decimal      @db.Decimal(14, 2)
-  date          DateTime     @db.Date
-  createdAt     DateTime     @default(now()) @map("created_at")
+  id        String       @id @default(uuid())
+  companyId String       @map("company_id")
+  partyId   String       @map("party_id")
+  type      PurchaseType
+  amount    Decimal      @db.Decimal(14, 2)
+  paid      Boolean      @default(true) // false → stays outstanding in the party ledger
+  date      DateTime     @db.Date
+  createdAt DateTime     @default(now()) @map("created_at")
 
-  company Company @relation(fields: [companyId], references: [id])
-  party   Party   @relation(fields: [partyId], references: [id])
+  company Company        @relation(fields: [companyId], references: [id])
+  party   Party          @relation(fields: [partyId], references: [id])
+  lines   PurchaseLine[]
 
-  @@unique([companyId, invoiceNumber])
   @@index([companyId, date])
   @@map("purchases")
 }
 
-enum StockState {
-  AVAILABLE
-  IN_TRANSIT
-  SOLD
-  LOSS
+// Itemised rows for a LOCAL purchase only (spec: Name · Particular · Quantity
+// · Price/kg · Total). Society/KFDC/Private purchases have no lines.
+model PurchaseLine {
+  id         String  @id @default(uuid())
+  purchaseId String  @map("purchase_id")
+  particular String
+  qtyKg      Decimal @map("qty_kg") @db.Decimal(12, 3)
+  pricePerKg Decimal @map("price_per_kg") @db.Decimal(12, 2)
+  total      Decimal @db.Decimal(14, 2)
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseId])
+  @@map("purchase_lines")
 }
 
-enum StockDirection {
-  IN
-  OUT
+// ---------- Expenses ----------
+
+enum ExpenseCategory {
+  ICE
+  LOADERS
+  LADIES
+  BATHA
+  CANTEEN
+  RENT
 }
 
-// Spec §2 lists PURCHASE, DELIVERY, SETTLEMENT_RETURN, LOSS_WRITEOFF but has no
-// source for accepted-qty → SOLD or for DirectSale; SETTLEMENT and DIRECT_SALE
-// added to cover those transitions.
-enum StockSourceType {
-  PURCHASE
-  DELIVERY
-  SETTLEMENT
-  SETTLEMENT_RETURN
-  LOSS_WRITEOFF
-  DIRECT_SALE
-}
-
-// Append-only inventory ledger — the single source of truth for stock (spec §2).
-// Rows are NEVER updated or deleted. A state transition writes a paired
-// OUT-from-old-state / IN-to-new-state pair in one transaction, so for each
-// fish type: net(AVAILABLE) + net(IN_TRANSIT) + net(SOLD) + net(LOSS)
-// always equals total purchased qty (reconciliation invariant, spec §2).
-model StockMovement {
-  id         String          @id @default(uuid())
-  companyId  String          @map("company_id")
-  fishType   String          @map("fish_type")
-  qtyKg      Decimal         @map("qty_kg") @db.Decimal(12, 3) // always positive; direction carries the sign
-  direction  StockDirection
-  state      StockState
-  sourceType StockSourceType @map("source_type")
-  sourceId   String          @map("source_id")
-  date       DateTime        @db.Date
-  createdAt  DateTime        @default(now()) @map("created_at")
+// One row per expense. `details` holds the per-category fields (ICE: vehicle,
+// plant, blocks, rate; Loaders/Ladies: boxes, rate; Rent: vehicle; etc.);
+// `amount` is always the total that flows to the ledger and the Profit report.
+model Expense {
+  id        String          @id @default(uuid())
+  companyId String          @map("company_id")
+  partyId   String          @map("party_id") // expense vendor / category ledger
+  category  ExpenseCategory
+  amount    Decimal         @db.Decimal(14, 2)
+  paid      Boolean         @default(true)
+  details   Json?
+  notes     String?
+  date      DateTime        @db.Date
+  createdAt DateTime        @default(now()) @map("created_at")
 
   company Company @relation(fields: [companyId], references: [id])
+  party   Party   @relation(fields: [partyId], references: [id])
 
-  @@index([companyId, fishType, state])
-  @@index([sourceType, sourceId])
-  @@map("stock_movements")
+  @@index([companyId, category, date])
+  @@map("expenses")
 }
 
-// ---------- Delivery & Settlement ----------
+// ---------- Sales (Delivery + Settlement) ----------
 
 enum DeliveryChannel {
-  FACTORY
   MARKET
+  FACTORY
   FISH_MILL
-  LOCAL_SALE
+  LOCAL
 }
 
 enum DeliveryStatus {
   PENDING
-  PARTIALLY_SETTLED
   SETTLED
 }
 
+// Goods leave on a vehicle to a buyer/channel; the delivery-note image is the
+// record. No quantity/rate — the settlement bill carries the money.
 model DeliveryNote {
-  id            String          @id @default(uuid())
-  companyId     String          @map("company_id")
-  partyId       String          @map("party_id") // buyer
-  channel       DeliveryChannel
-  fishType      String          @map("fish_type")
-  qtySent       Decimal         @map("qty_sent") @db.Decimal(12, 3)
-  rate          Decimal         @db.Decimal(12, 2) // locked at creation — settlement never renegotiates price (spec §3.2)
-  expectedValue Decimal         @map("expected_value") @db.Decimal(14, 2)
-  date          DateTime        @db.Date
-  status        DeliveryStatus  @default(PENDING)
-  createdAt     DateTime        @default(now()) @map("created_at")
+  id        String          @id @default(uuid())
+  companyId String          @map("company_id")
+  partyId   String          @map("party_id") // buyer
+  channel   DeliveryChannel
+  vehicleNo String          @map("vehicle_no")
+  date      DateTime        @db.Date
+  status    DeliveryStatus  @default(PENDING)
+  createdAt DateTime        @default(now()) @map("created_at")
 
   company     Company      @relation(fields: [companyId], references: [id])
   party       Party        @relation(fields: [partyId], references: [id])
@@ -193,96 +197,21 @@ model DeliveryNote {
   @@map("delivery_notes")
 }
 
-// Multiple partial settlements per delivery note (spec §2 / decisions log §4).
-// A note is SETTLED once SUM(accepted + returned + spoiled) across its
-// settlements equals qty_sent.
+// The settlement bill: total billed and what's actually been received.
+// Posting it recognises the sale (full amount) in the buyer ledger; any
+// shortfall between amount and amountReceived stays outstanding there.
 model Settlement {
   id             String   @id @default(uuid())
   deliveryNoteId String   @map("delivery_note_id")
-  qtyAccepted    Decimal  @map("qty_accepted") @db.Decimal(12, 3)
-  qtyReturned    Decimal  @map("qty_returned") @db.Decimal(12, 3)
-  qtySpoiled     Decimal  @map("qty_spoiled") @db.Decimal(12, 3) // permanent LOSS, never re-enters AVAILABLE (spec §3.6)
-  amountReceived Decimal  @map("amount_received") @db.Decimal(14, 2) // net, as billed
+  amount         Decimal  @db.Decimal(14, 2) // Total Amount (the bill total)
+  amountReceived Decimal  @map("amount_received") @db.Decimal(14, 2) // Amount Received so far
   date           DateTime @db.Date
   createdAt      DateTime @default(now()) @map("created_at")
 
-  // Channel deduction fields — entered as billed, never calculated (spec §3.3).
-  // Used on MARKET; defaulted zero elsewhere but never hardcoded away (spec §2).
-  gross        Decimal? @db.Decimal(14, 2)
-  commission   Decimal? @db.Decimal(14, 2) // reference only
-  ownerReserve Decimal? @map("owner_reserve") @db.Decimal(14, 2) // also credits OwnerReserveEntry
-
-  deliveryNote       DeliveryNote        @relation(fields: [deliveryNoteId], references: [id])
-  ownerReserveEntries OwnerReserveEntry[]
+  deliveryNote DeliveryNote @relation(fields: [deliveryNoteId], references: [id])
 
   @@index([deliveryNoteId])
   @@map("settlements")
-}
-
-// Local Sale quick path: AVAILABLE → SOLD in one step, no delivery/settlement split.
-model DirectSale {
-  id        String   @id @default(uuid())
-  companyId String   @map("company_id")
-  partyId   String   @map("party_id")
-  fishType  String   @map("fish_type")
-  qtyKg     Decimal  @map("qty_kg") @db.Decimal(12, 3)
-  rate      Decimal  @db.Decimal(12, 2)
-  amount    Decimal  @db.Decimal(14, 2)
-  date      DateTime @db.Date
-  createdAt DateTime @default(now()) @map("created_at")
-
-  company Company @relation(fields: [companyId], references: [id])
-  party   Party   @relation(fields: [partyId], references: [id])
-
-  @@index([companyId, date])
-  @@map("direct_sales")
-}
-
-// ---------- Owner Reserve ----------
-
-// Append-only; one running balance per company. Balance = sum of entries.
-model OwnerReserveEntry {
-  id             String   @id @default(uuid())
-  companyId      String   @map("company_id")
-  settlementId   String   @map("settlement_id")
-  amount         Decimal  @db.Decimal(14, 2)
-  date           DateTime @db.Date
-  runningBalance Decimal  @map("running_balance") @db.Decimal(14, 2)
-  createdAt      DateTime @default(now()) @map("created_at")
-
-  company    Company    @relation(fields: [companyId], references: [id])
-  settlement Settlement @relation(fields: [settlementId], references: [id])
-
-  @@index([companyId, date])
-  @@map("owner_reserve_entries")
-}
-
-// ---------- Expenses ----------
-
-enum ExpenseCategory {
-  LOADERS
-  WORKERS
-  ICE
-  CANTEEN
-  RENT
-  TRANSPORT
-  FUEL
-  MISC
-}
-
-model Expense {
-  id        String          @id @default(uuid())
-  companyId String          @map("company_id")
-  category  ExpenseCategory
-  amount    Decimal         @db.Decimal(14, 2)
-  date      DateTime        @db.Date
-  notes     String?
-  createdAt DateTime        @default(now()) @map("created_at")
-
-  company Company @relation(fields: [companyId], references: [id])
-
-  @@index([companyId, category, date])
-  @@map("expenses")
 }
 
 // ---------- Ledger ----------
@@ -295,13 +224,13 @@ enum LedgerEntryType {
 enum LedgerSourceType {
   PURCHASE
   SALE
-  SETTLEMENT
-  PRICE_VARIANCE
+  EXPENSE
   PAYMENT
 }
 
-// One generic ledger table powers every party statement (spec §2) —
-// no per-party-type ledger tables.
+// One generic ledger table powers every party statement — no per-party-type
+// ledger tables. Sign convention: positive = party owes us, negative = we owe
+// the party. DEBIT increases the balance, CREDIT decreases it.
 model LedgerEntry {
   id             String           @id @default(uuid())
   companyId      String           @map("company_id")
@@ -348,7 +277,7 @@ model Attachment {
 // ---------- Day close & corrections ----------
 
 // A date with a DayClose row is locked — no direct edits via normal UI.
-// Trigger model: explicit "Close Day" merchant action (confirmed 2026-07-15).
+// Trigger model: explicit "Close Day" merchant action.
 model DayClose {
   id        String   @id @default(uuid())
   companyId String   @map("company_id")
@@ -365,13 +294,12 @@ enum ErrorFlagLinkedType {
   PURCHASE
   DELIVERY_NOTE
   SETTLEMENT
-  DIRECT_SALE
   EXPENSE
 }
 
-// Closed-day corrections: original row is never deleted; it gets an ErrorFlag
-// and a replacement record linked via correctingEntryId. Reports exclude
-// flagged records from totals but keep them visible in audit views.
+// Closed-day corrections: the original row is never deleted; it gets an
+// ErrorFlag and a replacement record linked via correctingEntryId. Reports
+// exclude flagged records from totals but keep them visible in audit views.
 model ErrorFlag {
   id                String              @id @default(uuid())
   linkedType        ErrorFlagLinkedType @map("linked_type")

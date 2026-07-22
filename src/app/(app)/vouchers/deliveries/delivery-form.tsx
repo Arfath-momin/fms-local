@@ -1,19 +1,15 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import type { DeliveryFormState } from "./actions";
-import type { DeliveryChannel, PartyType } from "@/generated/prisma/enums";
-import { CHANNEL_BUYER_TYPE } from "@/lib/party";
-
-export type BuyerOption = { id: string; name: string; type: PartyType };
-export type FishOption = { fishType: string; available: string };
+import type { DeliveryChannel } from "@/generated/prisma/enums";
 
 const CHANNEL_OPTIONS: { value: DeliveryChannel; label: string }[] = [
-  { value: "FACTORY", label: "Factory" },
   { value: "MARKET", label: "Market" },
+  { value: "FACTORY", label: "Factory" },
   { value: "FISH_MILL", label: "Fish Mill" },
-  { value: "LOCAL_SALE", label: "Local Sale" },
+  { value: "LOCAL", label: "Local" },
 ];
 
 const inputCls =
@@ -21,15 +17,15 @@ const inputCls =
 const labelCls =
   "block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1";
 
-const inr = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-});
+export type DeliveryInit = {
+  channel: DeliveryChannel;
+  buyerName: string;
+  vehicleNo: string;
+  date: string;
+};
 
 export function DeliveryForm({
   action,
-  buyers,
-  fishOptions,
   initial,
   submitLabel,
 }: {
@@ -37,50 +33,25 @@ export function DeliveryForm({
     prev: DeliveryFormState,
     formData: FormData
   ) => Promise<DeliveryFormState>;
-  buyers: BuyerOption[];
-  fishOptions: FishOption[];
-  initial?: {
-    channel: DeliveryChannel;
-    partyId: string;
-    fishType: string;
-    qtySent: string;
-    rate: string;
-    date: string;
-  };
+  initial?: DeliveryInit;
   submitLabel: string;
 }) {
-  const [state, formAction, pending] = useActionState<
-    DeliveryFormState,
-    FormData
-  >(action, null);
-  const [channel, setChannel] = useState<DeliveryChannel>(
-    initial?.channel ?? "FACTORY"
+  const [state, formAction, pending] = useActionState<DeliveryFormState, FormData>(
+    action,
+    null
   );
-  const [qty, setQty] = useState(initial?.qtySent ?? "");
-  const [rate, setRate] = useState(initial?.rate ?? "");
-  const [fishType, setFishType] = useState(initial?.fishType ?? "");
+  const [channel, setChannel] = useState<DeliveryChannel>(
+    initial?.channel ?? "MARKET"
+  );
 
   const today = new Date().toISOString().slice(0, 10);
-
-  // Only the buyer type that matches the channel. An existing note's buyer
-  // stays selectable even if its type no longer matches.
-  const channelBuyers = useMemo(() => {
-    const want = CHANNEL_BUYER_TYPE[channel];
-    return buyers.filter(
-      (b) => b.type === want || b.id === initial?.partyId
-    );
-  }, [buyers, channel, initial?.partyId]);
-
-  const expected =
-    Number(qty) > 0 && Number(rate) > 0 ? Number(qty) * Number(rate) : null;
-  const selectedFish = fishOptions.find((f) => f.fishType === fishType);
 
   return (
     <form action={formAction} className="max-w-lg space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="channel" className={labelCls}>
-            Channel
+            Type
           </label>
           <select
             id="channel"
@@ -113,102 +84,49 @@ export function DeliveryForm({
       </div>
 
       <div>
-        <label htmlFor="partyId" className={labelCls}>
-          Buyer
+        <label htmlFor="vehicleNo" className={labelCls}>
+          Vehicle No
         </label>
-        <select
-          id="partyId"
-          name="partyId"
+        <input
+          id="vehicleNo"
+          name="vehicleNo"
           required
-          defaultValue={initial?.partyId ?? ""}
+          defaultValue={initial?.vehicleNo ?? ""}
+          placeholder="e.g. KA-01-AB-1234"
           className={inputCls}
-        >
-          <option value="" disabled>
-            Select buyer…
-          </option>
-          {channelBuyers.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-        {channelBuyers.length === 0 && (
-          <p className="text-debit text-[12px] mt-1">
-            No buyers of the right type for this channel.{" "}
-            <Link href="/masters" className="underline underline-offset-2">
-              Add one in Masters
-            </Link>
-            .
-          </p>
-        )}
+        />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <div>
-          <label htmlFor="fishType" className={labelCls}>
-            Fish Type
-          </label>
-          <select
-            id="fishType"
-            name="fishType"
-            required
-            value={fishType}
-            onChange={(e) => setFishType(e.target.value)}
-            className={inputCls}
-          >
-            <option value="" disabled>
-              Select…
-            </option>
-            {fishOptions.map((f) => (
-              <option key={f.fishType} value={f.fishType}>
-                {f.fishType}
-              </option>
-            ))}
-          </select>
-          {selectedFish && (
-            <p className="text-muted text-[12px] mt-1 num">
-              {selectedFish.available} kg available
-            </p>
-          )}
-        </div>
-        <div>
-          <label htmlFor="qtySent" className={labelCls}>
-            Qty (kg)
-          </label>
-          <input
-            id="qtySent"
-            name="qtySent"
-            required
-            inputMode="decimal"
-            value={qty}
-            onChange={(e) => setQty(e.target.value)}
-            className={inputCls + " num text-right"}
-          />
-        </div>
-        <div>
-          <label htmlFor="rate" className={labelCls}>
-            Rate (₹/kg)
-          </label>
-          <input
-            id="rate"
-            name="rate"
-            required
-            inputMode="decimal"
-            value={rate}
-            onChange={(e) => setRate(e.target.value)}
-            className={inputCls + " num text-right"}
-          />
-        </div>
+      <div>
+        <label htmlFor="buyerName" className={labelCls}>
+          Buyer{" "}
+          <span className="normal-case font-normal">
+            (optional — leave blank to track under “{CHANNEL_OPTIONS.find((c) => c.value === channel)?.label}”)
+          </span>
+        </label>
+        <input
+          id="buyerName"
+          name="buyerName"
+          defaultValue={initial?.buyerName ?? ""}
+          placeholder="e.g. Coastal Exports"
+          className={inputCls}
+        />
+        <p className="text-muted text-[12px] mt-1">
+          Each buyer keeps its own ledger, built from settlement bills.
+        </p>
       </div>
 
-      <div className="border border-line bg-background px-4 py-3 text-[13px] flex justify-between">
-        <span className="text-muted">
-          Expected value (rate locks on save — settlement can only dispute
-          quantity)
-        </span>
-        <span className="num font-semibold">
-          {expected !== null ? inr.format(expected) : "—"}
-        </span>
+      <div>
+        <label htmlFor="bill" className={labelCls}>
+          Delivery Note (upload)
+        </label>
+        <input
+          id="bill"
+          name="bill"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="text-[13px]"
+        />
       </div>
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}

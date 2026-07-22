@@ -4,16 +4,11 @@ import { useActionState } from "react";
 import Link from "next/link";
 import type { PartyFormState } from "./actions";
 import type { PartyType } from "@/generated/prisma/enums";
+import { PARTY_TYPES, PARTY_TYPE_LABELS } from "@/lib/party";
 
-const TYPE_OPTIONS: { value: PartyType; label: string }[] = [
-  { value: "SOCIETY", label: "Society" },
-  { value: "PRIVATE_SELLER", label: "Private Seller" },
-  { value: "BOAT", label: "Boat" },
-  { value: "MARKET_BUYER", label: "Market Buyer" },
-  { value: "FACTORY", label: "Factory" },
-  { value: "FISH_MILL", label: "Fish Mill" },
-  { value: "LOCAL_BUYER", label: "Local Buyer" },
-];
+const TYPE_OPTIONS: { value: PartyType; label: string }[] = PARTY_TYPES.map(
+  (t) => ({ value: t, label: PARTY_TYPE_LABELS[t] })
+);
 
 export function PartyForm({
   action,

@@ -4,8 +4,13 @@ import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { isDayClosed } from "@/lib/dayclose";
 import { computeDayBook } from "@/lib/report";
+import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
+import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
+import { CHANNEL_LABELS } from "@/lib/delivery";
 import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { closeDay } from "./actions";
+
+const ZERO = new Prisma.Decimal(0);
 
 export default async function DayBookPage({
   searchParams,
@@ -27,8 +32,11 @@ export default async function DayBookPage({
   ]);
   const isMerchant = session.role === "MERCHANT";
   const isFuture = date.getTime() > new Date(toInputDate(new Date())).getTime();
-  const pfCls = (v: Prisma.Decimal) =>
-    v.greaterThan(0) ? "text-credit" : v.lessThan(0) ? "text-debit" : "";
+  const pfCls = d.profit.greaterThan(0)
+    ? "text-credit"
+    : d.profit.lessThan(0)
+      ? "text-debit"
+      : "";
 
   return (
     <div className="max-w-3xl">
@@ -85,7 +93,7 @@ export default async function DayBookPage({
         )
       )}
 
-      {/* The familiar daily row — cash snapshot, primary (design doc #7) */}
+      {/* The daily row: Sale − (Purchase + Expense) = Profit */}
       <div className="border border-line-strong bg-surface">
         <table className="ledger-table">
           <thead>
@@ -101,11 +109,10 @@ export default async function DayBookPage({
                 </Link>
               </th>
               <th className="num-col">
-                <Link href="/ledgers/expenses/rent" className="hover:underline">
-                  Rent
+                <Link href="/vouchers/deliveries" className="hover:underline">
+                  Sale
                 </Link>
               </th>
-              <th className="num-col">Sale</th>
               <th className="num-col">P/F</th>
             </tr>
           </thead>
@@ -115,48 +122,86 @@ export default async function DayBookPage({
                 {fmtMoney(d.purchase)}
               </td>
               <td className="num-col num font-semibold text-debit">
-                {fmtMoney(d.expenses)}
-              </td>
-              <td className="num-col num font-semibold text-debit">
-                {fmtMoney(d.rent)}
+                {fmtMoney(d.expense)}
               </td>
               <td className="num-col num font-semibold text-credit">
-                {fmtMoney(d.cashSale)}
+                {fmtMoney(d.sale)}
               </td>
-              <td className={`num-col num font-bold ${pfCls(d.cashPf)}`}>
-                {fmtMoney(d.cashPf)}
+              <td className={`num-col num font-bold ${pfCls}`}>
+                {fmtMoney(d.profit)}
               </td>
             </tr>
           </tbody>
         </table>
         <p className="px-4 py-2 text-[12px] text-muted border-t border-line">
-          Cash snapshot: money received today minus money spent today. Stock
-          bought today but not yet sold makes this look worse than reality.
+          Profit = Sale − (Purchase + Expense), from the bills entered for this
+          day.
         </p>
       </div>
 
-      {/* Secondary, visually distinct: the accrual-accurate figure */}
-      <div className="border border-line bg-background mt-3 px-4 py-3">
-        <div className="flex items-center justify-between">
-          <span className="text-[13px] font-semibold">
-            True profit (COGS-matched)
-            <span className="text-muted font-normal">
-              {" "}
-              — value sold today minus what that stock cost, spoilage and the
-              day&apos;s expenses
-            </span>
-          </span>
-          <span className={`num text-lg font-bold ${pfCls(d.truePf)}`}>
-            {fmtMoney(d.truePf)}
-          </span>
-        </div>
-        <div className="mt-2 text-[12px] text-muted num flex gap-5 flex-wrap">
-          <span>Revenue earned {fmtMoney(d.accrualRevenue)}</span>
-          <span>− cost of goods sold {fmtMoney(d.cogs)}</span>
-          <span>− spoilage {fmtMoney(d.spoilage)}</span>
-          <span>− expenses &amp; rent {fmtMoney(d.expenses.add(d.rent))}</span>
-        </div>
+      {/* Breakdowns */}
+      <div className="grid sm:grid-cols-3 gap-3 mt-4">
+        <Breakdown
+          title="Purchase by type"
+          rows={d.purchaseByType.map((r) => ({
+            label: PURCHASE_TYPE_LABELS[r.type],
+            amount: r.amount,
+          }))}
+          total={d.purchase}
+        />
+        <Breakdown
+          title="Expense by category"
+          rows={d.expenseByCategory.map((r) => ({
+            label: EXPENSE_CATEGORY_LABELS[r.category],
+            amount: r.amount,
+          }))}
+          total={d.expense}
+        />
+        <Breakdown
+          title="Sale by type"
+          rows={d.saleByChannel.map((r) => ({
+            label: CHANNEL_LABELS[r.channel],
+            amount: r.amount,
+          }))}
+          total={d.sale}
+        />
       </div>
+    </div>
+  );
+}
+
+function Breakdown({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; amount: Prisma.Decimal }[];
+  total: Prisma.Decimal;
+}) {
+  return (
+    <div className="border border-line bg-surface px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-muted font-semibold mb-1">
+        {title}
+      </div>
+      {rows.length === 0 ? (
+        <div className="text-muted text-[12px]">—</div>
+      ) : (
+        <table className="w-full text-[13px]">
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label}>
+                <td className="py-0.5">{r.label}</td>
+                <td className="py-0.5 num text-right">{fmtMoney(r.amount)}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-line font-semibold">
+              <td className="py-0.5">Total</td>
+              <td className="py-0.5 num text-right">{fmtMoney(total ?? ZERO)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

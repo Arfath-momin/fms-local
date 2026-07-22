@@ -5,10 +5,6 @@ const STYLES: Record<DeliveryStatus, { label: string; cls: string }> = {
     label: "Pending",
     cls: "bg-[#fdf3e3] text-[#8a5a00] border-[#e0c894]",
   },
-  PARTIALLY_SETTLED: {
-    label: "Partially Settled",
-    cls: "bg-[#e8eef7] text-accent border-[#b6c6de]",
-  },
   SETTLED: {
     label: "Settled",
     cls: "bg-[#e7f2ec] text-credit border-[#b2d4c2]",

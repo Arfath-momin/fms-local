@@ -64,7 +64,9 @@ export default async function EditExpensePage({
     category: expense.category,
     amount: expense.amount.toString(),
     date: toInputDate(expense.date),
+    paid: expense.paid,
     notes: expense.notes,
+    details: (expense.details as Record<string, string> | null) ?? {},
   };
 
   const attachments = await getAttachments("EXPENSE", expense.id);

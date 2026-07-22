@@ -5,47 +5,44 @@ import type {
 } from "@/generated/prisma/enums";
 
 export const PARTY_TYPE_LABELS: Record<PartyType, string> = {
-  SOCIETY: "Society",
-  PRIVATE_SELLER: "Private Seller",
   BOAT: "Boat",
+  LOCAL_SELLER: "Local Seller",
   MARKET_BUYER: "Market Buyer",
   FACTORY: "Factory",
   FISH_MILL: "Fish Mill",
   LOCAL_BUYER: "Local Buyer",
+  EXPENSE_VENDOR: "Expense Vendor",
 };
 
 export const PARTY_TYPE_PLURALS: Record<PartyType, string> = {
-  SOCIETY: "Societies",
-  PRIVATE_SELLER: "Private Sellers",
   BOAT: "Boats",
+  LOCAL_SELLER: "Local Sellers",
   MARKET_BUYER: "Market Buyers",
   FACTORY: "Factories",
   FISH_MILL: "Fish Mills",
   LOCAL_BUYER: "Local Buyers",
+  EXPENSE_VENDOR: "Expense Vendors",
 };
 
 export const PARTY_TYPES = Object.keys(PARTY_TYPE_LABELS) as PartyType[];
 
 /**
- * Which party types can SELL to us, per purchase type. Buyer-side parties
- * (market buyers, factories, mills) never appear on a purchase.
+ * The seller side of a purchase is always identified by a typed name:
+ * Society / KFDC / Private track the individual BOAT; Local tracks the seller
+ * ("Name"). The name is resolved to a Party (find-or-create) so each gets its
+ * own auto-built ledger.
  */
-export const PURCHASE_SELLER_TYPES: Record<PurchaseType, PartyType[]> = {
-  SOCIETY: ["SOCIETY"],
-  PRIVATE: ["PRIVATE_SELLER", "BOAT"],
-  LOCAL: ["PRIVATE_SELLER", "BOAT"],
+export const PURCHASE_SELLER_TYPE: Record<PurchaseType, PartyType> = {
+  SOCIETY: "BOAT",
+  KFDC: "BOAT",
+  PRIVATE: "BOAT",
+  LOCAL: "LOCAL_SELLER",
 };
 
-/**
- * Which party type BUYS through each delivery channel. The delivery-note
- * buyer list shows only the matching type.
- */
+/** Which party type BUYS through each delivery channel. */
 export const CHANNEL_BUYER_TYPE: Record<DeliveryChannel, PartyType> = {
-  FACTORY: "FACTORY",
   MARKET: "MARKET_BUYER",
+  FACTORY: "FACTORY",
   FISH_MILL: "FISH_MILL",
-  LOCAL_SALE: "LOCAL_BUYER",
+  LOCAL: "LOCAL_BUYER",
 };
-
-/** Direct sales are the local quick path — local buyers only. */
-export const DIRECT_SALE_BUYER_TYPES: PartyType[] = ["LOCAL_BUYER"];

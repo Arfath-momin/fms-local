@@ -31,8 +31,7 @@ export default async function ExpensesPage() {
         <div>
           <h1 className="heading text-xl font-semibold">Expenses</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · loaders, workers, ice, canteen, rent, transport,
-            fuel, misc.
+            {company.name} · ice, loaders, ladies, batha, canteen, rent.
           </p>
         </div>
         {isMerchant && (

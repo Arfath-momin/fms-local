@@ -13,8 +13,8 @@ export default function VouchersPage() {
         >
           <div className="font-semibold text-[14px]">Purchase</div>
           <div className="text-muted text-[12px]">
-            Society, private and local purchases. Adds stock, posts to the
-            seller&apos;s ledger.
+            Society, KFDC, Private and Local. Upload the bill, enter the total,
+            posts to the boat/seller ledger.
           </div>
         </Link>
         <Link
@@ -22,21 +22,11 @@ export default function VouchersPage() {
           className="block px-4 py-3 hover:bg-background border-b border-line"
         >
           <div className="font-semibold text-[14px]">
-            Delivery Note &amp; Settlement
+            Sale — Delivery &amp; Settlement
           </div>
           <div className="text-muted text-[12px]">
-            Dispatch stock to factory, market, mill or local buyers; settle
-            with accepted / returned / spoiled splits.
-          </div>
-        </Link>
-        <Link
-          href="/vouchers/direct-sales"
-          className="block px-4 py-3 hover:bg-background border-b border-line"
-        >
-          <div className="font-semibold text-[14px]">Direct Sale</div>
-          <div className="text-muted text-[12px]">
-            Quick local sale — stock sold and paid in one step, no delivery
-            note.
+            Dispatch on a vehicle to market, factory, mill or local; settle with
+            the bill amount.
           </div>
         </Link>
         <Link
@@ -45,7 +35,7 @@ export default function VouchersPage() {
         >
           <div className="font-semibold text-[14px]">Expense</div>
           <div className="text-muted text-[12px]">
-            Loaders, workers, ice, canteen, rent, transport, fuel, misc.
+            Ice, loaders, ladies, batha, canteen, rent.
           </div>
         </Link>
         {COMING.map((c) => (

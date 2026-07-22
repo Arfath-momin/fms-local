@@ -2,10 +2,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { getKnownFishTypes } from "@/lib/stock";
 import { toInputDate } from "@/lib/format";
 import { correctPurchase, updatePurchase } from "../actions";
-import { PurchaseForm } from "../purchase-form";
+import { PurchaseForm, type PurchaseInit } from "../purchase-form";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
@@ -19,21 +18,19 @@ export default async function EditPurchasePage({
   if (session.role !== "MERCHANT") redirect("/vouchers/purchases");
 
   const { id } = await params;
-  const purchase = await prisma.purchase.findUnique({ where: { id } });
+  const purchase = await prisma.purchase.findUnique({
+    where: { id },
+    include: {
+      party: { select: { name: true } },
+      lines: { orderBy: { id: "asc" } },
+    },
+  });
   if (!purchase) notFound();
 
-  const [parties, fishTypes, dayClose, flag] = await Promise.all([
-    prisma.party.findMany({
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, type: true },
-    }),
-    getKnownFishTypes(purchase.companyId),
+  const [dayClose, flag] = await Promise.all([
     prisma.dayClose.findUnique({
       where: {
-        companyId_date: {
-          companyId: purchase.companyId,
-          date: purchase.date,
-        },
+        companyId_date: { companyId: purchase.companyId, date: purchase.date },
       },
     }),
     prisma.errorFlag.findUnique({
@@ -51,9 +48,7 @@ export default async function EditPurchasePage({
           <p className="font-semibold text-debit">
             This purchase was flagged as an error and corrected.
           </p>
-          {flag.reason && (
-            <p className="mt-1 text-muted">Reason: {flag.reason}</p>
-          )}
+          {flag.reason && <p className="mt-1 text-muted">Reason: {flag.reason}</p>}
           {flag.correctingEntryId && (
             <p className="mt-1">
               <Link
@@ -69,14 +64,17 @@ export default async function EditPurchasePage({
     );
   }
 
-  const initial = {
+  const initial: PurchaseInit = {
     type: purchase.type,
-    partyId: purchase.partyId,
-    invoiceNumber: purchase.invoiceNumber,
-    fishType: purchase.fishType,
-    qtyKg: purchase.qtyKg.toString(),
+    partyName: purchase.party.name,
     amount: purchase.amount.toString(),
+    paid: purchase.paid,
     date: toInputDate(purchase.date),
+    lines: purchase.lines.map((l) => ({
+      particular: l.particular,
+      qtyKg: l.qtyKg.toString(),
+      pricePerKg: l.pricePerKg.toString(),
+    })),
   };
 
   const attachments = await getAttachments("PURCHASE", purchase.id);
@@ -104,15 +102,12 @@ export default async function EditPurchasePage({
           Correct Purchase (closed day)
         </h1>
         <p className="text-[13px] text-muted mb-4 max-w-lg">
-          This day is closed, so the original entry cannot be edited. Saving
-          here flags the original as an error — it stays visible,
-          struck-through — and records this corrected entry in its place. Its
-          invoice number gets a “/C” suffix if unchanged.
+          This day is closed, so the original entry cannot be edited. Saving here
+          flags the original as an error — it stays visible, struck-through — and
+          records this corrected entry in its place.
         </p>
         <PurchaseForm
           action={correctPurchase.bind(null, purchase.id)}
-          parties={parties}
-          fishTypes={fishTypes}
           initial={initial}
           submitLabel="Flag Original & Save Correction"
           reasonField
@@ -127,8 +122,6 @@ export default async function EditPurchasePage({
       <h1 className="heading text-xl font-semibold mb-4">Edit Purchase</h1>
       <PurchaseForm
         action={updatePurchase.bind(null, purchase.id)}
-        parties={parties}
-        fishTypes={fishTypes}
         initial={initial}
         submitLabel="Save Changes"
       />

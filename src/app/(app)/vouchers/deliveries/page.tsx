@@ -1,10 +1,11 @@
 import Link from "next/link";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { CHANNEL_LABELS, PENDING_WARN_DAYS } from "@/lib/delivery";
 import { getClosedDateSet } from "@/lib/dayclose";
-import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
+import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { StatusBadge, daysSince } from "./status-badge";
 import { LockMark } from "../../lock-mark";
 
@@ -16,7 +17,10 @@ export default async function DeliveriesPage() {
   const [notes, closedDates] = await Promise.all([
     prisma.deliveryNote.findMany({
       where: { companyId: company.id },
-      include: { party: { select: { name: true } } },
+      include: {
+        party: { select: { name: true } },
+        settlements: { select: { amount: true } },
+      },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     }),
     getClosedDateSet(company.id),
@@ -28,7 +32,7 @@ export default async function DeliveriesPage() {
         <div>
           <h1 className="heading text-xl font-semibold">Delivery Notes</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · dispatched stock stays In Transit until settled.
+            {company.name} · dispatch on a vehicle, then settle with the bill.
           </p>
         </div>
         {isMerchant && (
@@ -44,7 +48,7 @@ export default async function DeliveriesPage() {
       {notes.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
           No delivery notes for {company.name} yet.
-          {isMerchant && " Use “New Delivery Note” to dispatch stock."}
+          {isMerchant && " Use “New Delivery Note” to dispatch."}
         </p>
       ) : (
         <div className="border border-line-strong bg-surface">
@@ -52,12 +56,10 @@ export default async function DeliveriesPage() {
             <thead>
               <tr>
                 <th>Date</th>
+                <th>Vehicle</th>
+                <th>Type</th>
                 <th>Buyer</th>
-                <th>Channel</th>
-                <th>Fish</th>
-                <th className="num-col">Qty Sent</th>
-                <th className="num-col">Rate</th>
-                <th className="num-col">Expected</th>
+                <th className="num-col">Bill Amount</th>
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -65,20 +67,23 @@ export default async function DeliveriesPage() {
             <tbody>
               {notes.map((n) => {
                 const age = daysSince(n.date);
-                const overdue =
-                  n.status !== "SETTLED" && age >= PENDING_WARN_DAYS;
+                const overdue = n.status !== "SETTLED" && age >= PENDING_WARN_DAYS;
+                const billed = n.settlements.reduce(
+                  (acc, s) => acc.add(s.amount),
+                  new Prisma.Decimal(0)
+                );
                 return (
                   <tr key={n.id}>
                     <td className="whitespace-nowrap">
                       {fmtDate(n.date)}
                       <LockMark closed={closedDates.has(toInputDate(n.date))} />
                     </td>
-                    <td className="font-medium">{n.party.name}</td>
+                    <td className="num">{n.vehicleNo}</td>
                     <td>{CHANNEL_LABELS[n.channel]}</td>
-                    <td>{n.fishType}</td>
-                    <td className="num-col num">{fmtKg(n.qtySent)}</td>
-                    <td className="num-col num">{fmtMoney(n.rate)}</td>
-                    <td className="num-col num">{fmtMoney(n.expectedValue)}</td>
+                    <td className="font-medium">{n.party.name}</td>
+                    <td className="num-col num text-credit">
+                      {n.settlements.length > 0 ? fmtMoney(billed) : "—"}
+                    </td>
                     <td className="whitespace-nowrap">
                       <StatusBadge status={n.status} />
                       {overdue && (

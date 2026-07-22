@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "postinstall": "prisma generate",
     "db:dev": "node scripts/dev-db.mjs",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx scripts/seed.ts"
@@ -15,6 +16,7 @@
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.10.0",
     "dotenv": "^17.4.2",
     "jose": "^6.2.3",
     "next": "16.2.10",

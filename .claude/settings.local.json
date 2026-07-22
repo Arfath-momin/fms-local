@@ -16,7 +16,20 @@
       "Bash(npx tsc *)",
       "Bash(npx eslint *)",
       "Bash(npx tsx -e ' *)",
-      "Bash(npx tsx *)"
+      "Bash(npx tsx *)",
+      "Bash(taskkill //F //PID 13000)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //PID 15236)",
+      "Bash(tasklist //FI \"PID eq 14560\")",
+      "Bash(tasklist //FI \"IMAGENAME eq postgres.exe\")",
+      "Bash(tasklist //FI \"IMAGENAME eq node.exe\")",
+      "Bash(taskkill //F //PID 18488 //T)",
+      "Bash(taskkill //F //PID 16504)",
+      "Bash(taskkill //F //PID 5648)",
+      "Bash(taskkill //F //PID 17268)",
+      "Bash(taskkill //F //PID 12692)",
+      "Bash(taskkill //F //IM postgres.exe //T)",
+      "Bash(cd \"D:\\\\Arfath\\\\Clients\\\\BMF Fish\" && echo \"=== generated client: does it have vehicleNo? ===\" && grep -rl \"vehicleNo\\\\|vehicle_no\" src/generated/prisma/ 2>/dev/null | head -3 && echo \"\" && echo \"=== app SOURCE still referencing removed fields \\(qtySent/expectedValue/rate/PARTIALLY_SETTLED\\)? ===\" && grep -rln \"qtySent\\\\|expectedValue\\\\|PARTIALLY_SETTLED\\\\|expected_value\\\\|qty_sent\" src/app src/lib 2>/dev/null && echo \"\" && echo \"=== schema git status timestamp ===\" && git log -1 --format=\"HEAD committed: %cd\" && stat -c \"schema.prisma modified: %y\" prisma/schema.prisma 2>/dev/null)"
     ]
   }
 }

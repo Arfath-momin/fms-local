@@ -3,13 +3,12 @@
 import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { PurchaseFormState } from "./actions";
-import type { PartyType, PurchaseType } from "@/generated/prisma/enums";
-import { PURCHASE_SELLER_TYPES } from "@/lib/party";
-
-export type PartyOption = { id: string; name: string; type: PartyType };
+import type { PurchaseType } from "@/generated/prisma/enums";
+import { fmtMoney } from "@/lib/format";
 
 const TYPE_OPTIONS: { value: PurchaseType; label: string }[] = [
   { value: "SOCIETY", label: "Society" },
+  { value: "KFDC", label: "KFDC" },
   { value: "PRIVATE", label: "Private" },
   { value: "LOCAL", label: "Local" },
 ];
@@ -19,10 +18,25 @@ const inputCls =
 const labelCls =
   "block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1";
 
+export type PurchaseLineInit = {
+  particular: string;
+  qtyKg: string;
+  pricePerKg: string;
+};
+
+export type PurchaseInit = {
+  type: PurchaseType;
+  partyName: string;
+  amount: string;
+  paid: boolean;
+  date: string;
+  lines: PurchaseLineInit[];
+};
+
+const BLANK_LINE: PurchaseLineInit = { particular: "", qtyKg: "", pricePerKg: "" };
+
 export function PurchaseForm({
   action,
-  parties,
-  fishTypes,
   initial,
   submitLabel,
   reasonField,
@@ -31,39 +45,37 @@ export function PurchaseForm({
     prev: PurchaseFormState,
     formData: FormData
   ) => Promise<PurchaseFormState>;
-  parties: PartyOption[];
-  fishTypes: string[];
-  initial?: {
-    type: PurchaseType;
-    partyId: string;
-    invoiceNumber: string;
-    fishType: string;
-    qtyKg: string;
-    amount: string;
-    date: string;
-  };
+  initial?: PurchaseInit;
   submitLabel: string;
   reasonField?: boolean;
 }) {
-  const [state, formAction, pending] = useActionState<
-    PurchaseFormState,
-    FormData
-  >(action, null);
+  const [state, formAction, pending] = useActionState<PurchaseFormState, FormData>(
+    action,
+    null
+  );
   const [type, setType] = useState<PurchaseType>(initial?.type ?? "SOCIETY");
+  const [lines, setLines] = useState<PurchaseLineInit[]>(
+    initial?.lines?.length ? initial.lines : [BLANK_LINE]
+  );
 
   const today = new Date().toISOString().slice(0, 10);
+  const isLocal = type === "LOCAL";
 
-  // Only seller-side parties, per purchase type. An existing entry's party
-  // stays selectable even if its type no longer matches.
-  const sellers = useMemo(() => {
-    const allowed = PURCHASE_SELLER_TYPES[type];
-    return parties.filter(
-      (p) => allowed.includes(p.type) || p.id === initial?.partyId
-    );
-  }, [parties, type, initial?.partyId]);
+  const grandTotal = useMemo(
+    () =>
+      lines.reduce((sum, l) => {
+        const q = Number(l.qtyKg);
+        const p = Number(l.pricePerKg);
+        return sum + (Number.isFinite(q) && Number.isFinite(p) ? q * p : 0);
+      }, 0),
+    [lines]
+  );
+
+  const setLine = (i: number, patch: Partial<PurchaseLineInit>) =>
+    setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
   return (
-    <form action={formAction} className="max-w-lg space-y-4">
+    <form action={formAction} className="max-w-2xl space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="type" className={labelCls}>
@@ -100,102 +112,156 @@ export function PurchaseForm({
       </div>
 
       <div>
-        <label htmlFor="partyId" className={labelCls}>
-          Party (seller)
-        </label>
-        <select
-          id="partyId"
-          name="partyId"
-          required
-          defaultValue={initial?.partyId ?? ""}
-          className={inputCls}
-        >
-          <option value="" disabled>
-            Select party…
-          </option>
-          {sellers.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        {sellers.length === 0 && (
-          <p className="text-debit text-[12px] mt-1">
-            No parties of the right type for this purchase.{" "}
-            <Link href="/masters" className="underline underline-offset-2">
-              Add one in Masters
-            </Link>
-            .
-          </p>
-        )}
-      </div>
-
-      <div>
-        <label htmlFor="invoiceNumber" className={labelCls}>
-          Invoice Number
-          {type === "LOCAL" && (
-            <span className="normal-case font-normal">
-              {" "}
-              — leave blank to auto-number (LOC-AUTO-####)
-            </span>
-          )}
+        <label htmlFor="partyName" className={labelCls}>
+          {isLocal ? "Seller Name" : "Boat Name"}
         </label>
         <input
-          id="invoiceNumber"
-          name="invoiceNumber"
-          required={type !== "LOCAL"}
-          defaultValue={initial?.invoiceNumber ?? ""}
-          placeholder={type === "LOCAL" ? "LOC-AUTO-…" : ""}
+          id="partyName"
+          name="partyName"
+          required
+          defaultValue={initial?.partyName ?? ""}
+          placeholder={isLocal ? "e.g. Ramesh" : "e.g. Boat No. 12"}
           className={inputCls}
+        />
+        <p className="text-muted text-[12px] mt-1">
+          Each {isLocal ? "seller" : "boat"} keeps its own ledger — reusing the
+          same name adds to that ledger.
+        </p>
+      </div>
+
+      {isLocal ? (
+        <div>
+          <label className={labelCls}>Items</label>
+          <div className="border border-line-strong bg-surface">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-muted text-[12px] uppercase tracking-wide">
+                  <th className="text-left font-semibold px-3 py-2">Particular</th>
+                  <th className="text-right font-semibold px-3 py-2 w-28">Qty (kg)</th>
+                  <th className="text-right font-semibold px-3 py-2 w-28">Price/kg</th>
+                  <th className="text-right font-semibold px-3 py-2 w-32">Total</th>
+                  <th className="w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((l, i) => {
+                  const rowTotal =
+                    (Number(l.qtyKg) || 0) * (Number(l.pricePerKg) || 0);
+                  return (
+                    <tr key={i} className="border-t border-line">
+                      <td className="px-2 py-1">
+                        <input
+                          name="particular"
+                          value={l.particular}
+                          onChange={(e) =>
+                            setLine(i, { particular: e.target.value })
+                          }
+                          className={inputCls}
+                          placeholder="e.g. Prawn"
+                        />
+                      </td>
+                      <td className="px-2 py-1">
+                        <input
+                          name="qtyKg"
+                          inputMode="decimal"
+                          value={l.qtyKg}
+                          onChange={(e) => setLine(i, { qtyKg: e.target.value })}
+                          className={inputCls + " num text-right"}
+                        />
+                      </td>
+                      <td className="px-2 py-1">
+                        <input
+                          name="pricePerKg"
+                          inputMode="decimal"
+                          value={l.pricePerKg}
+                          onChange={(e) =>
+                            setLine(i, { pricePerKg: e.target.value })
+                          }
+                          className={inputCls + " num text-right"}
+                        />
+                      </td>
+                      <td className="px-3 py-1 num text-right text-muted">
+                        {fmtMoney(rowTotal)}
+                      </td>
+                      <td className="px-1 py-1 text-center">
+                        {lines.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLines((ls) => ls.filter((_, j) => j !== i))
+                            }
+                            className="text-debit text-lg leading-none"
+                            aria-label="Remove line"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-line-strong">
+                  <td colSpan={3} className="px-3 py-2 text-right font-semibold">
+                    Grand Total
+                  </td>
+                  <td className="px-3 py-2 num text-right font-semibold text-debit">
+                    {fmtMoney(grandTotal)}
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLines((ls) => [...ls, { ...BLANK_LINE }])}
+            className="mt-2 border border-line-strong bg-surface px-3 py-1.5 text-[12px] font-semibold hover:border-accent"
+          >
+            + Add item
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="amount" className={labelCls}>
+              Grand Total (₹)
+            </label>
+            <input
+              id="amount"
+              name="amount"
+              required
+              inputMode="decimal"
+              defaultValue={initial?.amount ?? ""}
+              className={inputCls + " num text-right"}
+            />
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label htmlFor="bill" className={labelCls}>
+          Bill / Receipt {isLocal ? "(optional)" : "— fish details stay on the bill"}
+        </label>
+        <input
+          id="bill"
+          name="bill"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="text-[13px]"
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <div>
-          <label htmlFor="fishType" className={labelCls}>
-            Fish Type
-          </label>
-          <input
-            id="fishType"
-            name="fishType"
-            required
-            list="fish-types"
-            defaultValue={initial?.fishType ?? ""}
-            className={inputCls}
-          />
-          <datalist id="fish-types">
-            {fishTypes.map((f) => (
-              <option key={f} value={f} />
-            ))}
-          </datalist>
-        </div>
-        <div>
-          <label htmlFor="qtyKg" className={labelCls}>
-            Qty (kg)
-          </label>
-          <input
-            id="qtyKg"
-            name="qtyKg"
-            required
-            inputMode="decimal"
-            defaultValue={initial?.qtyKg ?? ""}
-            className={inputCls + " num text-right"}
-          />
-        </div>
-        <div>
-          <label htmlFor="amount" className={labelCls}>
-            Amount (₹)
-          </label>
-          <input
-            id="amount"
-            name="amount"
-            required
-            inputMode="decimal"
-            defaultValue={initial?.amount ?? ""}
-            className={inputCls + " num text-right"}
-          />
-        </div>
-      </div>
+      <label className="flex items-center gap-2 text-[13px]">
+        <input
+          type="checkbox"
+          name="paid"
+          defaultChecked={initial ? initial.paid : true}
+          className="h-4 w-4"
+        />
+        Paid (uncheck to leave outstanding in the ledger)
+      </label>
 
       {reasonField && (
         <div>

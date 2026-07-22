@@ -1,15 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { UPLOADS_DIR } from "@/lib/attachments";
-
-const CONTENT_TYPES: Record<string, string> = {
-  ".jpg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-};
 
 export async function GET(
   _req: Request,
@@ -22,18 +13,16 @@ export async function GET(
   const attachment = await prisma.attachment.findUnique({ where: { id } });
   if (!attachment) return new NextResponse("Not found", { status: 404 });
 
-  // imageUrl is a bare filename we generated; resolve inside UPLOADS_DIR only.
-  const filePath = path.join(UPLOADS_DIR, path.basename(attachment.imageUrl));
-  try {
-    const data = await readFile(filePath);
-    return new NextResponse(new Uint8Array(data), {
-      headers: {
-        "Content-Type":
-          CONTENT_TYPES[path.extname(filePath)] ?? "application/octet-stream",
-        "Cache-Control": "private, max-age=3600",
-      },
-    });
-  } catch {
+  // Proxy the Cloudinary image through our own auth gate rather than
+  // exposing the (public) Cloudinary URL directly to the client.
+  const upstream = await fetch(attachment.imageUrl);
+  if (!upstream.ok || !upstream.body)
     return new NextResponse("File missing", { status: 404 });
-  }
+
+  return new NextResponse(upstream.body, {
+    headers: {
+      "Content-Type": upstream.headers.get("content-type") ?? "application/octet-stream",
+      "Cache-Control": "private, max-age=3600",
+    },
+  });
 }

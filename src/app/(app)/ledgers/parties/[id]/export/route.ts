@@ -6,8 +6,7 @@ import { getActiveCompany } from "@/lib/company";
 const SOURCE_LABELS: Record<string, string> = {
   PURCHASE: "Purchase",
   SALE: "Sale",
-  SETTLEMENT: "Settlement received",
-  PRICE_VARIANCE: "Price variance debt",
+  EXPENSE: "Expense",
   PAYMENT: "Payment",
 };
 

@@ -9,62 +9,55 @@ import { requireMerchant } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { assertDayOpen } from "@/lib/dayclose";
 import { postLedgerEntry } from "@/lib/ledger";
-import { getNetQty, postStockMovement } from "@/lib/stock";
-import { getSettledTotals, postOwnerReserveEntry } from "@/lib/delivery";
 import { CHANNEL_BUYER_TYPE } from "@/lib/party";
+import { findOrCreateParty } from "@/lib/party-db";
+import { CHANNEL_LABELS } from "@/lib/delivery";
+import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
 
 export type DeliveryFormState = { error: string } | null;
 export type SettlementFormState = { error: string } | null;
 
-const CHANNELS: DeliveryChannel[] = [
-  "FACTORY",
-  "MARKET",
-  "FISH_MILL",
-  "LOCAL_SALE",
-];
+const CHANNELS: DeliveryChannel[] = ["MARKET", "FACTORY", "FISH_MILL", "LOCAL"];
 
 // ---------- Delivery Note ----------
 
 type ParsedDelivery = {
   channel: DeliveryChannel;
-  partyId: string;
-  fishType: string;
-  qtySent: Prisma.Decimal;
-  rate: Prisma.Decimal;
+  buyerName: string; // empty → falls back to the channel label
+  vehicleNo: string;
   date: Date;
+  file: unknown;
 };
 
 function parseDelivery(
   formData: FormData
 ): { error: string } | { data: ParsedDelivery } {
   const channel = String(formData.get("channel") ?? "") as DeliveryChannel;
-  const partyId = String(formData.get("partyId") ?? "");
-  const fishType = String(formData.get("fishType") ?? "")
+  const buyerName = String(formData.get("buyerName") ?? "")
     .trim()
     .replace(/\s+/g, " ");
-  const qtyRaw = String(formData.get("qtySent") ?? "").trim();
-  const rateRaw = String(formData.get("rate") ?? "").trim();
+  const vehicleNo = String(formData.get("vehicleNo") ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
   const dateRaw = String(formData.get("date") ?? "");
+  const file = formData.get("bill");
 
-  if (!CHANNELS.includes(channel)) return { error: "Choose a channel." };
-  if (!partyId) return { error: "Choose a buyer." };
-  if (!fishType) return { error: "Choose a fish type." };
-  if (!/^\d+(\.\d{1,3})?$/.test(qtyRaw) || Number(qtyRaw) <= 0)
-    return { error: "Quantity must be a positive number (up to 3 decimals)." };
-  if (!/^\d+(\.\d{1,2})?$/.test(rateRaw) || Number(rateRaw) <= 0)
-    return { error: "Rate must be a positive number (up to 2 decimals)." };
+  if (!CHANNELS.includes(channel)) return { error: "Choose a type." };
+  if (!vehicleNo) return { error: "Enter the vehicle number." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
 
-  return {
-    data: {
-      channel,
-      partyId,
-      fishType,
-      qtySent: new Prisma.Decimal(qtyRaw),
-      rate: new Prisma.Decimal(rateRaw),
-      date: new Date(dateRaw),
-    },
-  };
+  const badFile = validateImageFile(file);
+  if (badFile) return { error: badFile };
+
+  return { data: { channel, buyerName, vehicleNo, date: new Date(dateRaw), file } };
+}
+
+async function resolveBuyer(
+  tx: Prisma.TransactionClient,
+  d: ParsedDelivery
+): Promise<string> {
+  const name = d.buyerName || CHANNEL_LABELS[d.channel];
+  return findOrCreateParty(tx, name, CHANNEL_BUYER_TYPE[d.channel]);
 }
 
 export async function createDelivery(
@@ -77,62 +70,32 @@ export async function createDelivery(
   const d = parsed.data;
   const company = await getActiveCompany();
 
-  let noteId = "";
+  let noteId: string;
   try {
-    await prisma.$transaction(async (tx) => {
+    noteId = await prisma.$transaction(async (tx) => {
       await assertDayOpen(tx, company.id, d.date);
-
-      const party = await tx.party.findUnique({ where: { id: d.partyId } });
-      if (!party || party.type !== CHANNEL_BUYER_TYPE[d.channel]) {
-        throw new Error("That party cannot buy through this channel.");
-      }
-
-      const available = await getNetQty(tx, company.id, d.fishType, "AVAILABLE");
-      if (available.lessThan(d.qtySent)) {
-        throw new Error(
-          `Only ${available.toString()} kg of ${d.fishType} is available — cannot dispatch ${d.qtySent.toString()} kg.`
-        );
-      }
-
+      const partyId = await resolveBuyer(tx, d);
       const note = await tx.deliveryNote.create({
         data: {
           companyId: company.id,
-          partyId: d.partyId,
+          partyId,
           channel: d.channel,
-          fishType: d.fishType,
-          qtySent: d.qtySent,
-          rate: d.rate, // locked here — settlement never renegotiates price (spec §3.2)
-          expectedValue: d.qtySent.mul(d.rate),
+          vehicleNo: d.vehicleNo,
           date: d.date,
         },
       });
-      noteId = note.id;
-
-      // AVAILABLE → IN_TRANSIT as an out/in pair
-      await postStockMovement(tx, {
-        companyId: company.id,
-        fishType: d.fishType,
-        qtyKg: d.qtySent,
-        direction: "OUT",
-        state: "AVAILABLE",
-        sourceType: "DELIVERY",
-        sourceId: note.id,
-        date: d.date,
-      });
-      await postStockMovement(tx, {
-        companyId: company.id,
-        fishType: d.fishType,
-        qtyKg: d.qtySent,
-        direction: "IN",
-        state: "IN_TRANSIT",
-        sourceType: "DELIVERY",
-        sourceId: note.id,
-        date: d.date,
-      });
+      return note.id;
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save delivery." };
   }
+
+  await saveAttachmentFile({
+    companyId: company.id,
+    linkedType: "DELIVERY_NOTE",
+    linkedId: noteId,
+    file: d.file,
+  });
 
   revalidatePath("/vouchers/deliveries");
   redirect(`/vouchers/deliveries/${noteId}`);
@@ -149,71 +112,41 @@ export async function updateDelivery(
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
+  let companyId: string;
   try {
-    await prisma.$transaction(async (tx) => {
+    companyId = await prisma.$transaction(async (tx) => {
       const existing = await tx.deliveryNote.findUnique({
         where: { id: deliveryNoteId },
         include: { _count: { select: { settlements: true } } },
       });
       if (!existing) throw new Error("Delivery note not found.");
       if (existing._count.settlements > 0)
-        throw new Error(
-          "This delivery already has settlements and can no longer be edited."
-        );
-
+        throw new Error("This delivery is already settled and cannot be edited.");
       await assertDayOpen(tx, existing.companyId, existing.date);
       await assertDayOpen(tx, existing.companyId, d.date);
 
-      await tx.stockMovement.deleteMany({
-        where: { sourceType: "DELIVERY", sourceId: deliveryNoteId },
-      });
-
-      const note = await tx.deliveryNote.update({
+      const partyId = await resolveBuyer(tx, d);
+      await tx.deliveryNote.update({
         where: { id: deliveryNoteId },
         data: {
-          partyId: d.partyId,
+          partyId,
           channel: d.channel,
-          fishType: d.fishType,
-          qtySent: d.qtySent,
-          rate: d.rate,
-          expectedValue: d.qtySent.mul(d.rate),
+          vehicleNo: d.vehicleNo,
           date: d.date,
         },
       });
-
-      await postStockMovement(tx, {
-        companyId: note.companyId,
-        fishType: d.fishType,
-        qtyKg: d.qtySent,
-        direction: "OUT",
-        state: "AVAILABLE",
-        sourceType: "DELIVERY",
-        sourceId: note.id,
-        date: d.date,
-      });
-      await postStockMovement(tx, {
-        companyId: note.companyId,
-        fishType: d.fishType,
-        qtyKg: d.qtySent,
-        direction: "IN",
-        state: "IN_TRANSIT",
-        sourceType: "DELIVERY",
-        sourceId: note.id,
-        date: d.date,
-      });
-
-      for (const fishType of new Set([existing.fishType, d.fishType])) {
-        const net = await getNetQty(tx, note.companyId, fishType, "AVAILABLE");
-        if (net.isNegative()) {
-          throw new Error(
-            `Cannot save: available stock of ${fishType} would go negative.`
-          );
-        }
-      }
+      return existing.companyId;
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save delivery." };
   }
+
+  await saveAttachmentFile({
+    companyId,
+    linkedType: "DELIVERY_NOTE",
+    linkedId: deliveryNoteId,
+    file: d.file,
+  });
 
   revalidatePath("/vouchers/deliveries");
   redirect(`/vouchers/deliveries/${deliveryNoteId}`);
@@ -221,72 +154,11 @@ export async function updateDelivery(
 
 // ---------- Settlement ----------
 
-type ParsedSettlement = {
-  qtyAccepted: Prisma.Decimal;
-  qtyReturned: Prisma.Decimal;
-  qtySpoiled: Prisma.Decimal;
-  amountReceived: Prisma.Decimal;
-  gross: Prisma.Decimal | null;
-  commission: Prisma.Decimal | null;
-  ownerReserve: Prisma.Decimal | null;
-  date: Date;
-};
-
-function decOrNull(raw: string): Prisma.Decimal | null | "bad" {
-  if (!raw) return null;
-  if (!/^\d+(\.\d{1,2})?$/.test(raw)) return "bad";
-  return new Prisma.Decimal(raw);
-}
-
-function parseSettlement(
-  formData: FormData
-): { error: string } | { data: ParsedSettlement } {
-  const qty = (name: string) => String(formData.get(name) ?? "0").trim() || "0";
-  const qtys: Record<string, Prisma.Decimal> = {};
-  for (const name of ["qtyAccepted", "qtyReturned", "qtySpoiled"]) {
-    const raw = qty(name);
-    if (!/^\d+(\.\d{1,3})?$/.test(raw))
-      return { error: "Quantities must be numbers (up to 3 decimals)." };
-    qtys[name] = new Prisma.Decimal(raw);
-  }
-
-  const amountRaw = String(formData.get("amountReceived") ?? "").trim() || "0";
-  if (!/^\d+(\.\d{1,2})?$/.test(amountRaw))
-    return { error: "Amount received must be a number (up to 2 decimals)." };
-
-  const gross = decOrNull(String(formData.get("gross") ?? "").trim());
-  const commission = decOrNull(String(formData.get("commission") ?? "").trim());
-  const ownerReserve = decOrNull(
-    String(formData.get("ownerReserve") ?? "").trim()
-  );
-  if (gross === "bad" || commission === "bad" || ownerReserve === "bad")
-    return { error: "Deduction fields must be numbers (up to 2 decimals)." };
-
-  const dateRaw = String(formData.get("date") ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
-
-  return {
-    data: {
-      qtyAccepted: qtys.qtyAccepted,
-      qtyReturned: qtys.qtyReturned,
-      qtySpoiled: qtys.qtySpoiled,
-      amountReceived: new Prisma.Decimal(amountRaw),
-      gross,
-      commission,
-      ownerReserve,
-      date: new Date(dateRaw),
-    },
-  };
-}
-
 /**
- * Settlement posting (spec §2 Settlement):
- *  - accepted → SOLD, returned → AVAILABLE, spoiled → LOSS (permanent)
- *  - ledger: DEBIT SALE at the locked rate for accepted qty; CREDIT what the
- *    buyer actually put toward the sale (gross when billed, else net);
- *    any shortfall is labeled as PRICE_VARIANCE debt so it stays visible on
- *    the party's statement (spec §2 price variance, §5).
- *  - a non-zero owner reserve credits the company's reserve account.
+ * Settlement bill: records the Total Amount billed and recognises the full
+ * sale in the buyer's ledger — DEBIT SALE for the total, matched by a CREDIT
+ * PAYMENT for whatever's actually been received. Any shortfall stands as an
+ * outstanding balance in the buyer ledger. Marks the delivery SETTLED.
  */
 export async function createSettlement(
   deliveryNoteId: string,
@@ -294,154 +166,74 @@ export async function createSettlement(
   formData: FormData
 ): Promise<SettlementFormState> {
   await requireMerchant();
-  const parsed = parseSettlement(formData);
-  if ("error" in parsed) return { error: parsed.error };
-  const s = parsed.data;
+  const amountRaw = String(formData.get("amount") ?? "").trim();
+  const amountReceivedRaw = String(formData.get("amountReceived") ?? "").trim();
+  const dateRaw = String(formData.get("date") ?? "");
+  const file = formData.get("bill");
 
-  const settledQty = s.qtyAccepted.add(s.qtyReturned).add(s.qtySpoiled);
-  if (settledQty.lessThanOrEqualTo(0))
-    return { error: "Enter at least one non-zero quantity." };
+  if (!/^\d+(\.\d{1,2})?$/.test(amountRaw) || Number(amountRaw) <= 0)
+    return { error: "Total amount must be a positive number (up to 2 decimals)." };
+  if (!/^\d+(\.\d{1,2})?$/.test(amountReceivedRaw) || Number(amountReceivedRaw) < 0)
+    return { error: "Amount received must be a number (up to 2 decimals)." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
+  const badFile = validateImageFile(file);
+  if (badFile) return { error: badFile };
 
+  const amount = new Prisma.Decimal(amountRaw);
+  const amountReceived = new Prisma.Decimal(amountReceivedRaw);
+  if (amountReceived.gt(amount))
+    return { error: "Amount received cannot exceed the total amount." };
+  const date = new Date(dateRaw);
+
+  let settlementId: string;
+  let companyId: string;
   try {
-    await prisma.$transaction(async (tx) => {
-      const note = await tx.deliveryNote.findUnique({
-        where: { id: deliveryNoteId },
-      });
+    const result = await prisma.$transaction(async (tx) => {
+      const note = await tx.deliveryNote.findUnique({ where: { id: deliveryNoteId } });
       if (!note) throw new Error("Delivery note not found.");
-      if (note.status === "SETTLED")
-        throw new Error("This delivery note is already fully settled.");
-
-      await assertDayOpen(tx, note.companyId, s.date);
-
-      const prior = await getSettledTotals(tx, deliveryNoteId);
-      const remaining = note.qtySent.sub(prior.total);
-      if (settledQty.greaterThan(remaining)) {
-        throw new Error(
-          `Accepted + Returned + Spoiled must not exceed the ${remaining.toString()} kg still unsettled — currently totals ${settledQty.toString()} kg.`
-        );
-      }
+      await assertDayOpen(tx, note.companyId, date);
 
       const settlement = await tx.settlement.create({
-        data: {
-          deliveryNoteId,
-          qtyAccepted: s.qtyAccepted,
-          qtyReturned: s.qtyReturned,
-          qtySpoiled: s.qtySpoiled,
-          amountReceived: s.amountReceived,
-          gross: s.gross,
-          commission: s.commission,
-          ownerReserve: s.ownerReserve,
-          date: s.date,
-        },
+        data: { deliveryNoteId, amount, amountReceived, date },
       });
-
-      // Stock transitions — all out of IN_TRANSIT
-      const stockPairs: {
-        qty: Prisma.Decimal;
-        toState: "SOLD" | "AVAILABLE" | "LOSS";
-        sourceType: "SETTLEMENT" | "SETTLEMENT_RETURN" | "LOSS_WRITEOFF";
-      }[] = [
-        { qty: s.qtyAccepted, toState: "SOLD", sourceType: "SETTLEMENT" },
-        { qty: s.qtyReturned, toState: "AVAILABLE", sourceType: "SETTLEMENT_RETURN" },
-        { qty: s.qtySpoiled, toState: "LOSS", sourceType: "LOSS_WRITEOFF" },
-      ];
-      for (const p of stockPairs) {
-        if (p.qty.lessThanOrEqualTo(0)) continue;
-        await postStockMovement(tx, {
-          companyId: note.companyId,
-          fishType: note.fishType,
-          qtyKg: p.qty,
-          direction: "OUT",
-          state: "IN_TRANSIT",
-          sourceType: p.sourceType,
-          sourceId: settlement.id,
-          date: s.date,
-        });
-        await postStockMovement(tx, {
-          companyId: note.companyId,
-          fishType: note.fishType,
-          qtyKg: p.qty,
-          direction: "IN",
-          state: p.toState,
-          sourceType: p.sourceType,
-          sourceId: settlement.id,
-          date: s.date,
-        });
-      }
-
-      // Ledger
-      const expected = s.qtyAccepted.mul(note.rate);
-      const paidTowardSale = s.gross ?? s.amountReceived;
-      if (expected.greaterThan(0)) {
-        await postLedgerEntry(tx, {
-          companyId: note.companyId,
-          partyId: note.partyId,
-          type: "DEBIT",
-          sourceType: "SALE",
-          sourceId: settlement.id,
-          amount: expected,
-          date: s.date,
-        });
-      }
-      const shortfall = expected.sub(paidTowardSale);
-      if (shortfall.greaterThan(0)) {
-        // Credit the full expected value, then re-debit the shortfall as an
-        // explicit PRICE_VARIANCE line so the debt is visible, not buried.
+      await postLedgerEntry(tx, {
+        companyId: note.companyId,
+        partyId: note.partyId,
+        type: "DEBIT",
+        sourceType: "SALE",
+        sourceId: settlement.id,
+        amount,
+        date,
+      });
+      if (amountReceived.gt(0)) {
         await postLedgerEntry(tx, {
           companyId: note.companyId,
           partyId: note.partyId,
           type: "CREDIT",
-          sourceType: "SETTLEMENT",
+          sourceType: "PAYMENT",
           sourceId: settlement.id,
-          amount: expected,
-          date: s.date,
-        });
-        await postLedgerEntry(tx, {
-          companyId: note.companyId,
-          partyId: note.partyId,
-          type: "DEBIT",
-          sourceType: "PRICE_VARIANCE",
-          sourceId: settlement.id,
-          amount: shortfall,
-          date: s.date,
-        });
-      } else if (paidTowardSale.greaterThan(0)) {
-        await postLedgerEntry(tx, {
-          companyId: note.companyId,
-          partyId: note.partyId,
-          type: "CREDIT",
-          sourceType: "SETTLEMENT",
-          sourceId: settlement.id,
-          amount: paidTowardSale,
-          date: s.date,
+          amount: amountReceived,
+          date,
         });
       }
-
-      if (s.ownerReserve && s.ownerReserve.greaterThan(0)) {
-        await postOwnerReserveEntry(tx, {
-          companyId: note.companyId,
-          settlementId: settlement.id,
-          amount: s.ownerReserve,
-          date: s.date,
-        });
-      }
-
-      // Status
-      const after = await getSettledTotals(tx, deliveryNoteId);
       await tx.deliveryNote.update({
         where: { id: deliveryNoteId },
-        data: {
-          status: after.total.equals(note.qtySent)
-            ? "SETTLED"
-            : "PARTIALLY_SETTLED",
-        },
+        data: { status: "SETTLED" },
       });
+      return { settlementId: settlement.id, companyId: note.companyId };
     });
+    settlementId = result.settlementId;
+    companyId = result.companyId;
   } catch (e) {
-    return {
-      error: e instanceof Error ? e.message : "Could not save settlement.",
-    };
+    return { error: e instanceof Error ? e.message : "Could not save settlement." };
   }
+
+  await saveAttachmentFile({
+    companyId,
+    linkedType: "SETTLEMENT",
+    linkedId: settlementId,
+    file,
+  });
 
   revalidatePath("/vouchers/deliveries");
   redirect(`/vouchers/deliveries/${deliveryNoteId}`);

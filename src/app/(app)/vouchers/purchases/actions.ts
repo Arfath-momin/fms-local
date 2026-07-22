@@ -7,120 +7,134 @@ import type { PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireMerchant } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
-import { PURCHASE_SELLER_TYPES } from "@/lib/party";
+import { PURCHASE_SELLER_TYPE } from "@/lib/party";
+import { findOrCreateParty } from "@/lib/party-db";
 import { assertDayOpen } from "@/lib/dayclose";
 import { postLedgerEntry } from "@/lib/ledger";
-import { getNetQty, postStockMovement } from "@/lib/stock";
+import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
 
 export type PurchaseFormState = { error: string } | null;
 
-const PURCHASE_TYPES: PurchaseType[] = ["SOCIETY", "PRIVATE", "LOCAL"];
+const PURCHASE_TYPES: PurchaseType[] = ["SOCIETY", "KFDC", "PRIVATE", "LOCAL"];
+
+type ParsedLine = {
+  particular: string;
+  qtyKg: Prisma.Decimal;
+  pricePerKg: Prisma.Decimal;
+  total: Prisma.Decimal;
+};
 
 type Parsed = {
   type: PurchaseType;
-  partyId: string;
-  invoiceNumber: string; // may be "" for LOCAL → auto-numbered
-  fishType: string;
-  qtyKg: Prisma.Decimal;
+  partyName: string;
   amount: Prisma.Decimal;
+  paid: boolean;
   date: Date;
+  lines: ParsedLine[];
+  file: unknown;
 };
+
+const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
+const DECIMAL3 = /^\d+(\.\d{1,3})?$/;
 
 function parse(formData: FormData): { error: string } | { data: Parsed } {
   const type = String(formData.get("type") ?? "") as PurchaseType;
-  const partyId = String(formData.get("partyId") ?? "");
-  const invoiceNumber = String(formData.get("invoiceNumber") ?? "").trim();
-  const fishType = String(formData.get("fishType") ?? "")
+  const partyName = String(formData.get("partyName") ?? "")
     .trim()
     .replace(/\s+/g, " ");
-  const qtyRaw = String(formData.get("qtyKg") ?? "").trim();
-  const amountRaw = String(formData.get("amount") ?? "").trim();
   const dateRaw = String(formData.get("date") ?? "");
+  const paid = formData.get("paid") != null;
+  const file = formData.get("bill");
 
   if (!PURCHASE_TYPES.includes(type))
     return { error: "Choose a purchase type." };
-  if (!partyId) return { error: "Choose a party." };
-  if (!invoiceNumber && type !== "LOCAL")
-    return { error: "Invoice number is required for this purchase type." };
-  if (!fishType) return { error: "Fish type is required." };
-  if (!/^\d+(\.\d{1,3})?$/.test(qtyRaw) || Number(qtyRaw) <= 0)
-    return { error: "Quantity must be a positive number (up to 3 decimals)." };
-  if (!/^\d+(\.\d{1,2})?$/.test(amountRaw))
-    return { error: "Amount must be a number (up to 2 decimals)." };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw))
-    return { error: "Pick a date." };
+  if (!partyName)
+    return {
+      error: type === "LOCAL" ? "Enter the seller name." : "Enter the boat name.",
+    };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
 
+  const badFile = validateImageFile(file);
+  if (badFile) return { error: badFile };
+
+  const date = new Date(dateRaw);
+
+  if (type === "LOCAL") {
+    const particulars = formData.getAll("particular").map(String);
+    const qtys = formData.getAll("qtyKg").map(String);
+    const prices = formData.getAll("pricePerKg").map(String);
+    const lines: ParsedLine[] = [];
+    for (let i = 0; i < particulars.length; i++) {
+      const particular = particulars[i].trim().replace(/\s+/g, " ");
+      const qtyRaw = (qtys[i] ?? "").trim();
+      const priceRaw = (prices[i] ?? "").trim();
+      // Skip fully-blank rows the form may submit.
+      if (!particular && !qtyRaw && !priceRaw) continue;
+      if (!particular) return { error: "Every line needs a particular." };
+      if (!DECIMAL3.test(qtyRaw) || Number(qtyRaw) <= 0)
+        return { error: `Quantity for “${particular}” must be a positive number.` };
+      if (!DECIMAL2.test(priceRaw))
+        return { error: `Price for “${particular}” must be a number.` };
+      const qtyKg = new Prisma.Decimal(qtyRaw);
+      const pricePerKg = new Prisma.Decimal(priceRaw);
+      lines.push({
+        particular,
+        qtyKg,
+        pricePerKg,
+        total: qtyKg.mul(pricePerKg),
+      });
+    }
+    if (lines.length === 0)
+      return { error: "Add at least one line item." };
+    const amount = lines.reduce((a, l) => a.add(l.total), new Prisma.Decimal(0));
+    return { data: { type, partyName, amount, paid, date, lines, file } };
+  }
+
+  const amountRaw = String(formData.get("amount") ?? "").trim();
+  if (!DECIMAL2.test(amountRaw) || Number(amountRaw) <= 0)
+    return { error: "Total must be a positive number (up to 2 decimals)." };
   return {
     data: {
       type,
-      partyId,
-      invoiceNumber,
-      fishType,
-      qtyKg: new Prisma.Decimal(qtyRaw),
+      partyName,
       amount: new Prisma.Decimal(amountRaw),
-      date: new Date(dateRaw),
+      paid,
+      date,
+      lines: [],
+      file,
     },
   };
 }
 
-async function nextLocalInvoice(
-  tx: Prisma.TransactionClient,
-  companyId: string
-) {
-  const { localInvoiceSeq } = await tx.company.update({
-    where: { id: companyId },
-    data: { localInvoiceSeq: { increment: 1 } },
-    select: { localInvoiceSeq: true },
-  });
-  return `LOC-AUTO-${String(localInvoiceSeq).padStart(4, "0")}`;
-}
-
 /**
- * On save (spec §2 Purchase): stock IN → AVAILABLE, plus a paid-same-day
- * ledger pair — CREDIT (PURCHASE: we owe the seller) immediately matched by
- * DEBIT (PAYMENT), since there is no advance/credit modeling (spec §3.5).
- * The pair nets to zero but keeps the party statement a complete history.
+ * Purchase ledger effect: CREDIT the seller (we owe them). When paid, an
+ * immediate DEBIT PAYMENT nets it to zero but keeps the statement complete;
+ * when unpaid, the CREDIT stands as an outstanding balance.
  */
-async function postPurchaseEffects(
+async function postPurchaseLedger(
   tx: Prisma.TransactionClient,
-  purchase: {
-    id: string;
-    companyId: string;
-    partyId: string;
-    fishType: string;
-    qtyKg: Prisma.Decimal;
-    amount: Prisma.Decimal;
-    date: Date;
-  }
+  p: { companyId: string; partyId: string; id: string; amount: Prisma.Decimal; date: Date; paid: boolean }
 ) {
-  await postStockMovement(tx, {
-    companyId: purchase.companyId,
-    fishType: purchase.fishType,
-    qtyKg: purchase.qtyKg,
-    direction: "IN",
-    state: "AVAILABLE",
-    sourceType: "PURCHASE",
-    sourceId: purchase.id,
-    date: purchase.date,
-  });
   await postLedgerEntry(tx, {
-    companyId: purchase.companyId,
-    partyId: purchase.partyId,
+    companyId: p.companyId,
+    partyId: p.partyId,
     type: "CREDIT",
     sourceType: "PURCHASE",
-    sourceId: purchase.id,
-    amount: purchase.amount,
-    date: purchase.date,
+    sourceId: p.id,
+    amount: p.amount,
+    date: p.date,
   });
-  await postLedgerEntry(tx, {
-    companyId: purchase.companyId,
-    partyId: purchase.partyId,
-    type: "DEBIT",
-    sourceType: "PAYMENT",
-    sourceId: purchase.id,
-    amount: purchase.amount,
-    date: purchase.date,
-  });
+  if (p.paid) {
+    await postLedgerEntry(tx, {
+      companyId: p.companyId,
+      partyId: p.partyId,
+      type: "DEBIT",
+      sourceType: "PAYMENT",
+      sourceId: p.id,
+      amount: p.amount,
+      date: p.date,
+    });
+  }
 }
 
 export async function createPurchase(
@@ -133,140 +147,46 @@ export async function createPurchase(
   const d = parsed.data;
   const company = await getActiveCompany();
 
+  let purchaseId: string;
   try {
-    await prisma.$transaction(async (tx) => {
+    purchaseId = await prisma.$transaction(async (tx) => {
       await assertDayOpen(tx, company.id, d.date);
-
-      const party = await tx.party.findUnique({ where: { id: d.partyId } });
-      if (!party || !PURCHASE_SELLER_TYPES[d.type].includes(party.type)) {
-        throw new Error(
-          "That party cannot be a seller for this purchase type."
-        );
-      }
-
-      const invoiceNumber =
-        d.invoiceNumber || (await nextLocalInvoice(tx, company.id));
+      const partyId = await findOrCreateParty(
+        tx,
+        d.partyName,
+        PURCHASE_SELLER_TYPE[d.type]
+      );
       const purchase = await tx.purchase.create({
         data: {
           companyId: company.id,
-          partyId: d.partyId,
+          partyId,
           type: d.type,
-          invoiceNumber,
-          fishType: d.fishType,
-          qtyKg: d.qtyKg,
           amount: d.amount,
+          paid: d.paid,
           date: d.date,
+          lines: { create: d.lines },
         },
       });
-      await postPurchaseEffects(tx, purchase);
+      await postPurchaseLedger(tx, { ...purchase, ...d });
+      return purchase.id;
     });
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
-      return { error: "This invoice number already exists for this company." };
     return { error: e instanceof Error ? e.message : "Could not save purchase." };
   }
 
-  revalidatePath("/vouchers/purchases");
-  redirect("/vouchers/purchases");
-}
-
-/**
- * Closed-day correction (spec §2 ErrorFlag): flags the original purchase
- * (kept, never deleted), replaces its stock/ledger effect rows with the
- * correction's, and links the replacement. This path deliberately skips the
- * day-open guard — it IS the sanctioned way to fix a closed day.
- */
-export async function correctPurchase(
-  purchaseId: string,
-  _prev: PurchaseFormState,
-  formData: FormData
-): Promise<PurchaseFormState> {
-  await requireMerchant();
-  const parsed = parse(formData);
-  if ("error" in parsed) return { error: parsed.error };
-  const d = parsed.data;
-  const reason = String(formData.get("reason") ?? "").trim();
-
-  try {
-    await prisma.$transaction(async (tx) => {
-      const original = await tx.purchase.findUnique({
-        where: { id: purchaseId },
-      });
-      if (!original) throw new Error("Purchase not found.");
-
-      const already = await tx.errorFlag.findUnique({
-        where: { linkedType_linkedId: { linkedType: "PURCHASE", linkedId: purchaseId } },
-      });
-      if (already) throw new Error("This purchase has already been corrected.");
-
-      const flag = await tx.errorFlag.create({
-        data: {
-          linkedType: "PURCHASE",
-          linkedId: purchaseId,
-          reason: reason || null,
-        },
-      });
-
-      await tx.stockMovement.deleteMany({
-        where: { sourceType: "PURCHASE", sourceId: purchaseId },
-      });
-      await tx.ledgerEntry.deleteMany({
-        where: {
-          sourceId: purchaseId,
-          sourceType: { in: ["PURCHASE", "PAYMENT"] },
-        },
-      });
-
-      // Same invoice number as the original would collide with the flagged
-      // record's unique constraint — suffix the correction.
-      const invoiceNumber =
-        (d.invoiceNumber || original.invoiceNumber) === original.invoiceNumber
-          ? `${original.invoiceNumber}/C`
-          : d.invoiceNumber;
-
-      const replacement = await tx.purchase.create({
-        data: {
-          companyId: original.companyId,
-          partyId: d.partyId,
-          type: d.type,
-          invoiceNumber,
-          fishType: d.fishType,
-          qtyKg: d.qtyKg,
-          amount: d.amount,
-          date: d.date,
-        },
-      });
-      await postPurchaseEffects(tx, replacement);
-
-      for (const fishType of new Set([original.fishType, replacement.fishType])) {
-        const net = await getNetQty(tx, original.companyId, fishType, "AVAILABLE");
-        if (net.isNegative()) {
-          throw new Error(
-            `Cannot correct: available stock of ${fishType} would go negative — some of this purchase was already dispatched or sold.`
-          );
-        }
-      }
-
-      await tx.errorFlag.update({
-        where: { id: flag.id },
-        data: { correctingEntryId: replacement.id },
-      });
-    });
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
-      return { error: "This invoice number already exists for this company." };
-    return { error: e instanceof Error ? e.message : "Could not save correction." };
-  }
+  await saveAttachmentFile({
+    companyId: company.id,
+    linkedType: "PURCHASE",
+    linkedId: purchaseId,
+    file: d.file,
+  });
 
   revalidatePath("/vouchers/purchases");
   redirect("/vouchers/purchases");
 }
 
 /**
- * Direct edits are allowed only while the day is open (spec §2 DayClose).
- * The edit re-posts the purchase's stock and ledger effects atomically, and
- * refuses if the change would drive available stock negative (e.g. qty was
- * already dispatched).
+ * Open-day edit: re-post the purchase's ledger effect and lines atomically.
  */
 export async function updatePurchase(
   purchaseId: string,
@@ -280,58 +200,118 @@ export async function updatePurchase(
 
   try {
     await prisma.$transaction(async (tx) => {
-      const existing = await tx.purchase.findUnique({
-        where: { id: purchaseId },
-      });
+      const existing = await tx.purchase.findUnique({ where: { id: purchaseId } });
       if (!existing) throw new Error("Purchase not found.");
-
       await assertDayOpen(tx, existing.companyId, existing.date);
       await assertDayOpen(tx, existing.companyId, d.date);
 
-      await tx.stockMovement.deleteMany({
-        where: { sourceType: "PURCHASE", sourceId: purchaseId },
-      });
       await tx.ledgerEntry.deleteMany({
-        where: {
-          sourceId: purchaseId,
-          sourceType: { in: ["PURCHASE", "PAYMENT"] },
-        },
+        where: { sourceId: purchaseId, sourceType: { in: ["PURCHASE", "PAYMENT"] } },
       });
+      await tx.purchaseLine.deleteMany({ where: { purchaseId } });
 
+      const partyId = await findOrCreateParty(
+        tx,
+        d.partyName,
+        PURCHASE_SELLER_TYPE[d.type]
+      );
       const purchase = await tx.purchase.update({
         where: { id: purchaseId },
         data: {
-          partyId: d.partyId,
+          partyId,
           type: d.type,
-          // Blank invoice on a LOCAL edit keeps the existing auto number.
-          invoiceNumber: d.invoiceNumber || existing.invoiceNumber,
-          fishType: d.fishType,
-          qtyKg: d.qtyKg,
           amount: d.amount,
+          paid: d.paid,
           date: d.date,
+          lines: { create: d.lines },
         },
       });
-      await postPurchaseEffects(tx, purchase);
-
-      for (const fishType of new Set([existing.fishType, purchase.fishType])) {
-        const net = await getNetQty(
-          tx,
-          existing.companyId,
-          fishType,
-          "AVAILABLE"
-        );
-        if (net.isNegative()) {
-          throw new Error(
-            `Cannot save: available stock of ${fishType} would go negative — some of this purchase has already been dispatched or sold.`
-          );
-        }
-      }
+      await postPurchaseLedger(tx, { ...purchase, ...d });
     });
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
-      return { error: "This invoice number already exists for this company." };
     return { error: e instanceof Error ? e.message : "Could not save purchase." };
   }
+
+  await saveAttachmentFile({
+    companyId: (await prisma.purchase.findUnique({ where: { id: purchaseId }, select: { companyId: true } }))!.companyId,
+    linkedType: "PURCHASE",
+    linkedId: purchaseId,
+    file: d.file,
+  });
+
+  revalidatePath("/vouchers/purchases");
+  redirect("/vouchers/purchases");
+}
+
+/**
+ * Closed-day correction: flag the original (kept, struck-through), replace its
+ * ledger + line rows with the correction's, and link the replacement.
+ */
+export async function correctPurchase(
+  purchaseId: string,
+  _prev: PurchaseFormState,
+  formData: FormData
+): Promise<PurchaseFormState> {
+  await requireMerchant();
+  const parsed = parse(formData);
+  if ("error" in parsed) return { error: parsed.error };
+  const d = parsed.data;
+  const reason = String(formData.get("reason") ?? "").trim();
+
+  let replacementId: string;
+  let companyId: string;
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const original = await tx.purchase.findUnique({ where: { id: purchaseId } });
+      if (!original) throw new Error("Purchase not found.");
+
+      const already = await tx.errorFlag.findUnique({
+        where: { linkedType_linkedId: { linkedType: "PURCHASE", linkedId: purchaseId } },
+      });
+      if (already) throw new Error("This purchase has already been corrected.");
+
+      const flag = await tx.errorFlag.create({
+        data: { linkedType: "PURCHASE", linkedId: purchaseId, reason: reason || null },
+      });
+      await tx.ledgerEntry.deleteMany({
+        where: { sourceId: purchaseId, sourceType: { in: ["PURCHASE", "PAYMENT"] } },
+      });
+
+      const partyId = await findOrCreateParty(
+        tx,
+        d.partyName,
+        PURCHASE_SELLER_TYPE[d.type]
+      );
+      const replacement = await tx.purchase.create({
+        data: {
+          companyId: original.companyId,
+          partyId,
+          type: d.type,
+          amount: d.amount,
+          paid: d.paid,
+          date: d.date,
+          lines: { create: d.lines },
+        },
+      });
+      await postPurchaseLedger(tx, { ...replacement, ...d });
+      await tx.errorFlag.update({
+        where: { id: flag.id },
+        data: { correctingEntryId: replacement.id },
+      });
+      return { replacementId: replacement.id, companyId: original.companyId };
+    });
+    replacementId = result.replacementId;
+    companyId = result.companyId;
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not save correction." };
+  }
+
+  await saveAttachmentFile({
+    companyId,
+    linkedType: "PURCHASE",
+    linkedId: replacementId,
+    file: d.file,
+  });
 
   revalidatePath("/vouchers/purchases");
   redirect("/vouchers/purchases");

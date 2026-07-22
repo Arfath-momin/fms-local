@@ -2,24 +2,14 @@ import Link from "next/link";
 
 const ITEMS = [
   {
-    href: "/reports/pnl",
-    label: "Profit & Loss",
-    desc: "Day, month, year or custom range — accrual figures with the 90-day aged-outstanding rule.",
-  },
-  {
-    href: "/reports/balance-sheet",
-    label: "Balance Sheet",
-    desc: "Stock at cost, receivables, owner reserve and payables as of any date.",
-  },
-  {
-    href: "/reports/stock",
-    label: "Stock Reconciliation",
-    desc: "Available / In Transit / Sold / Loss per fish type — always sums to total purchased.",
+    href: "/reports/profit",
+    label: "Profit",
+    desc: "Sale − (Purchase + Expense) for any date range, with per-type breakdowns.",
   },
   {
     href: "/ledgers/parties",
     label: "Party Statements",
-    desc: "Full statement per party, exportable as CSV.",
+    desc: "Full statement per boat, seller, buyer or vendor — exportable as CSV.",
   },
 ];
 

@@ -15,6 +15,13 @@ const pg = new EmbeddedPostgres({
   password: "fms",
   port: PORT,
   persistent: true,
+  // On some Windows machines Postgres cannot fork worker children — the
+  // autovacuum worker dies with 0xC0000142 (STATUS_DLL_INIT_FAILED, usually a
+  // security product injecting a DLL into the spawned child), which crashes the
+  // whole cluster. Autovacuum is unnecessary for a tiny local dev DB, so turn it
+  // off to keep the cluster stable. (Not a production setting — prod uses a real
+  // Postgres and ignores this file entirely.)
+  postgresFlags: ["-c", "autovacuum=off"],
 });
 
 const freshInit = !existsSync(path.join(DATA_DIR, "PG_VERSION"));

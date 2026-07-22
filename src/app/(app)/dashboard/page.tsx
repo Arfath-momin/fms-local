@@ -3,10 +3,9 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
-import { getStockSummary } from "@/lib/stock";
-import { computeDayBook, getAvgCostMap, getBalancesAsOf } from "@/lib/report";
+import { computeDayBook, getBalancesAsOf } from "@/lib/report";
 import { CHANNEL_LABELS, PENDING_WARN_DAYS } from "@/lib/delivery";
-import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
+import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { StatusBadge, daysSince } from "../vouchers/deliveries/status-badge";
 
 const ZERO = new Prisma.Decimal(0);
@@ -45,10 +44,8 @@ export default async function DashboardPage() {
   const company = await getActiveCompany();
   const today = new Date(toInputDate(new Date()));
 
-  const [day, stock, avgCost, balances, pendingNotes] = await Promise.all([
+  const [day, balances, pendingNotes] = await Promise.all([
     computeDayBook(company.id, today),
-    getStockSummary(company.id),
-    getAvgCostMap(company.id, today),
     getBalancesAsOf(company.id, today),
     prisma.deliveryNote.findMany({
       where: { companyId: company.id, status: { not: "SETTLED" } },
@@ -56,14 +53,6 @@ export default async function DashboardPage() {
       orderBy: [{ date: "asc" }, { createdAt: "asc" }],
     }),
   ]);
-
-  let stockKg = ZERO;
-  let stockValue = ZERO;
-  for (const r of stock) {
-    if (!r.available.greaterThan(0)) continue;
-    stockKg = stockKg.add(r.available);
-    stockValue = stockValue.add(r.available.mul(avgCost.get(r.fishType) ?? ZERO));
-  }
 
   let outstanding = ZERO;
   let owingParties = 0;
@@ -77,9 +66,9 @@ export default async function DashboardPage() {
   const overdue = pendingNotes.filter(
     (n) => daysSince(n.date) >= PENDING_WARN_DAYS
   );
-  const pfCls = day.cashPf.greaterThan(0)
+  const pfCls = day.profit.greaterThan(0)
     ? "text-credit"
-    : day.cashPf.lessThan(0)
+    : day.profit.lessThan(0)
       ? "text-debit"
       : "";
 
@@ -87,11 +76,11 @@ export default async function DashboardPage() {
     <div className="max-w-4xl">
       <h1 className="heading text-xl font-semibold mb-1">Dashboard</h1>
       <p className="text-muted text-[13px] mb-5">
-        {company.name} · today, {fmtDate(today)}. Every figure clicks through
-        to its underlying entries.
+        {company.name} · today, {fmtDate(today)}. Every figure clicks through to
+        its underlying entries.
       </p>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Tile
           href="/vouchers/purchases"
           label="Purchase today"
@@ -99,22 +88,22 @@ export default async function DashboardPage() {
           valueCls="text-debit"
         />
         <Tile
-          href="/vouchers/deliveries"
-          label="Sale today (received)"
-          value={fmtMoney(day.cashSale)}
-          valueCls="text-credit"
-        />
-        <Tile
           href="/ledgers/expenses"
-          label="Expenses today (incl. rent)"
-          value={fmtMoney(day.expenses.add(day.rent))}
+          label="Expenses today"
+          value={fmtMoney(day.expense)}
           valueCls="text-debit"
         />
         <Tile
+          href="/vouchers/deliveries"
+          label="Sale today"
+          value={fmtMoney(day.sale)}
+          valueCls="text-credit"
+        />
+        <Tile
           href="/ledgers/day-book"
-          label="P/F today (cash)"
-          value={fmtMoney(day.cashPf)}
-          sub={`true profit ${fmtMoney(day.truePf)} — see Day Book`}
+          label="Profit today"
+          value={fmtMoney(day.profit)}
+          sub="Sale − (Purchase + Expense)"
           valueCls={pfCls}
         />
         <Tile
@@ -127,12 +116,6 @@ export default async function DashboardPage() {
               : `${owingParties} ${owingParties === 1 ? "party owes" : "parties owe"} us`
           }
           valueCls={outstanding.greaterThan(0) ? "text-debit" : ""}
-        />
-        <Tile
-          href="/reports/stock"
-          label="Stock available"
-          value={fmtKg(stockKg)}
-          sub={`${fmtMoney(stockValue)} at cost`}
         />
       </div>
 
@@ -150,10 +133,9 @@ export default async function DashboardPage() {
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Vehicle</th>
+                  <th>Type</th>
                   <th>Buyer</th>
-                  <th>Channel</th>
-                  <th>Fish</th>
-                  <th className="num-col">Expected</th>
                   <th>Status</th>
                   <th></th>
                 </tr>
@@ -172,12 +154,9 @@ export default async function DashboardPage() {
                           </span>
                         )}
                       </td>
-                      <td className="font-medium">{n.party.name}</td>
+                      <td className="num">{n.vehicleNo}</td>
                       <td>{CHANNEL_LABELS[n.channel]}</td>
-                      <td>{n.fishType}</td>
-                      <td className="num-col num">
-                        {fmtMoney(n.expectedValue)}
-                      </td>
+                      <td className="font-medium">{n.party.name}</td>
                       <td>
                         <StatusBadge status={n.status} />
                       </td>
@@ -197,8 +176,8 @@ export default async function DashboardPage() {
             {overdue.length > 0 && (
               <p className="px-4 py-2 text-[12px] text-debit border-t border-line font-semibold">
                 {overdue.length}{" "}
-                {overdue.length === 1 ? "delivery has" : "deliveries have"}{" "}
-                been unsettled for {PENDING_WARN_DAYS}+ days.
+                {overdue.length === 1 ? "delivery has" : "deliveries have"} been
+                unsettled for {PENDING_WARN_DAYS}+ days.
               </p>
             )}
           </div>

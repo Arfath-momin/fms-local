@@ -1,4 +1,4 @@
-// Dev sanity check: prints ledger entries and stock movement count.
+// Dev sanity check: prints ledger entries.
 import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -27,7 +27,6 @@ async function main() {
       ].join(" | ")
     );
   }
-  console.log("stock movement rows:", await prisma.stockMovement.count());
 }
 
 main().finally(() => prisma.$disconnect());
