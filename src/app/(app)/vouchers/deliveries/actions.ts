@@ -3,61 +3,126 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
-import type { DeliveryChannel } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireMerchant } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
-import { assertDayOpen } from "@/lib/dayclose";
-import { postLedgerEntry } from "@/lib/ledger";
-import { CHANNEL_BUYER_TYPE } from "@/lib/party";
-import { findOrCreateParty } from "@/lib/party-db";
-import { CHANNEL_LABELS } from "@/lib/delivery";
+import { requireActiveScope } from "@/lib/centre";
 import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
 
 export type DeliveryFormState = { error: string } | null;
-export type SettlementFormState = { error: string } | null;
 
-const CHANNELS: DeliveryChannel[] = ["MARKET", "FACTORY", "FISH_MILL", "LOCAL"];
+const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
+const DECIMAL3 = /^\d+(\.\d{1,3})?$/;
+const INT = /^\d+$/;
 
-// ---------- Delivery Note ----------
+type ParsedLine = {
+  particulars: string;
+  kg: Prisma.Decimal;
+  box: number;
+  bigBox: number;
+  loose: number;
+  pcs: number;
+};
 
-type ParsedDelivery = {
-  channel: DeliveryChannel;
-  buyerName: string; // empty → falls back to the channel label
-  vehicleNo: string;
+type Parsed = {
+  billNo: string;
   date: Date;
+  recipient: string;
+  vehicleNo: string;
+  advancePaid: Prisma.Decimal | null;
+  driverName: string | null;
+  mobileNo: string | null;
+  lines: ParsedLine[];
   file: unknown;
 };
 
-function parseDelivery(
-  formData: FormData
-): { error: string } | { data: ParsedDelivery } {
-  const channel = String(formData.get("channel") ?? "") as DeliveryChannel;
-  const buyerName = String(formData.get("buyerName") ?? "")
-    .trim()
-    .replace(/\s+/g, " ");
-  const vehicleNo = String(formData.get("vehicleNo") ?? "")
-    .trim()
-    .replace(/\s+/g, " ");
+const clean = (v: FormDataEntryValue | null) =>
+  String(v ?? "").trim().replace(/\s+/g, " ");
+
+function parse(formData: FormData): { error: string } | { data: Parsed } {
+  const billNo = clean(formData.get("billNo"));
   const dateRaw = String(formData.get("date") ?? "");
+  const recipient = clean(formData.get("recipient"));
+  const vehicleNo = clean(formData.get("vehicleNo"));
+  const advanceRaw = clean(formData.get("advancePaid"));
+  const driverName = clean(formData.get("driverName"));
+  const mobileNo = clean(formData.get("mobileNo"));
   const file = formData.get("bill");
 
-  if (!CHANNELS.includes(channel)) return { error: "Choose a type." };
-  if (!vehicleNo) return { error: "Enter the vehicle number." };
+  if (!billNo) return { error: "Enter the bill number." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
+  if (!recipient) return { error: "Enter the recipient (To)." };
+  if (!vehicleNo) return { error: "Enter the vehicle number." };
+
+  let advancePaid: Prisma.Decimal | null = null;
+  if (advanceRaw) {
+    if (!DECIMAL2.test(advanceRaw))
+      return { error: "Advance paid must be a number (up to 2 decimals)." };
+    advancePaid = new Prisma.Decimal(advanceRaw);
+  }
 
   const badFile = validateImageFile(file);
   if (badFile) return { error: badFile };
 
-  return { data: { channel, buyerName, vehicleNo, date: new Date(dateRaw), file } };
-}
+  const particulars = formData.getAll("particulars").map(String);
+  const kgs = formData.getAll("kg").map(String);
+  const boxes = formData.getAll("box").map(String);
+  const bigBoxes = formData.getAll("bigBox").map(String);
+  const looses = formData.getAll("loose").map(String);
+  const pcses = formData.getAll("pcs").map(String);
 
-async function resolveBuyer(
-  tx: Prisma.TransactionClient,
-  d: ParsedDelivery
-): Promise<string> {
-  const name = d.buyerName || CHANNEL_LABELS[d.channel];
-  return findOrCreateParty(tx, name, CHANNEL_BUYER_TYPE[d.channel]);
+  const intField = (raw: string, label: string): number | { error: string } => {
+    const t = raw.trim();
+    if (!t) return 0;
+    if (!INT.test(t)) return { error: `${label} must be a whole number.` };
+    return Number(t);
+  };
+
+  const lines: ParsedLine[] = [];
+  for (let i = 0; i < particulars.length; i++) {
+    const p = particulars[i].trim().replace(/\s+/g, " ");
+    const kgRaw = (kgs[i] ?? "").trim();
+    const boxRaw = (boxes[i] ?? "").trim();
+    const bigRaw = (bigBoxes[i] ?? "").trim();
+    const looseRaw = (looses[i] ?? "").trim();
+    const pcsRaw = (pcses[i] ?? "").trim();
+
+    // Skip fully-blank rows.
+    if (!p && !kgRaw && !boxRaw && !bigRaw && !looseRaw && !pcsRaw) continue;
+    if (!p) return { error: "Every line needs a particular." };
+
+    let kg = new Prisma.Decimal(0);
+    if (kgRaw) {
+      if (!DECIMAL3.test(kgRaw))
+        return { error: `Kg for “${p}” must be a number.` };
+      kg = new Prisma.Decimal(kgRaw);
+    }
+    const box = intField(boxRaw, `Box for “${p}”`);
+    if (typeof box === "object") return box;
+    const bigBox = intField(bigRaw, `Big Box for “${p}”`);
+    if (typeof bigBox === "object") return bigBox;
+    const loose = intField(looseRaw, `Loose for “${p}”`);
+    if (typeof loose === "object") return loose;
+    const pcs = intField(pcsRaw, `Pcs for “${p}”`);
+    if (typeof pcs === "object") return pcs;
+
+    lines.push({ particulars: p, kg, box, bigBox, loose, pcs });
+  }
+
+  if (lines.length === 0) return { error: "Add at least one line item." };
+
+  return {
+    data: {
+      billNo,
+      date: new Date(dateRaw),
+      recipient,
+      vehicleNo,
+      advancePaid,
+      driverName: driverName || null,
+      mobileNo: mobileNo || null,
+      lines,
+      file,
+    },
+  };
 }
 
 export async function createDelivery(
@@ -65,33 +130,44 @@ export async function createDelivery(
   formData: FormData
 ): Promise<DeliveryFormState> {
   await requireMerchant();
-  const parsed = parseDelivery(formData);
+  const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
-  const company = await getActiveCompany();
+  const { company, centre } = await requireActiveScope();
 
   let noteId: string;
   try {
-    noteId = await prisma.$transaction(async (tx) => {
-      await assertDayOpen(tx, company.id, d.date);
-      const partyId = await resolveBuyer(tx, d);
-      const note = await tx.deliveryNote.create({
-        data: {
-          companyId: company.id,
-          partyId,
-          channel: d.channel,
-          vehicleNo: d.vehicleNo,
-          date: d.date,
+    const note = await prisma.deliveryNote.create({
+      data: {
+        companyId: company.id,
+        centreId: centre.id,
+        billNo: d.billNo,
+        date: d.date,
+        recipient: d.recipient,
+        vehicleNo: d.vehicleNo,
+        advancePaid: d.advancePaid,
+        driverName: d.driverName,
+        mobileNo: d.mobileNo,
+        lines: {
+          create: d.lines.map((l) => ({
+            particulars: l.particulars,
+            kg: l.kg,
+            box: l.box,
+            bigBox: l.bigBox,
+            loose: l.loose,
+            pcs: l.pcs,
+          })),
         },
-      });
-      return note.id;
+      },
     });
+    noteId = note.id;
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not save delivery." };
+    return { error: e instanceof Error ? e.message : "Could not save delivery note." };
   }
 
   await saveAttachmentFile({
     companyId: company.id,
+    centreId: centre.id,
     linkedType: "DELIVERY_NOTE",
     linkedId: noteId,
     file: d.file,
@@ -101,138 +177,60 @@ export async function createDelivery(
   redirect(`/vouchers/deliveries/${noteId}`);
 }
 
-/** Edit is only allowed while PENDING (no settlements) on an open day. */
 export async function updateDelivery(
   deliveryNoteId: string,
   _prev: DeliveryFormState,
   formData: FormData
 ): Promise<DeliveryFormState> {
   await requireMerchant();
-  const parsed = parseDelivery(formData);
+  const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
-  let companyId: string;
+  let scope: { companyId: string; centreId: string };
   try {
-    companyId = await prisma.$transaction(async (tx) => {
+    scope = await prisma.$transaction(async (tx) => {
       const existing = await tx.deliveryNote.findUnique({
         where: { id: deliveryNoteId },
-        include: { _count: { select: { settlements: true } } },
+        select: { companyId: true, centreId: true },
       });
       if (!existing) throw new Error("Delivery note not found.");
-      if (existing._count.settlements > 0)
-        throw new Error("This delivery is already settled and cannot be edited.");
-      await assertDayOpen(tx, existing.companyId, existing.date);
-      await assertDayOpen(tx, existing.companyId, d.date);
 
-      const partyId = await resolveBuyer(tx, d);
+      await tx.deliveryNoteLine.deleteMany({ where: { deliveryNoteId } });
       await tx.deliveryNote.update({
         where: { id: deliveryNoteId },
         data: {
-          partyId,
-          channel: d.channel,
-          vehicleNo: d.vehicleNo,
+          billNo: d.billNo,
           date: d.date,
+          recipient: d.recipient,
+          vehicleNo: d.vehicleNo,
+          advancePaid: d.advancePaid,
+          driverName: d.driverName,
+          mobileNo: d.mobileNo,
+          lines: {
+            create: d.lines.map((l) => ({
+              particulars: l.particulars,
+              kg: l.kg,
+              box: l.box,
+              bigBox: l.bigBox,
+              loose: l.loose,
+              pcs: l.pcs,
+            })),
+          },
         },
       });
-      return existing.companyId;
+      return existing;
     });
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not save delivery." };
+    return { error: e instanceof Error ? e.message : "Could not save delivery note." };
   }
 
   await saveAttachmentFile({
-    companyId,
+    companyId: scope.companyId,
+    centreId: scope.centreId,
     linkedType: "DELIVERY_NOTE",
     linkedId: deliveryNoteId,
     file: d.file,
-  });
-
-  revalidatePath("/vouchers/deliveries");
-  redirect(`/vouchers/deliveries/${deliveryNoteId}`);
-}
-
-// ---------- Settlement ----------
-
-/**
- * Settlement bill: records the Total Amount billed and recognises the full
- * sale in the buyer's ledger — DEBIT SALE for the total, matched by a CREDIT
- * PAYMENT for whatever's actually been received. Any shortfall stands as an
- * outstanding balance in the buyer ledger. Marks the delivery SETTLED.
- */
-export async function createSettlement(
-  deliveryNoteId: string,
-  _prev: SettlementFormState,
-  formData: FormData
-): Promise<SettlementFormState> {
-  await requireMerchant();
-  const amountRaw = String(formData.get("amount") ?? "").trim();
-  const amountReceivedRaw = String(formData.get("amountReceived") ?? "").trim();
-  const dateRaw = String(formData.get("date") ?? "");
-  const file = formData.get("bill");
-
-  if (!/^\d+(\.\d{1,2})?$/.test(amountRaw) || Number(amountRaw) <= 0)
-    return { error: "Total amount must be a positive number (up to 2 decimals)." };
-  if (!/^\d+(\.\d{1,2})?$/.test(amountReceivedRaw) || Number(amountReceivedRaw) < 0)
-    return { error: "Amount received must be a number (up to 2 decimals)." };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
-  const badFile = validateImageFile(file);
-  if (badFile) return { error: badFile };
-
-  const amount = new Prisma.Decimal(amountRaw);
-  const amountReceived = new Prisma.Decimal(amountReceivedRaw);
-  if (amountReceived.gt(amount))
-    return { error: "Amount received cannot exceed the total amount." };
-  const date = new Date(dateRaw);
-
-  let settlementId: string;
-  let companyId: string;
-  try {
-    const result = await prisma.$transaction(async (tx) => {
-      const note = await tx.deliveryNote.findUnique({ where: { id: deliveryNoteId } });
-      if (!note) throw new Error("Delivery note not found.");
-      await assertDayOpen(tx, note.companyId, date);
-
-      const settlement = await tx.settlement.create({
-        data: { deliveryNoteId, amount, amountReceived, date },
-      });
-      await postLedgerEntry(tx, {
-        companyId: note.companyId,
-        partyId: note.partyId,
-        type: "DEBIT",
-        sourceType: "SALE",
-        sourceId: settlement.id,
-        amount,
-        date,
-      });
-      if (amountReceived.gt(0)) {
-        await postLedgerEntry(tx, {
-          companyId: note.companyId,
-          partyId: note.partyId,
-          type: "CREDIT",
-          sourceType: "PAYMENT",
-          sourceId: settlement.id,
-          amount: amountReceived,
-          date,
-        });
-      }
-      await tx.deliveryNote.update({
-        where: { id: deliveryNoteId },
-        data: { status: "SETTLED" },
-      });
-      return { settlementId: settlement.id, companyId: note.companyId };
-    });
-    settlementId = result.settlementId;
-    companyId = result.companyId;
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not save settlement." };
-  }
-
-  await saveAttachmentFile({
-    companyId,
-    linkedType: "SETTLEMENT",
-    linkedId: settlementId,
-    file,
   });
 
   revalidatePath("/vouchers/deliveries");

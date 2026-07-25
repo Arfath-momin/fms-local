@@ -49,6 +49,7 @@ export function validateImageFile(file: unknown): string | null {
  */
 export async function saveAttachmentFile(args: {
   companyId: string;
+  centreId: string;
   linkedType: AttachmentLinkedType;
   linkedId: string;
   file: unknown;
@@ -77,6 +78,7 @@ export async function saveAttachmentFile(args: {
     data: {
       id,
       companyId: args.companyId,
+      centreId: args.centreId,
       linkedType: args.linkedType,
       linkedId: args.linkedId,
       imageUrl: secure_url,

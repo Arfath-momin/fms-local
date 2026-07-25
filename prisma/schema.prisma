@@ -42,14 +42,40 @@ model Company {
   name      String   @unique // "BFM" / "B2B"
   createdAt DateTime @default(now()) @map("created_at")
 
+  centres       Centre[]
   purchases     Purchase[]
   deliveryNotes DeliveryNote[]
+  sales         Sale[]
   expenses      Expense[]
   ledgerEntries LedgerEntry[]
   attachments   Attachment[]
   dayCloses     DayClose[]
 
   @@map("companies")
+}
+
+// A centre is a fully isolated ledger/transaction scope inside a company
+// (added via Masters). Every transaction and ledger entry is stamped with both
+// company_id and centre_id; balances are derived per (company, centre, party).
+// P/L is deliberately NOT computed per centre — the merchant splits purchase
+// and sale across centres, so P/L aggregates at the company (and union) level.
+model Centre {
+  id        String   @id @default(uuid())
+  companyId String   @map("company_id")
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company       Company        @relation(fields: [companyId], references: [id])
+  purchases     Purchase[]
+  deliveryNotes DeliveryNote[]
+  sales         Sale[]
+  expenses      Expense[]
+  ledgerEntries LedgerEntry[]
+  attachments   Attachment[]
+  dayCloses     DayClose[]
+
+  @@unique([companyId, name])
+  @@map("centres")
 }
 
 // Every ledger is keyed to a Party. Boat/seller names are typed on the
@@ -65,6 +91,9 @@ enum PartyType {
   FISH_MILL
   LOCAL_BUYER
   EXPENSE_VENDOR // ice plant, landlord, loaders group, etc.
+  CARE_OF // commission agent who pays immediately; a Fish Mill/Factory sale
+  // "via CareOf" keeps the real buyer on the sale record but posts the ledger
+  // to this CareOf party instead.
 }
 
 model Party {
@@ -75,9 +104,10 @@ model Party {
   createdAt   DateTime  @default(now()) @map("created_at")
 
   purchases     Purchase[]
-  deliveryNotes DeliveryNote[]
   expenses      Expense[]
   ledgerEntries LedgerEntry[]
+  salesAsBuyer  Sale[]        @relation("SaleBuyer")
+  salesAsCareOf Sale[]        @relation("SaleCareOf")
 
   @@unique([name, type])
   @@map("parties")
@@ -98,6 +128,7 @@ enum PurchaseType {
 model Purchase {
   id        String       @id @default(uuid())
   companyId String       @map("company_id")
+  centreId  String       @map("centre_id")
   partyId   String       @map("party_id")
   type      PurchaseType
   amount    Decimal      @db.Decimal(14, 2)
@@ -106,10 +137,11 @@ model Purchase {
   createdAt DateTime     @default(now()) @map("created_at")
 
   company Company        @relation(fields: [companyId], references: [id])
+  centre  Centre         @relation(fields: [centreId], references: [id])
   party   Party          @relation(fields: [partyId], references: [id])
   lines   PurchaseLine[]
 
-  @@index([companyId, date])
+  @@index([companyId, centreId, date])
   @@map("purchases")
 }
 
@@ -146,6 +178,7 @@ enum ExpenseCategory {
 model Expense {
   id        String          @id @default(uuid())
   companyId String          @map("company_id")
+  centreId  String          @map("centre_id")
   partyId   String          @map("party_id") // expense vendor / category ledger
   category  ExpenseCategory
   amount    Decimal         @db.Decimal(14, 2)
@@ -156,62 +189,129 @@ model Expense {
   createdAt DateTime        @default(now()) @map("created_at")
 
   company Company @relation(fields: [companyId], references: [id])
+  centre  Centre  @relation(fields: [centreId], references: [id])
   party   Party   @relation(fields: [partyId], references: [id])
 
-  @@index([companyId, category, date])
+  @@index([companyId, centreId, category, date])
   @@map("expenses")
 }
 
-// ---------- Sales (Delivery + Settlement) ----------
+// ---------- Delivery Notes (record only) ----------
 
-enum DeliveryChannel {
-  MARKET
-  FACTORY
-  FISH_MILL
-  LOCAL
-}
-
-enum DeliveryStatus {
-  PENDING
-  SETTLED
-}
-
-// Goods leave on a vehicle to a buyer/channel; the delivery-note image is the
-// record. No quantity/rate — the settlement bill carries the money.
+// A delivery note is a pure dispatch record — no ledger, no settlement, no
+// money movement. Header fields + line items + an optional bill image. Column
+// totals (box / big box / loose / pcs) are summed on the fly for display; the
+// note itself carries no accounting.
 model DeliveryNote {
-  id        String          @id @default(uuid())
-  companyId String          @map("company_id")
-  partyId   String          @map("party_id") // buyer
-  channel   DeliveryChannel
-  vehicleNo String          @map("vehicle_no")
-  date      DateTime        @db.Date
-  status    DeliveryStatus  @default(PENDING)
-  createdAt DateTime        @default(now()) @map("created_at")
+  id          String   @id @default(uuid())
+  companyId   String   @map("company_id")
+  centreId    String   @map("centre_id")
+  billNo      String   @map("bill_no")
+  date        DateTime @db.Date
+  recipient   String // the "To" field
+  vehicleNo   String   @map("vehicle_no")
+  advancePaid Decimal? @map("advance_paid") @db.Decimal(14, 2)
+  driverName  String?  @map("driver_name")
+  mobileNo    String?  @map("mobile_no")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  company     Company      @relation(fields: [companyId], references: [id])
-  party       Party        @relation(fields: [partyId], references: [id])
-  settlements Settlement[]
+  company Company            @relation(fields: [companyId], references: [id])
+  centre  Centre             @relation(fields: [centreId], references: [id])
+  lines   DeliveryNoteLine[]
 
-  @@index([companyId, status])
-  @@index([companyId, date])
+  @@index([companyId, centreId, date])
   @@map("delivery_notes")
 }
 
-// The settlement bill: total billed and what's actually been received.
-// Posting it recognises the sale (full amount) in the buyer ledger; any
-// shortfall between amount and amountReceived stays outstanding there.
-model Settlement {
-  id             String   @id @default(uuid())
-  deliveryNoteId String   @map("delivery_note_id")
-  amount         Decimal  @db.Decimal(14, 2) // Total Amount (the bill total)
-  amountReceived Decimal  @map("amount_received") @db.Decimal(14, 2) // Amount Received so far
-  date           DateTime @db.Date
-  createdAt      DateTime @default(now()) @map("created_at")
+model DeliveryNoteLine {
+  id             String  @id @default(uuid())
+  deliveryNoteId String  @map("delivery_note_id")
+  particulars    String
+  kg             Decimal @default(0) @db.Decimal(12, 3)
+  box            Int     @default(0)
+  bigBox         Int     @default(0) @map("big_box")
+  loose          Int     @default(0)
+  pcs            Int     @default(0)
 
-  deliveryNote DeliveryNote @relation(fields: [deliveryNoteId], references: [id])
+  deliveryNote DeliveryNote @relation(fields: [deliveryNoteId], references: [id], onDelete: Cascade)
 
   @@index([deliveryNoteId])
-  @@map("settlements")
+  @@map("delivery_note_lines")
+}
+
+// ---------- Sales ----------
+
+enum SaleType {
+  MARKET
+  FISH_MILL
+  FACTORY
+  LOCAL
+}
+
+// A sale posts to the buyer party's ledger — or, when routed "via CareOf"
+// (Fish Mill / Factory), to the CareOf party instead, while the real buyer
+// stays on the record. `amount` is the figure recognised as sale revenue and
+// posted to the ledger (Market → Net Bill; Fish Mill → table total rate;
+// Factory → bill amount total; Local → table total). `amountReceived` is what
+// has been collected; the shortfall stays outstanding in that ledger.
+// Type-specific header fields all live here; only the relevant ones are set.
+model Sale {
+  id            String   @id @default(uuid())
+  companyId     String   @map("company_id")
+  centreId      String   @map("centre_id")
+  type          SaleType
+  partyId       String   @map("party_id") // the buyer
+  careOfPartyId String?  @map("care_of_party_id") // ledger posts here when set
+  billNo        String   @map("bill_no")
+  date          DateTime @db.Date
+
+  amount         Decimal @db.Decimal(14, 2)
+  amountReceived Decimal @default(0) @map("amount_received") @db.Decimal(14, 2)
+
+  // Market-only (recorded/displayed, not posted):
+  totalBill  Decimal? @map("total_bill") @db.Decimal(14, 2) // gross incl. seller profit + expenses
+  commission Decimal? @db.Decimal(14, 2) // 2% of totalBill, reference only
+  place      String? // Market "Place"
+
+  // Fish Mill-only:
+  weight         Decimal? @db.Decimal(12, 3)
+  netWeight      Decimal? @map("net_weight") @db.Decimal(12, 3)
+  vehicleNo      String?  @map("vehicle_no")
+  placeOfLoading String?  @map("place_of_loading")
+
+  // Factory-only:
+  returnNote String? @map("return_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company     Company    @relation(fields: [companyId], references: [id])
+  centre      Centre     @relation(fields: [centreId], references: [id])
+  party       Party      @relation("SaleBuyer", fields: [partyId], references: [id])
+  careOfParty Party?     @relation("SaleCareOf", fields: [careOfPartyId], references: [id])
+  lines       SaleLine[]
+
+  @@index([companyId, centreId, date])
+  @@index([companyId, centreId, type])
+  @@map("sales")
+}
+
+// Line items for Fish Mill and Local sales.
+// Fish Mill: box · variety(particular) · kgs(qtyKg) · rate/kg · count · total.
+// Local:     particular · qty(qtyKg) · rate/kg · total.
+model SaleLine {
+  id         String  @id @default(uuid())
+  saleId     String  @map("sale_id")
+  particular String
+  box        Int? // Fish Mill only
+  qtyKg      Decimal @map("qty_kg") @db.Decimal(12, 3)
+  ratePerKg  Decimal @map("rate_per_kg") @db.Decimal(12, 2)
+  count      Int? // Fish Mill only
+  total      Decimal @db.Decimal(14, 2)
+
+  sale Sale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([saleId])
+  @@map("sale_lines")
 }
 
 // ---------- Ledger ----------
@@ -234,6 +334,7 @@ enum LedgerSourceType {
 model LedgerEntry {
   id             String           @id @default(uuid())
   companyId      String           @map("company_id")
+  centreId       String           @map("centre_id")
   partyId        String           @map("party_id")
   type           LedgerEntryType
   sourceType     LedgerSourceType @map("source_type")
@@ -244,9 +345,10 @@ model LedgerEntry {
   createdAt      DateTime         @default(now()) @map("created_at")
 
   company Company @relation(fields: [companyId], references: [id])
+  centre  Centre  @relation(fields: [centreId], references: [id])
   party   Party   @relation(fields: [partyId], references: [id])
 
-  @@index([companyId, partyId, date])
+  @@index([companyId, centreId, partyId, date])
   @@index([sourceType, sourceId])
   @@map("ledger_entries")
 }
@@ -256,19 +358,21 @@ model LedgerEntry {
 enum AttachmentLinkedType {
   PURCHASE
   DELIVERY_NOTE
-  SETTLEMENT
+  SALE
   EXPENSE
 }
 
 model Attachment {
   id         String               @id @default(uuid())
   companyId  String               @map("company_id")
+  centreId   String               @map("centre_id")
   linkedType AttachmentLinkedType @map("linked_type")
   linkedId   String               @map("linked_id")
   imageUrl   String               @map("image_url")
   uploadedAt DateTime             @default(now()) @map("uploaded_at")
 
   company Company @relation(fields: [companyId], references: [id])
+  centre  Centre  @relation(fields: [centreId], references: [id])
 
   @@index([linkedType, linkedId])
   @@map("attachments")
@@ -281,19 +385,21 @@ model Attachment {
 model DayClose {
   id        String   @id @default(uuid())
   companyId String   @map("company_id")
+  centreId  String   @map("centre_id")
   date      DateTime @db.Date
   closedAt  DateTime @default(now()) @map("closed_at")
 
   company Company @relation(fields: [companyId], references: [id])
+  centre  Centre  @relation(fields: [centreId], references: [id])
 
-  @@unique([companyId, date])
+  @@unique([companyId, centreId, date])
   @@map("day_closes")
 }
 
 enum ErrorFlagLinkedType {
   PURCHASE
   DELIVERY_NOTE
-  SETTLEMENT
+  SALE
   EXPENSE
 }
 

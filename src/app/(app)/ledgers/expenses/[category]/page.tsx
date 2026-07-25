@@ -4,10 +4,11 @@ import { Prisma } from "@/generated/prisma/client";
 import type { ExpenseCategory } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { getActiveScope } from "@/lib/centre";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { getFlagsFor } from "@/lib/errorflag";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { NoCentreNotice } from "../../../no-centre";
 
 export default async function ExpenseCategoryPage({
   params,
@@ -16,13 +17,14 @@ export default async function ExpenseCategoryPage({
 }) {
   const session = await requireSession();
   const isMerchant = session.role === "MERCHANT";
-  const company = await getActiveCompany();
+  const { company, centre } = await getActiveScope();
+  if (!centre) return <NoCentreNotice companyName={company.name} />;
 
   const category = (await params).category.toUpperCase() as ExpenseCategory;
   if (!EXPENSE_CATEGORIES.includes(category)) notFound();
 
   const expenses = await prisma.expense.findMany({
-    where: { companyId: company.id, category },
+    where: { companyId: company.id, centreId: centre.id, category },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   });
   const flags = await getFlagsFor(

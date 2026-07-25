@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { getActiveScope } from "@/lib/centre";
 
 const SOURCE_LABELS: Record<string, string> = {
   PURCHASE: "Purchase",
@@ -24,14 +24,16 @@ export async function GET(
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
   const { id } = await params;
-  const [party, company] = await Promise.all([
+  const [party, scope] = await Promise.all([
     prisma.party.findUnique({ where: { id } }),
-    getActiveCompany(),
+    getActiveScope(),
   ]);
   if (!party) return new NextResponse("Not found", { status: 404 });
+  const { company, centre } = scope;
+  if (!centre) return new NextResponse("No centre selected", { status: 400 });
 
   const entries = await prisma.ledgerEntry.findMany({
-    where: { companyId: company.id, partyId: id },
+    where: { companyId: company.id, centreId: centre.id, partyId: id },
     orderBy: [{ date: "asc" }, { createdAt: "asc" }],
   });
 
@@ -48,7 +50,7 @@ export async function GET(
     ),
   ];
 
-  const filename = `${company.name}-${party.name.replace(/[^\w-]+/g, "_")}-statement.csv`;
+  const filename = `${company.name}-${centre.name.replace(/[^\w-]+/g, "_")}-${party.name.replace(/[^\w-]+/g, "_")}-statement.csv`;
   return new NextResponse(lines.join("\r\n"), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",

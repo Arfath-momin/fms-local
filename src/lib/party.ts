@@ -1,8 +1,4 @@
-import type {
-  DeliveryChannel,
-  PartyType,
-  PurchaseType,
-} from "@/generated/prisma/enums";
+import type { PartyType, PurchaseType } from "@/generated/prisma/enums";
 
 export const PARTY_TYPE_LABELS: Record<PartyType, string> = {
   BOAT: "Boat",
@@ -12,6 +8,7 @@ export const PARTY_TYPE_LABELS: Record<PartyType, string> = {
   FISH_MILL: "Fish Mill",
   LOCAL_BUYER: "Local Buyer",
   EXPENSE_VENDOR: "Expense Vendor",
+  CARE_OF: "CareOf",
 };
 
 export const PARTY_TYPE_PLURALS: Record<PartyType, string> = {
@@ -22,6 +19,7 @@ export const PARTY_TYPE_PLURALS: Record<PartyType, string> = {
   FISH_MILL: "Fish Mills",
   LOCAL_BUYER: "Local Buyers",
   EXPENSE_VENDOR: "Expense Vendors",
+  CARE_OF: "CareOf Agents",
 };
 
 export const PARTY_TYPES = Object.keys(PARTY_TYPE_LABELS) as PartyType[];
@@ -39,10 +37,3 @@ export const PURCHASE_SELLER_TYPE: Record<PurchaseType, PartyType> = {
   LOCAL: "LOCAL_SELLER",
 };
 
-/** Which party type BUYS through each delivery channel. */
-export const CHANNEL_BUYER_TYPE: Record<DeliveryChannel, PartyType> = {
-  MARKET: "MARKET_BUYER",
-  FACTORY: "FACTORY",
-  FISH_MILL: "FISH_MILL",
-  LOCAL: "LOCAL_BUYER",
-};

@@ -11,10 +11,11 @@ import { toInputDate } from "@/lib/format";
 export async function assertDayOpen(
   tx: Prisma.TransactionClient,
   companyId: string,
+  centreId: string,
   date: Date
 ) {
   const closed = await tx.dayClose.findUnique({
-    where: { companyId_date: { companyId, date } },
+    where: { companyId_centreId_date: { companyId, centreId, date } },
   });
   if (closed) {
     throw new Error(
@@ -23,19 +24,29 @@ export async function assertDayOpen(
   }
 }
 
-/** All closed dates for a company, as "YYYY-MM-DD" strings for list markers. */
-export async function getClosedDateSet(companyId: string): Promise<Set<string>> {
+/**
+ * All closed dates for a (company, centre), as "YYYY-MM-DD" strings for list
+ * markers. Day close is per centre — each centre's days close independently.
+ */
+export async function getClosedDateSet(
+  companyId: string,
+  centreId: string
+): Promise<Set<string>> {
   const rows = await prisma.dayClose.findMany({
-    where: { companyId },
+    where: { companyId, centreId },
     select: { date: true },
   });
   return new Set(rows.map((r) => toInputDate(r.date)));
 }
 
-export async function isDayClosed(companyId: string, date: Date) {
+export async function isDayClosed(
+  companyId: string,
+  centreId: string,
+  date: Date
+) {
   return Boolean(
     await prisma.dayClose.findUnique({
-      where: { companyId_date: { companyId, date } },
+      where: { companyId_centreId_date: { companyId, centreId, date } },
     })
   );
 }

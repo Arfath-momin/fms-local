@@ -11,6 +11,7 @@ const TYPE_DESCRIPTIONS: Record<string, string> = {
   FISH_MILL: "Fish mills buying by delivery note.",
   LOCAL_BUYER: "Local buyers.",
   EXPENSE_VENDOR: "Ice plants, landlords and other expense vendors.",
+  CARE_OF: "Commission agents who pay immediately; Fish Mill/Factory sales can post to a CareOf ledger.",
 };
 
 export default async function MastersPage() {
@@ -26,8 +27,20 @@ export default async function MastersPage() {
     <div>
       <h1 className="heading text-xl font-semibold mb-1">Masters</h1>
       <p className="text-muted text-[13px] mb-4">
-        Parties are shared across BFM and B2B; balances stay per company.
+        Centres are per company; parties are shared across companies with
+        balances kept per centre.
       </p>
+
+      <Link
+        href="/masters/centres"
+        className="block max-w-md border border-line bg-surface px-4 py-3 mb-4 hover:bg-background"
+      >
+        <div className="font-semibold text-[14px]">Centres</div>
+        <div className="text-muted text-[12px]">
+          Isolated transaction/ledger scopes inside the active company.
+        </div>
+      </Link>
+
       <div className="max-w-md border border-line bg-surface">
         {PARTY_TYPES.map((t) => (
           <Link

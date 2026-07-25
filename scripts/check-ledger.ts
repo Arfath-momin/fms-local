@@ -12,6 +12,7 @@ async function main() {
     orderBy: { createdAt: "asc" },
     include: {
       company: { select: { name: true } },
+      centre: { select: { name: true } },
       party: { select: { name: true } },
     },
   });
@@ -19,6 +20,7 @@ async function main() {
     console.log(
       [
         e.company.name,
+        e.centre.name,
         e.party.name,
         e.type,
         e.sourceType,

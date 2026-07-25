@@ -6,7 +6,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { ExpenseCategory } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireMerchant } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { requireActiveScope } from "@/lib/centre";
 import { assertDayOpen } from "@/lib/dayclose";
 import { postLedgerEntry } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
@@ -85,10 +85,11 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
 /** Expense ledger effect: CREDIT the vendor; DEBIT PAYMENT when paid. */
 async function postExpenseLedger(
   tx: Prisma.TransactionClient,
-  e: { companyId: string; partyId: string; id: string; amount: Prisma.Decimal; date: Date; paid: boolean }
+  e: { companyId: string; centreId: string; partyId: string; id: string; amount: Prisma.Decimal; date: Date; paid: boolean }
 ) {
   await postLedgerEntry(tx, {
     companyId: e.companyId,
+    centreId: e.centreId,
     partyId: e.partyId,
     type: "CREDIT",
     sourceType: "EXPENSE",
@@ -99,6 +100,7 @@ async function postExpenseLedger(
   if (e.paid) {
     await postLedgerEntry(tx, {
       companyId: e.companyId,
+      centreId: e.centreId,
       partyId: e.partyId,
       type: "DEBIT",
       sourceType: "PAYMENT",
@@ -117,16 +119,17 @@ export async function createExpense(
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
-  const company = await getActiveCompany();
+  const { company, centre } = await requireActiveScope();
 
   let expenseId: string;
   try {
     expenseId = await prisma.$transaction(async (tx) => {
-      await assertDayOpen(tx, company.id, d.date);
+      await assertDayOpen(tx, company.id, centre.id, d.date);
       const partyId = await findOrCreateParty(tx, d.vendorName, "EXPENSE_VENDOR");
       const expense = await tx.expense.create({
         data: {
           companyId: company.id,
+          centreId: centre.id,
           partyId,
           category: d.category,
           amount: d.amount,
@@ -145,6 +148,7 @@ export async function createExpense(
 
   await saveAttachmentFile({
     companyId: company.id,
+    centreId: centre.id,
     linkedType: "EXPENSE",
     linkedId: expenseId,
     file: d.file,
@@ -164,13 +168,13 @@ export async function updateExpense(
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
-  let companyId: string;
+  let scope: { companyId: string; centreId: string };
   try {
-    companyId = await prisma.$transaction(async (tx) => {
+    scope = await prisma.$transaction(async (tx) => {
       const existing = await tx.expense.findUnique({ where: { id: expenseId } });
       if (!existing) throw new Error("Expense not found.");
-      await assertDayOpen(tx, existing.companyId, existing.date);
-      await assertDayOpen(tx, existing.companyId, d.date);
+      await assertDayOpen(tx, existing.companyId, existing.centreId, existing.date);
+      await assertDayOpen(tx, existing.companyId, existing.centreId, d.date);
 
       await tx.ledgerEntry.deleteMany({
         where: { sourceId: expenseId, sourceType: { in: ["EXPENSE", "PAYMENT"] } },
@@ -189,14 +193,15 @@ export async function updateExpense(
         },
       });
       await postExpenseLedger(tx, { ...expense, ...d });
-      return existing.companyId;
+      return { companyId: existing.companyId, centreId: existing.centreId };
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save expense." };
   }
 
   await saveAttachmentFile({
-    companyId,
+    companyId: scope.companyId,
+    centreId: scope.centreId,
     linkedType: "EXPENSE",
     linkedId: expenseId,
     file: d.file,
@@ -220,6 +225,7 @@ export async function correctExpense(
 
   let replacementId: string;
   let companyId: string;
+  let centreId: string;
   try {
     const result = await prisma.$transaction(async (tx) => {
       const original = await tx.expense.findUnique({ where: { id: expenseId } });
@@ -240,6 +246,7 @@ export async function correctExpense(
       const replacement = await tx.expense.create({
         data: {
           companyId: original.companyId,
+          centreId: original.centreId,
           partyId,
           category: d.category,
           amount: d.amount,
@@ -254,16 +261,22 @@ export async function correctExpense(
         where: { id: flag.id },
         data: { correctingEntryId: replacement.id },
       });
-      return { replacementId: replacement.id, companyId: original.companyId };
+      return {
+        replacementId: replacement.id,
+        companyId: original.companyId,
+        centreId: original.centreId,
+      };
     });
     replacementId = result.replacementId;
     companyId = result.companyId;
+    centreId = result.centreId;
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save correction." };
   }
 
   await saveAttachmentFile({
     companyId,
+    centreId,
     linkedType: "EXPENSE",
     linkedId: replacementId,
     file: d.file,

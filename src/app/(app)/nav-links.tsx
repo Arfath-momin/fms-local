@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/masters", label: "Masters" },
   { href: "/ledgers", label: "Ledgers" },
   { href: "/reports", label: "Reports" },
+  { href: "/union", label: "Union" },
 ];
 
 export function NavLinks() {

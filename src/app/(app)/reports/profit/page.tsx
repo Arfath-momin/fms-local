@@ -4,7 +4,7 @@ import { getActiveCompany } from "@/lib/company";
 import { computeProfit } from "@/lib/report";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
-import { CHANNEL_LABELS } from "@/lib/delivery";
+import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 
 function monthStart(d: Date) {
@@ -110,8 +110,8 @@ export default async function ProfitReportPage({
         />
         <Breakdown
           title="Sale by type"
-          rows={r.saleByChannel.map((x) => ({
-            label: CHANNEL_LABELS[x.channel],
+          rows={r.saleByType.map((x) => ({
+            label: SALE_TYPE_LABELS[x.type],
             amount: x.amount,
           }))}
           total={r.sale}

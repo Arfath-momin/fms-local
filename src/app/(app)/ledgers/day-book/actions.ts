@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireMerchant } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { requireActiveScope } from "@/lib/centre";
 import { toInputDate } from "@/lib/format";
 
 /**
@@ -15,7 +15,7 @@ import { toInputDate } from "@/lib/format";
  */
 export async function closeDay(formData: FormData) {
   await requireMerchant();
-  const company = await getActiveCompany();
+  const { company, centre } = await requireActiveScope();
 
   const raw = String(formData.get("date") ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new Error("Pick a date.");
@@ -26,7 +26,7 @@ export async function closeDay(formData: FormData) {
 
   try {
     await prisma.dayClose.create({
-      data: { companyId: company.id, date },
+      data: { companyId: company.id, centreId: centre.id, date },
     });
   } catch (e) {
     // Already closed — treat as done.

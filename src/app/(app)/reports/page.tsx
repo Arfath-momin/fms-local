@@ -2,14 +2,19 @@ import Link from "next/link";
 
 const ITEMS = [
   {
+    href: "/reports/register",
+    label: "Daily Transactions",
+    desc: "Every purchase, sale and expense across all centres for a day, month or year — with company-wide P/L below.",
+  },
+  {
     href: "/reports/profit",
-    label: "Profit",
-    desc: "Sale − (Purchase + Expense) for any date range, with per-type breakdowns.",
+    label: "Profit breakdown",
+    desc: "Sale − (Purchase + Expense) for any date range, split by type and category.",
   },
   {
     href: "/ledgers/parties",
     label: "Party Statements",
-    desc: "Full statement per boat, seller, buyer or vendor — exportable as CSV.",
+    desc: "Per-centre statement for any boat, seller, buyer, vendor or CareOf agent — exportable as CSV.",
   },
 ];
 

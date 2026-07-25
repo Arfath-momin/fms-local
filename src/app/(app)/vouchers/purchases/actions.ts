@@ -6,7 +6,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireMerchant } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { requireActiveScope } from "@/lib/centre";
 import { PURCHASE_SELLER_TYPE } from "@/lib/party";
 import { findOrCreateParty } from "@/lib/party-db";
 import { assertDayOpen } from "@/lib/dayclose";
@@ -113,10 +113,11 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
  */
 async function postPurchaseLedger(
   tx: Prisma.TransactionClient,
-  p: { companyId: string; partyId: string; id: string; amount: Prisma.Decimal; date: Date; paid: boolean }
+  p: { companyId: string; centreId: string; partyId: string; id: string; amount: Prisma.Decimal; date: Date; paid: boolean }
 ) {
   await postLedgerEntry(tx, {
     companyId: p.companyId,
+    centreId: p.centreId,
     partyId: p.partyId,
     type: "CREDIT",
     sourceType: "PURCHASE",
@@ -127,6 +128,7 @@ async function postPurchaseLedger(
   if (p.paid) {
     await postLedgerEntry(tx, {
       companyId: p.companyId,
+      centreId: p.centreId,
       partyId: p.partyId,
       type: "DEBIT",
       sourceType: "PAYMENT",
@@ -145,12 +147,12 @@ export async function createPurchase(
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
-  const company = await getActiveCompany();
+  const { company, centre } = await requireActiveScope();
 
   let purchaseId: string;
   try {
     purchaseId = await prisma.$transaction(async (tx) => {
-      await assertDayOpen(tx, company.id, d.date);
+      await assertDayOpen(tx, company.id, centre.id, d.date);
       const partyId = await findOrCreateParty(
         tx,
         d.partyName,
@@ -159,6 +161,7 @@ export async function createPurchase(
       const purchase = await tx.purchase.create({
         data: {
           companyId: company.id,
+          centreId: centre.id,
           partyId,
           type: d.type,
           amount: d.amount,
@@ -176,6 +179,7 @@ export async function createPurchase(
 
   await saveAttachmentFile({
     companyId: company.id,
+    centreId: centre.id,
     linkedType: "PURCHASE",
     linkedId: purchaseId,
     file: d.file,
@@ -202,8 +206,8 @@ export async function updatePurchase(
     await prisma.$transaction(async (tx) => {
       const existing = await tx.purchase.findUnique({ where: { id: purchaseId } });
       if (!existing) throw new Error("Purchase not found.");
-      await assertDayOpen(tx, existing.companyId, existing.date);
-      await assertDayOpen(tx, existing.companyId, d.date);
+      await assertDayOpen(tx, existing.companyId, existing.centreId, existing.date);
+      await assertDayOpen(tx, existing.companyId, existing.centreId, d.date);
 
       await tx.ledgerEntry.deleteMany({
         where: { sourceId: purchaseId, sourceType: { in: ["PURCHASE", "PAYMENT"] } },
@@ -232,8 +236,13 @@ export async function updatePurchase(
     return { error: e instanceof Error ? e.message : "Could not save purchase." };
   }
 
+  const scope = (await prisma.purchase.findUnique({
+    where: { id: purchaseId },
+    select: { companyId: true, centreId: true },
+  }))!;
   await saveAttachmentFile({
-    companyId: (await prisma.purchase.findUnique({ where: { id: purchaseId }, select: { companyId: true } }))!.companyId,
+    companyId: scope.companyId,
+    centreId: scope.centreId,
     linkedType: "PURCHASE",
     linkedId: purchaseId,
     file: d.file,
@@ -260,6 +269,7 @@ export async function correctPurchase(
 
   let replacementId: string;
   let companyId: string;
+  let centreId: string;
   try {
     const result = await prisma.$transaction(async (tx) => {
       const original = await tx.purchase.findUnique({ where: { id: purchaseId } });
@@ -285,6 +295,7 @@ export async function correctPurchase(
       const replacement = await tx.purchase.create({
         data: {
           companyId: original.companyId,
+          centreId: original.centreId,
           partyId,
           type: d.type,
           amount: d.amount,
@@ -298,16 +309,22 @@ export async function correctPurchase(
         where: { id: flag.id },
         data: { correctingEntryId: replacement.id },
       });
-      return { replacementId: replacement.id, companyId: original.companyId };
+      return {
+        replacementId: replacement.id,
+        companyId: original.companyId,
+        centreId: original.centreId,
+      };
     });
     replacementId = result.replacementId;
     companyId = result.companyId;
+    centreId = result.centreId;
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save correction." };
   }
 
   await saveAttachmentFile({
     companyId,
+    centreId,
     linkedType: "PURCHASE",
     linkedId: replacementId,
     file: d.file,

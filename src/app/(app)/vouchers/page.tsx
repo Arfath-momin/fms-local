@@ -18,15 +18,23 @@ export default function VouchersPage() {
           </div>
         </Link>
         <Link
+          href="/vouchers/sales"
+          className="block px-4 py-3 hover:bg-background border-b border-line"
+        >
+          <div className="font-semibold text-[14px]">Sale</div>
+          <div className="text-muted text-[12px]">
+            Market, Fish Mill, Factory or Local. Posts the sale to the buyer
+            (or CareOf) ledger.
+          </div>
+        </Link>
+        <Link
           href="/vouchers/deliveries"
           className="block px-4 py-3 hover:bg-background border-b border-line"
         >
-          <div className="font-semibold text-[14px]">
-            Sale — Delivery &amp; Settlement
-          </div>
+          <div className="font-semibold text-[14px]">Delivery Note</div>
           <div className="text-muted text-[12px]">
-            Dispatch on a vehicle to market, factory, mill or local; settle with
-            the bill amount.
+            Dispatch record only — bill no, vehicle, driver and item table. No
+            ledger or settlement.
           </div>
         </Link>
         <Link

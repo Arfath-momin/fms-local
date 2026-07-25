@@ -2,20 +2,23 @@ import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { getActiveScope } from "@/lib/centre";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { getFlaggedIds } from "@/lib/errorflag";
 import { fmtMoney } from "@/lib/format";
+import { NoCentreNotice } from "../../no-centre";
 
-// Each category is its own mini ledger (spec §2 Expense).
+// Each category is its own mini ledger (spec §2 Expense), scoped to the centre.
 export default async function ExpenseLedgersPage() {
   await requireSession();
-  const company = await getActiveCompany();
+  const { company, centre } = await getActiveScope();
+  if (!centre) return <NoCentreNotice companyName={company.name} />;
 
   const groups = await prisma.expense.groupBy({
     by: ["category"],
     where: {
       companyId: company.id,
+      centreId: centre.id,
       id: { notIn: await getFlaggedIds("EXPENSE") },
     },
     _sum: { amount: true },
@@ -34,7 +37,7 @@ export default async function ExpenseLedgersPage() {
         <div>
           <h1 className="heading text-xl font-semibold">Expense Ledgers</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · one mini ledger per category.
+            {company.name} · {centre.name} · one mini ledger per category.
           </p>
         </div>
         <div className="text-right">

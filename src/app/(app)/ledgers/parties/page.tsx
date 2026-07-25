@@ -2,20 +2,23 @@ import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { getActiveScope } from "@/lib/centre";
 import { PARTY_TYPE_LABELS } from "@/lib/party";
 import { fmtMoney } from "@/lib/format";
+import { NoCentreNotice } from "../../no-centre";
 
 export default async function PartyLedgersPage() {
   await requireSession();
-  const company = await getActiveCompany();
+  const { company, centre } = await getActiveScope();
+  if (!centre) return <NoCentreNotice companyName={company.name} />;
 
   const [parties, latestEntries] = await Promise.all([
     prisma.party.findMany({ orderBy: { name: "asc" } }),
-    // Latest entry per party = current balance (distinct picks the first row
-    // per party in this ordering).
+    // Latest entry per party = current balance within this centre (distinct
+    // picks the first row per party in this ordering). Ledgers are isolated
+    // per centre.
     prisma.ledgerEntry.findMany({
-      where: { companyId: company.id },
+      where: { companyId: company.id, centreId: centre.id },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       distinct: ["partyId"],
       select: { partyId: true, runningBalance: true },
@@ -30,7 +33,7 @@ export default async function PartyLedgersPage() {
     <div className="max-w-2xl">
       <h1 className="heading text-xl font-semibold mb-1">Party Ledgers</h1>
       <p className="text-muted text-[13px] mb-4">
-        {company.name} · positive balance = party owes us.
+        {company.name} · {centre.name} · positive balance = party owes us.
       </p>
 
       <div className="border border-line-strong bg-surface">

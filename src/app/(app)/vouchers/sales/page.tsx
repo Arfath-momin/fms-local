@@ -4,62 +4,54 @@ import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { getClosedDateSet } from "@/lib/dayclose";
 import { getFlagsFor } from "@/lib/errorflag";
+import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { CorrectedBadge, LockMark } from "../../lock-mark";
 import { NoCentreNotice } from "../../no-centre";
 
-const TYPE_LABELS = {
-  SOCIETY: "Society",
-  KFDC: "KFDC",
-  PRIVATE: "Private",
-  LOCAL: "Local",
-};
-
-export default async function PurchasesPage() {
+export default async function SalesPage() {
   const session = await requireSession();
   const isMerchant = session.role === "MERCHANT";
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const [purchases, closedDates] = await Promise.all([
-    prisma.purchase.findMany({
+  const [sales, closedDates] = await Promise.all([
+    prisma.sale.findMany({
       where: { companyId: company.id, centreId: centre.id },
       include: {
         party: { select: { name: true } },
-        _count: { select: { lines: true } },
+        careOfParty: { select: { name: true } },
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     }),
     getClosedDateSet(company.id, centre.id),
   ]);
-  const flags = await getFlagsFor(
-    "PURCHASE",
-    purchases.map((p) => p.id)
-  );
+  const flags = await getFlagsFor("SALE", sales.map((s) => s.id));
 
   return (
     <div>
       <div className="flex items-end justify-between mb-4">
         <div>
-          <h1 className="heading text-xl font-semibold">Purchases</h1>
+          <h1 className="heading text-xl font-semibold">Sales</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · each purchase posts to the boat/seller ledger.
+            {company.name} · {centre.name} · each sale posts to the buyer (or
+            CareOf) ledger.
           </p>
         </div>
         {isMerchant && (
           <Link
-            href="/vouchers/purchases/new"
+            href="/vouchers/sales/new"
             className="bg-accent text-white px-4 py-2 text-[13px] font-semibold"
           >
-            New Purchase
+            New Sale
           </Link>
         )}
       </div>
 
-      {purchases.length === 0 ? (
+      {sales.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
-          No purchases for {company.name} yet.
-          {isMerchant && " Use “New Purchase” to enter the first one."}
+          No sales for {company.name} · {centre.name} yet.
+          {isMerchant && " Use “New Sale” to record the first one."}
         </p>
       ) : (
         <div className="border border-line-strong bg-surface">
@@ -67,61 +59,61 @@ export default async function PurchasesPage() {
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Boat / Seller</th>
+                <th>Bill No.</th>
                 <th>Type</th>
-                <th className="num-col">Total</th>
-                <th>Paid</th>
+                <th>Party</th>
+                <th className="num-col">Amount</th>
+                <th className="num-col">Received</th>
+                <th className="num-col">Balance</th>
                 {isMerchant && <th className="w-16"></th>}
               </tr>
             </thead>
             <tbody>
-              {purchases.map((p) => {
-                const flag = flags.get(p.id);
+              {sales.map((s) => {
+                const flag = flags.get(s.id);
                 const struck = flag ? "line-through opacity-60" : "";
+                const balance = s.amount.sub(s.amountReceived);
                 return (
-                  <tr key={p.id}>
+                  <tr key={s.id}>
                     <td className="whitespace-nowrap">
-                      {fmtDate(p.date)}
-                      <LockMark closed={closedDates.has(toInputDate(p.date))} />
+                      {fmtDate(s.date)}
+                      <LockMark closed={closedDates.has(toInputDate(s.date))} />
                     </td>
+                    <td className={`num ${struck}`}>{s.billNo}</td>
+                    <td className={struck}>{SALE_TYPE_LABELS[s.type]}</td>
                     <td className="font-medium">
-                      <span className={struck}>{p.party.name}</span>
-                      {p.type === "LOCAL" && p._count.lines > 0 && (
+                      <span className={struck}>{s.party.name}</span>
+                      {s.careOfParty && (
                         <span className="text-muted text-[12px]">
-                          {" "}
-                          · {p._count.lines} item{p._count.lines > 1 ? "s" : ""}
+                          {" "}· c/o {s.careOfParty.name}
                         </span>
                       )}
                       {flag && (
                         <CorrectedBadge
                           href={
                             flag.correctingEntryId
-                              ? `/vouchers/purchases/${flag.correctingEntryId}`
+                              ? `/vouchers/sales/${flag.correctingEntryId}`
                               : null
                           }
                         />
                       )}
                     </td>
-                    <td className={struck}>{TYPE_LABELS[p.type]}</td>
-                    <td className={`num-col num text-debit ${struck}`}>
-                      {fmtMoney(p.amount)}
+                    <td className={`num-col num text-credit ${struck}`}>
+                      {fmtMoney(s.amount)}
                     </td>
-                    <td className={struck}>
-                      {p.paid ? (
-                        <span className="text-muted text-[12px]">Paid</span>
-                      ) : (
-                        <span className="text-debit text-[12px] font-semibold">
-                          Outstanding
-                        </span>
-                      )}
+                    <td className={`num-col num ${struck}`}>
+                      {fmtMoney(s.amountReceived)}
+                    </td>
+                    <td className={`num-col num ${struck} ${balance.greaterThan(0) ? "text-debit font-semibold" : "text-muted"}`}>
+                      {fmtMoney(balance)}
                     </td>
                     {isMerchant && (
                       <td>
                         <Link
-                          href={`/vouchers/purchases/${p.id}`}
+                          href={`/vouchers/sales/${s.id}`}
                           className="text-accent underline underline-offset-2 text-[12px]"
                         >
-                          {flag ? "View" : "Edit"}
+                          {flag ? "View" : "Open"}
                         </Link>
                       </td>
                     )}

@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany, getCompanies } from "@/lib/company";
-import { logout, switchCompany } from "./actions";
+import { getActiveCentre, getCentres } from "@/lib/centre";
+import { logout, switchCompany, switchCentre } from "./actions";
 import { NavLinks } from "./nav-links";
 
 export default async function AppLayout({
@@ -10,6 +12,10 @@ export default async function AppLayout({
   const [companies, activeCompany] = await Promise.all([
     getCompanies(),
     getActiveCompany(),
+  ]);
+  const [centres, activeCentre] = await Promise.all([
+    getCentres(activeCompany.id),
+    getActiveCentre(activeCompany.id),
   ]);
 
   return (
@@ -44,6 +50,44 @@ export default async function AppLayout({
               );
             })}
           </div>
+
+          {/* Centre switcher — the active centre scopes every entry and ledger */}
+          <div className="mt-3">
+            <div className="text-[10px] uppercase tracking-widest text-sidebar-ink/50 mb-1">
+              Centre
+            </div>
+            {centres.length === 0 ? (
+              <Link
+                href="/masters/centres"
+                className="block text-[12px] text-amber-300 underline underline-offset-2"
+              >
+                Add a centre →
+              </Link>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {centres.map((c) => {
+                  const active = c.id === activeCentre?.id;
+                  return (
+                    <form action={switchCentre} key={c.id}>
+                      <input type="hidden" name="centreId" value={c.id} />
+                      <button
+                        type="submit"
+                        aria-pressed={active}
+                        className={
+                          "w-full text-left px-2 py-1 text-[12px] font-medium border " +
+                          (active
+                            ? "bg-white/15 text-white border-white/30"
+                            : "bg-transparent text-sidebar-ink/70 border-white/10 hover:border-white/40")
+                        }
+                      >
+                        {c.name}
+                      </button>
+                    </form>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <NavLinks />
@@ -69,9 +113,17 @@ export default async function AppLayout({
         <header className="bg-company text-company-ink px-6 py-2 flex items-center justify-between">
           <span className="text-[13px] font-bold tracking-widest uppercase">
             {activeCompany.name}
+            {activeCentre ? (
+              <span className="font-medium normal-case tracking-normal opacity-90">
+                {" · "}
+                {activeCentre.name}
+              </span>
+            ) : null}
           </span>
           <span className="text-[12px] opacity-80">
-            All entries and figures on screen belong to {activeCompany.name}
+            {activeCentre
+              ? `Entries and figures on screen belong to ${activeCompany.name} · ${activeCentre.name}`
+              : `${activeCompany.name} has no centre yet — add one under Masters`}
           </span>
         </header>
         <main className="flex-1 p-6 overflow-x-auto">{children}</main>

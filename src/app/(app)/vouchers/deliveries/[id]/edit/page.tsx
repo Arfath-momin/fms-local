@@ -2,7 +2,6 @@ import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { toInputDate } from "@/lib/format";
-import { CHANNEL_LABELS } from "@/lib/delivery";
 import { updateDelivery } from "../../actions";
 import { DeliveryForm } from "../../delivery-form";
 
@@ -17,18 +16,9 @@ export default async function EditDeliveryPage({
 
   const note = await prisma.deliveryNote.findUnique({
     where: { id },
-    include: {
-      party: { select: { name: true } },
-      _count: { select: { settlements: true } },
-    },
+    include: { lines: { orderBy: { id: "asc" } } },
   });
   if (!note) notFound();
-  if (note.status !== "PENDING" || note._count.settlements > 0)
-    redirect(`/vouchers/deliveries/${id}`);
-
-  // A blank buyer defaulted to the channel label — don't echo that as a name.
-  const buyerName =
-    note.party.name === CHANNEL_LABELS[note.channel] ? "" : note.party.name;
 
   return (
     <div>
@@ -36,10 +26,21 @@ export default async function EditDeliveryPage({
       <DeliveryForm
         action={updateDelivery.bind(null, note.id)}
         initial={{
-          channel: note.channel,
-          buyerName,
-          vehicleNo: note.vehicleNo,
+          billNo: note.billNo,
           date: toInputDate(note.date),
+          recipient: note.recipient,
+          vehicleNo: note.vehicleNo,
+          advancePaid: note.advancePaid?.toString() ?? "",
+          driverName: note.driverName ?? "",
+          mobileNo: note.mobileNo ?? "",
+          lines: note.lines.map((l) => ({
+            particulars: l.particulars,
+            kg: l.kg.toString(),
+            box: l.box ? String(l.box) : "",
+            bigBox: l.bigBox ? String(l.bigBox) : "",
+            loose: l.loose ? String(l.loose) : "",
+            pcs: l.pcs ? String(l.pcs) : "",
+          })),
         }}
         submitLabel="Save Changes"
       />

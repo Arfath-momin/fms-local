@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { AttachmentLinkedType } from "@/generated/prisma/enums";
+import { prisma } from "@/lib/db";
 import { requireMerchant } from "@/lib/session";
 import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
 
@@ -10,14 +11,37 @@ export type UploadState = { error: string } | null;
 const LINKED_TYPES: AttachmentLinkedType[] = [
   "PURCHASE",
   "DELIVERY_NOTE",
-  "SETTLEMENT",
+  "SALE",
   "EXPENSE",
 ];
+
+/**
+ * The (company, centre) an attachment belongs to is derived from the linked
+ * record itself — never trusted from the client — so the attachment always
+ * lands in the same scope as the voucher it documents.
+ */
+async function scopeForLinked(
+  linkedType: AttachmentLinkedType,
+  linkedId: string
+): Promise<{ companyId: string; centreId: string } | null> {
+  const select = { companyId: true, centreId: true } as const;
+  switch (linkedType) {
+    case "PURCHASE":
+      return prisma.purchase.findUnique({ where: { id: linkedId }, select });
+    case "EXPENSE":
+      return prisma.expense.findUnique({ where: { id: linkedId }, select });
+    case "DELIVERY_NOTE":
+      return prisma.deliveryNote.findUnique({ where: { id: linkedId }, select });
+    case "SALE":
+      return prisma.sale.findUnique({ where: { id: linkedId }, select });
+    default:
+      return null;
+  }
+}
 
 export async function uploadAttachment(
   linkedType: AttachmentLinkedType,
   linkedId: string,
-  companyId: string,
   revalidate: string,
   _prev: UploadState,
   formData: FormData
@@ -33,7 +57,16 @@ export async function uploadAttachment(
   const invalid = validateImageFile(file);
   if (invalid) return { error: invalid };
 
-  await saveAttachmentFile({ companyId, linkedType, linkedId, file });
+  const scope = await scopeForLinked(linkedType, linkedId);
+  if (!scope) return { error: "Could not find the record to attach to." };
+
+  await saveAttachmentFile({
+    companyId: scope.companyId,
+    centreId: scope.centreId,
+    linkedType,
+    linkedId,
+    file,
+  });
 
   revalidatePath(revalidate);
   return null;

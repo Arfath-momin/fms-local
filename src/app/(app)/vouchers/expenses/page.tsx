@@ -1,24 +1,26 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { getActiveScope } from "@/lib/centre";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { getClosedDateSet } from "@/lib/dayclose";
 import { getFlagsFor } from "@/lib/errorflag";
 import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { CorrectedBadge, LockMark } from "../../lock-mark";
+import { NoCentreNotice } from "../../no-centre";
 
 export default async function ExpensesPage() {
   const session = await requireSession();
   const isMerchant = session.role === "MERCHANT";
-  const company = await getActiveCompany();
+  const { company, centre } = await getActiveScope();
+  if (!centre) return <NoCentreNotice companyName={company.name} />;
 
   const [expenses, closedDates] = await Promise.all([
     prisma.expense.findMany({
-      where: { companyId: company.id },
+      where: { companyId: company.id, centreId: centre.id },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     }),
-    getClosedDateSet(company.id),
+    getClosedDateSet(company.id, centre.id),
   ]);
   const flags = await getFlagsFor(
     "EXPENSE",

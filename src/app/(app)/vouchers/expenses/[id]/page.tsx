@@ -24,7 +24,11 @@ export default async function EditExpensePage({
   const [dayClose, flag] = await Promise.all([
     prisma.dayClose.findUnique({
       where: {
-        companyId_date: { companyId: expense.companyId, date: expense.date },
+        companyId_centreId_date: {
+          companyId: expense.companyId,
+          centreId: expense.centreId,
+          date: expense.date,
+        },
       },
     }),
     prisma.errorFlag.findUnique({
@@ -80,7 +84,6 @@ export default async function EditExpensePage({
         null,
         "EXPENSE",
         expense.id,
-        expense.companyId,
         `/vouchers/expenses/${expense.id}`
       )}
       canUpload

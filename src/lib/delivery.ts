@@ -1,27 +1,35 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
-import type { DeliveryChannel } from "@/generated/prisma/enums";
 
-export const CHANNEL_LABELS: Record<DeliveryChannel, string> = {
-  MARKET: "Market",
-  FACTORY: "Factory",
-  FISH_MILL: "Fish Mill",
-  LOCAL: "Local",
+export type DeliveryLine = {
+  kg: Prisma.Decimal | number | string;
+  box: number;
+  bigBox: number;
+  loose: number;
+  pcs: number;
 };
 
-/** Days after which an unsettled delivery gets the warning state. */
-export const PENDING_WARN_DAYS = 3;
+export type DeliveryTotals = {
+  kg: Prisma.Decimal;
+  box: number;
+  bigBox: number;
+  loose: number;
+  pcs: number;
+};
 
-const ZERO = new Prisma.Decimal(0);
-
-/** Total received across all settlement bills for a delivery note. */
-export async function getSettledAmount(
-  tx: Prisma.TransactionClient,
-  deliveryNoteId: string
-): Promise<Prisma.Decimal> {
-  const agg = await tx.settlement.aggregate({
-    where: { deliveryNoteId },
-    _sum: { amountReceived: true },
-  });
-  return agg._sum.amountReceived ?? ZERO;
+/**
+ * Column totals for a delivery note's line items — display only. A delivery
+ * note is a pure record; these sums carry no accounting meaning.
+ */
+export function sumDeliveryLines(lines: DeliveryLine[]): DeliveryTotals {
+  return lines.reduce<DeliveryTotals>(
+    (acc, l) => ({
+      kg: acc.kg.add(new Prisma.Decimal(l.kg)),
+      box: acc.box + l.box,
+      bigBox: acc.bigBox + l.bigBox,
+      loose: acc.loose + l.loose,
+      pcs: acc.pcs + l.pcs,
+    }),
+    { kg: new Prisma.Decimal(0), box: 0, bigBox: 0, loose: 0, pcs: 0 }
+  );
 }

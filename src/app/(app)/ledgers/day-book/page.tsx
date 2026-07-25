@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
 import { requireSession } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { getActiveScope } from "@/lib/centre";
 import { isDayClosed } from "@/lib/dayclose";
 import { computeDayBook } from "@/lib/report";
+import { NoCentreNotice } from "../../no-centre";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
-import { CHANNEL_LABELS } from "@/lib/delivery";
+import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { closeDay } from "./actions";
 
@@ -18,7 +19,8 @@ export default async function DayBookPage({
   searchParams: Promise<{ date?: string }>;
 }) {
   const session = await requireSession();
-  const company = await getActiveCompany();
+  const { company, centre } = await getActiveScope();
+  if (!centre) return <NoCentreNotice companyName={company.name} />;
 
   const raw = (await searchParams).date;
   const date =
@@ -28,7 +30,7 @@ export default async function DayBookPage({
 
   const [d, closed] = await Promise.all([
     computeDayBook(company.id, date),
-    isDayClosed(company.id, date),
+    isDayClosed(company.id, centre.id, date),
   ]);
   const isMerchant = session.role === "MERCHANT";
   const isFuture = date.getTime() > new Date(toInputDate(new Date())).getTime();
@@ -43,7 +45,9 @@ export default async function DayBookPage({
       <div className="flex items-end justify-between mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">Day Book</h1>
-          <p className="text-muted text-[13px]">{company.name}</p>
+          <p className="text-muted text-[13px]">
+            {company.name} · company-wide P/L · Close Day locks {centre.name}
+          </p>
         </div>
         <form method="GET" className="flex items-center gap-2">
           <label
@@ -109,7 +113,7 @@ export default async function DayBookPage({
                 </Link>
               </th>
               <th className="num-col">
-                <Link href="/vouchers/deliveries" className="hover:underline">
+                <Link href="/vouchers/sales" className="hover:underline">
                   Sale
                 </Link>
               </th>
@@ -159,8 +163,8 @@ export default async function DayBookPage({
         />
         <Breakdown
           title="Sale by type"
-          rows={d.saleByChannel.map((r) => ({
-            label: CHANNEL_LABELS[r.channel],
+          rows={d.saleByType.map((r) => ({
+            label: SALE_TYPE_LABELS[r.type],
             amount: r.amount,
           }))}
           total={d.sale}

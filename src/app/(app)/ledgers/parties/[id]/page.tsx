@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { getActiveScope } from "@/lib/centre";
 import { PARTY_TYPE_LABELS } from "@/lib/party";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { NoCentreNotice } from "../../../no-centre";
 
 const SOURCE_LABELS = {
   PURCHASE: "Purchase",
@@ -20,24 +21,26 @@ export default async function PartyStatementPage({
   params: Promise<{ id: string }>;
 }) {
   await requireSession();
-  const company = await getActiveCompany();
+  const { company, centre } = await getActiveScope();
+  if (!centre) return <NoCentreNotice companyName={company.name} />;
   const { id } = await params;
 
   const party = await prisma.party.findUnique({ where: { id } });
   if (!party) notFound();
 
   const entries = await prisma.ledgerEntry.findMany({
-    where: { companyId: company.id, partyId: id },
+    where: { companyId: company.id, centreId: centre.id, partyId: id },
     orderBy: [{ date: "asc" }, { createdAt: "asc" }],
   });
 
-  // Resolve source links for drill-down: settlements point at their delivery
-  // note; purchases and expenses point at their own voucher pages.
+  // Resolve source links for drill-down: each ledger entry's sourceId points at
+  // its own voucher page (purchase / sale / expense). PAYMENT entries share the
+  // source voucher's id, so they resolve to the same page.
   const sourceIds = [...new Set(entries.map((e) => e.sourceId))];
-  const [settlements, purchases, expenses] = await Promise.all([
-    prisma.settlement.findMany({
+  const [sales, purchases, expenses] = await Promise.all([
+    prisma.sale.findMany({
       where: { id: { in: sourceIds } },
-      select: { id: true, deliveryNoteId: true },
+      select: { id: true },
     }),
     prisma.purchase.findMany({
       where: { id: { in: sourceIds } },
@@ -51,8 +54,7 @@ export default async function PartyStatementPage({
   const links = new Map<string, string>();
   for (const p of purchases) links.set(p.id, `/vouchers/purchases/${p.id}`);
   for (const e of expenses) links.set(e.id, `/vouchers/expenses/${e.id}`);
-  for (const s of settlements)
-    links.set(s.id, `/vouchers/deliveries/${s.deliveryNoteId}`);
+  for (const s of sales) links.set(s.id, `/vouchers/sales/${s.id}`);
 
   const balance =
     entries.at(-1)?.runningBalance ?? new Prisma.Decimal(0);
@@ -69,7 +71,8 @@ export default async function PartyStatementPage({
         <div>
           <h1 className="heading text-xl font-semibold">{party.name}</h1>
           <p className="text-muted text-[13px]">
-            {PARTY_TYPE_LABELS[party.type]} · statement for {company.name}
+            {PARTY_TYPE_LABELS[party.type]} · statement for {company.name} ·{" "}
+            {centre.name}
           </p>
           <a
             href={`/ledgers/parties/${party.id}/export`}
