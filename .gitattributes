@@ -1,0 +1,17 @@
+# Files that are executed on the Linux server must keep LF endings. A CRLF
+# shebang fails with "bad interpreter: /usr/bin/env bash^M", which would only
+# show up on the VPS — long after anyone would think to look for it.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+Caddyfile       text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+.env.example    text eol=lf
+
+# Let Git decide for everything else, and never touch binaries.
+*               text=auto
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.webp          binary
+*.ico           binary
