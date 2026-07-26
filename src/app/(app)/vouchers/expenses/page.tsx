@@ -1,26 +1,25 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
-import { getClosedDateSet } from "@/lib/dayclose";
 import { getFlagsFor } from "@/lib/errorflag";
-import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
-import { CorrectedBadge, LockMark } from "../../lock-mark";
+import { fmtDate, fmtMoney } from "@/lib/format";
+import { CorrectedBadge } from "../../lock-mark";
 import { NoCentreNotice } from "../../no-centre";
 
 export default async function ExpensesPage() {
   const session = await requireSession();
-  const isMerchant = session.role === "MERCHANT";
+  const mayEnter = canEnter(session.role);
+  const mayEdit = canEdit(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const [expenses, closedDates] = await Promise.all([
+  const [expenses] = await Promise.all([
     prisma.expense.findMany({
       where: { companyId: company.id, centreId: centre.id },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     }),
-    getClosedDateSet(company.id, centre.id),
   ]);
   const flags = await getFlagsFor(
     "EXPENSE",
@@ -36,7 +35,7 @@ export default async function ExpensesPage() {
             {company.name} · ice, loaders, ladies, batha, canteen, rent.
           </p>
         </div>
-        {isMerchant && (
+        {mayEnter && (
           <Link
             href="/vouchers/expenses/new"
             className="bg-accent text-white px-4 py-2 text-[13px] font-semibold"
@@ -49,7 +48,7 @@ export default async function ExpensesPage() {
       {expenses.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
           No expenses for {company.name} yet.
-          {isMerchant && " Use “New Expense” to enter the first one."}
+          {mayEnter && " Use “New Expense” to enter the first one."}
         </p>
       ) : (
         <div className="border border-line-strong bg-surface max-w-2xl">
@@ -60,7 +59,7 @@ export default async function ExpensesPage() {
                 <th>Category</th>
                 <th>Notes</th>
                 <th className="num-col">Amount</th>
-                {isMerchant && <th className="w-16"></th>}
+                <th className="w-16"></th>
               </tr>
             </thead>
             <tbody>
@@ -71,7 +70,6 @@ export default async function ExpensesPage() {
                   <tr key={e.id}>
                     <td className="whitespace-nowrap">
                       {fmtDate(e.date)}
-                      <LockMark closed={closedDates.has(toInputDate(e.date))} />
                     </td>
                     <td className="font-medium">
                       <span className={struck}>
@@ -91,16 +89,14 @@ export default async function ExpensesPage() {
                     <td className={`num-col num text-debit ${struck}`}>
                       {fmtMoney(e.amount)}
                     </td>
-                    {isMerchant && (
-                      <td>
-                        <Link
-                          href={`/vouchers/expenses/${e.id}`}
-                          className="text-accent underline underline-offset-2 text-[12px]"
-                        >
-                          {flag ? "View" : "Edit"}
-                        </Link>
-                      </td>
-                    )}
+                    <td>
+                      <Link
+                        href={`/vouchers/expenses/${e.id}`}
+                        className="text-accent underline underline-offset-2 text-[12px]"
+                      >
+                        {mayEdit && !flag ? "Edit" : "View"}
+                      </Link>
+                    </td>
                   </tr>
                 );
               })}

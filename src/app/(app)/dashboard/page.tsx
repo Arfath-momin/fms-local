@@ -5,7 +5,7 @@ import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { computeDayBook, getBalancesAsOf } from "@/lib/report";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
-import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { businessTodayDate, fmtDate, fmtMoney } from "@/lib/format";
 import { NoCentreNotice } from "../no-centre";
 
 const ZERO = new Prisma.Decimal(0);
@@ -43,7 +43,7 @@ export default async function DashboardPage() {
   await requireSession();
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
-  const today = new Date(toInputDate(new Date()));
+  const today = businessTodayDate();
 
   const [day, balances, recentSales] = await Promise.all([
     computeDayBook(company.id, today),

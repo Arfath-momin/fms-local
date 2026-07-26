@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import type { PartyType } from "@/generated/prisma/enums";
-import { requireSession } from "@/lib/session";
+import { canEnter, requireSession } from "@/lib/session";
 import { PARTY_TYPES, PARTY_TYPE_LABELS } from "@/lib/party";
 import { createParty } from "../actions";
 import { PartyForm } from "../party-form";
@@ -11,7 +11,7 @@ export default async function NewPartyPage({
   searchParams: Promise<{ type?: string }>;
 }) {
   const session = await requireSession();
-  if (session.role !== "MERCHANT") redirect("/masters/parties");
+  if (!canEnter(session.role)) redirect("/masters/parties");
 
   const rawType = (await searchParams).type as PartyType | undefined;
   const type = rawType && PARTY_TYPES.includes(rawType) ? rawType : null;

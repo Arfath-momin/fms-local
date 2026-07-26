@@ -1,0 +1,30 @@
+# TLS is not optional for this app: session cookies are marked `secure` in
+# production, so sign-in silently fails over plain HTTP. Caddy provisions and
+# renews a Let's Encrypt certificate for FMS_DOMAIN automatically.
+
+{$FMS_DOMAIN} {
+	encode zstd gzip
+
+	# Must stay at or above serverActions.bodySizeLimit in next.config.ts.
+	# Bill photos are uploaded through a Server Action, and a proxy limit below
+	# the app's limit rejects them before Next ever sees the request.
+	request_body {
+		max_size 11MB
+	}
+
+	reverse_proxy app:3000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10MB
+			roll_keep 5
+		}
+	}
+}

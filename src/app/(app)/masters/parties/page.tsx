@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { PartyType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEnter, requireSession } from "@/lib/session";
 import {
   PARTY_TYPES,
   PARTY_TYPE_LABELS,
@@ -14,7 +14,7 @@ export default async function PartiesPage({
   searchParams: Promise<{ type?: string }>;
 }) {
   const session = await requireSession();
-  const isMerchant = session.role === "MERCHANT";
+  const mayManage = canEnter(session.role);
 
   const rawType = (await searchParams).type as PartyType | undefined;
   const type = rawType && PARTY_TYPES.includes(rawType) ? rawType : null;
@@ -45,7 +45,7 @@ export default async function PartiesPage({
             each party&apos;s ledger.
           </p>
         </div>
-        {isMerchant && (
+        {mayManage && (
           <Link
             href={newHref}
             className="bg-accent text-white px-4 py-2 text-[13px] font-semibold"
@@ -59,7 +59,7 @@ export default async function PartiesPage({
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
           No {type ? PARTY_TYPE_LABELS[type].toLowerCase() : "party"} entries
           yet.
-          {isMerchant &&
+          {mayManage &&
             ` Use “New ${type ? PARTY_TYPE_LABELS[type] : "Party"}” to add the first one.`}
         </p>
       ) : (
@@ -70,7 +70,7 @@ export default async function PartiesPage({
                 <th>Name</th>
                 {!type && <th>Type</th>}
                 <th>Contact</th>
-                {isMerchant && <th className="w-16"></th>}
+                {mayManage && <th className="w-16"></th>}
               </tr>
             </thead>
             <tbody>
@@ -79,7 +79,7 @@ export default async function PartiesPage({
                   <td className="font-medium">{p.name}</td>
                   {!type && <td>{PARTY_TYPE_LABELS[p.type]}</td>}
                   <td className="text-muted">{p.contactInfo ?? "—"}</td>
-                  {isMerchant && (
+                  {mayManage && (
                     <td>
                       <Link
                         href={`/masters/parties/${p.id}`}

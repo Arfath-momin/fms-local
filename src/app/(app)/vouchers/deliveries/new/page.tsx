@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireSession } from "@/lib/session";
+import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { createDelivery } from "../actions";
 import { DeliveryForm } from "../delivery-form";
@@ -7,7 +7,7 @@ import { NoCentreNotice } from "../../../no-centre";
 
 export default async function NewDeliveryPage() {
   const session = await requireSession();
-  if (session.role !== "MERCHANT") redirect("/vouchers/deliveries");
+  if (!canEnter(session.role)) redirect("/vouchers/deliveries");
 
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;

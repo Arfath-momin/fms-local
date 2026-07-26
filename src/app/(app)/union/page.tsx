@@ -2,12 +2,12 @@ import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
 import { requireSession } from "@/lib/session";
 import { computeUnion } from "@/lib/report";
-import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { businessTodayDate, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 
 type SearchParams = { from?: string; to?: string };
 
 function parseRange(sp: SearchParams) {
-  const today = new Date(toInputDate(new Date()));
+  const today = businessTodayDate();
   const from =
     sp.from && /^\d{4}-\d{2}-\d{2}$/.test(sp.from)
       ? new Date(sp.from)
@@ -31,7 +31,7 @@ export default async function UnionPage({
   const { from, to } = parseRange(sp);
   const u = await computeUnion(from, to);
 
-  const now = new Date(toInputDate(new Date()));
+  const now = businessTodayDate();
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   const iso = (d: Date) => toInputDate(d);

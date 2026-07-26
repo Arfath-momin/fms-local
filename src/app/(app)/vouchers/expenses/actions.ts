@@ -5,9 +5,8 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { ExpenseCategory } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { requireMerchant } from "@/lib/session";
+import { requireAdmin, requireEntry } from "@/lib/session";
 import { requireActiveScope } from "@/lib/centre";
-import { assertDayOpen } from "@/lib/dayclose";
 import { postLedgerEntry } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
 import { EXPENSE_CATEGORIES, EXPENSE_SPECS, expenseVendorName } from "@/lib/expense";
@@ -115,7 +114,7 @@ export async function createExpense(
   _prev: ExpenseFormState,
   formData: FormData
 ): Promise<ExpenseFormState> {
-  await requireMerchant();
+  const session = await requireEntry();
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
@@ -124,7 +123,6 @@ export async function createExpense(
   let expenseId: string;
   try {
     expenseId = await prisma.$transaction(async (tx) => {
-      await assertDayOpen(tx, company.id, centre.id, d.date);
       const partyId = await findOrCreateParty(tx, d.vendorName, "EXPENSE_VENDOR");
       const expense = await tx.expense.create({
         data: {
@@ -137,6 +135,7 @@ export async function createExpense(
           date: d.date,
           notes: d.notes,
           details: d.details,
+          createdById: session.userId,
         },
       });
       await postExpenseLedger(tx, { ...expense, ...d });
@@ -163,7 +162,7 @@ export async function updateExpense(
   _prev: ExpenseFormState,
   formData: FormData
 ): Promise<ExpenseFormState> {
-  await requireMerchant();
+  const session = await requireAdmin();
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
@@ -173,8 +172,6 @@ export async function updateExpense(
     scope = await prisma.$transaction(async (tx) => {
       const existing = await tx.expense.findUnique({ where: { id: expenseId } });
       if (!existing) throw new Error("Expense not found.");
-      await assertDayOpen(tx, existing.companyId, existing.centreId, existing.date);
-      await assertDayOpen(tx, existing.companyId, existing.centreId, d.date);
 
       await tx.ledgerEntry.deleteMany({
         where: { sourceId: expenseId, sourceType: { in: ["EXPENSE", "PAYMENT"] } },
@@ -190,6 +187,8 @@ export async function updateExpense(
           date: d.date,
           notes: d.notes,
           details: d.details,
+          updatedById: session.userId,
+          updatedAt: new Date(),
         },
       });
       await postExpenseLedger(tx, { ...expense, ...d });
@@ -204,81 +203,6 @@ export async function updateExpense(
     centreId: scope.centreId,
     linkedType: "EXPENSE",
     linkedId: expenseId,
-    file: d.file,
-  });
-
-  revalidatePath("/vouchers/expenses");
-  redirect("/vouchers/expenses");
-}
-
-/** Closed-day correction: flag original, create linked replacement. */
-export async function correctExpense(
-  expenseId: string,
-  _prev: ExpenseFormState,
-  formData: FormData
-): Promise<ExpenseFormState> {
-  await requireMerchant();
-  const parsed = parse(formData);
-  if ("error" in parsed) return { error: parsed.error };
-  const d = parsed.data;
-  const reason = String(formData.get("reason") ?? "").trim();
-
-  let replacementId: string;
-  let companyId: string;
-  let centreId: string;
-  try {
-    const result = await prisma.$transaction(async (tx) => {
-      const original = await tx.expense.findUnique({ where: { id: expenseId } });
-      if (!original) throw new Error("Expense not found.");
-
-      const already = await tx.errorFlag.findUnique({
-        where: { linkedType_linkedId: { linkedType: "EXPENSE", linkedId: expenseId } },
-      });
-      if (already) throw new Error("This expense has already been corrected.");
-
-      const flag = await tx.errorFlag.create({
-        data: { linkedType: "EXPENSE", linkedId: expenseId, reason: reason || null },
-      });
-      await tx.ledgerEntry.deleteMany({
-        where: { sourceId: expenseId, sourceType: { in: ["EXPENSE", "PAYMENT"] } },
-      });
-      const partyId = await findOrCreateParty(tx, d.vendorName, "EXPENSE_VENDOR");
-      const replacement = await tx.expense.create({
-        data: {
-          companyId: original.companyId,
-          centreId: original.centreId,
-          partyId,
-          category: d.category,
-          amount: d.amount,
-          paid: d.paid,
-          date: d.date,
-          notes: d.notes,
-          details: d.details,
-        },
-      });
-      await postExpenseLedger(tx, { ...replacement, ...d });
-      await tx.errorFlag.update({
-        where: { id: flag.id },
-        data: { correctingEntryId: replacement.id },
-      });
-      return {
-        replacementId: replacement.id,
-        companyId: original.companyId,
-        centreId: original.centreId,
-      };
-    });
-    replacementId = result.replacementId;
-    companyId = result.companyId;
-    centreId = result.centreId;
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not save correction." };
-  }
-
-  await saveAttachmentFile({
-    companyId,
-    centreId,
-    linkedType: "EXPENSE",
-    linkedId: replacementId,
     file: d.file,
   });
 

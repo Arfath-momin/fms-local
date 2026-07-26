@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
+import { VoucherMeta } from "../../voucher-meta";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -25,7 +26,8 @@ export default async function SalePage({
   params: Promise<{ id: string }>;
 }) {
   const session = await requireSession();
-  const isMerchant = session.role === "MERCHANT";
+  const mayEdit = canEdit(session.role);
+  const mayEnter = canEnter(session.role);
   const { id } = await params;
 
   const sale = await prisma.sale.findUnique({
@@ -36,19 +38,12 @@ export default async function SalePage({
       party: { select: { name: true } },
       careOfParty: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
+      createdBy: { select: { name: true } },
+      updatedBy: { select: { name: true } },
     },
   });
   if (!sale) notFound();
 
-  const dayClose = await prisma.dayClose.findUnique({
-    where: {
-      companyId_centreId_date: {
-        companyId: sale.companyId,
-        centreId: sale.centreId,
-        date: sale.date,
-      },
-    },
-  });
   const balance = sale.amount.sub(sale.amountReceived);
   const attachments = await getAttachments("SALE", sale.id);
   const isFishMill = sale.type === "FISH_MILL";
@@ -73,17 +68,14 @@ export default async function SalePage({
             )}
           </p>
         </div>
-        {isMerchant &&
-          (dayClose ? (
-            <span className="text-[12px] text-muted">🔒 Day closed</span>
-          ) : (
-            <Link
-              href={`/vouchers/sales/${sale.id}/edit`}
-              className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
-            >
-              Edit
-            </Link>
-          ))}
+        {mayEdit && (
+          <Link
+            href={`/vouchers/sales/${sale.id}/edit`}
+            className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
+          >
+            Edit
+          </Link>
+        )}
       </div>
 
       <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
@@ -169,7 +161,14 @@ export default async function SalePage({
           sale.id,
           `/vouchers/sales/${sale.id}`
         )}
-        canUpload={isMerchant}
+        canUpload={mayEnter}
+      />
+
+      <VoucherMeta
+        createdBy={sale.createdBy}
+        createdAt={sale.createdAt}
+        updatedBy={sale.updatedBy}
+        updatedAt={sale.updatedAt}
       />
     </div>
   );

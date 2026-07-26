@@ -5,9 +5,8 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { SaleType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { requireMerchant } from "@/lib/session";
+import { requireAdmin, requireEntry } from "@/lib/session";
 import { requireActiveScope } from "@/lib/centre";
-import { assertDayOpen } from "@/lib/dayclose";
 import { postLedgerEntry } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
 import {
@@ -281,7 +280,7 @@ export async function createSale(
   _prev: SaleFormState,
   formData: FormData
 ): Promise<SaleFormState> {
-  await requireMerchant();
+  const session = await requireEntry();
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
@@ -290,7 +289,6 @@ export async function createSale(
   let saleId: string;
   try {
     saleId = await prisma.$transaction(async (tx) => {
-      await assertDayOpen(tx, company.id, centre.id, d.date);
       const buyerId = await findOrCreateParty(tx, d.buyerName, SALE_BUYER_TYPE[d.type]);
       const careOfId = d.careOfName
         ? await findOrCreateParty(tx, d.careOfName, "CARE_OF")
@@ -300,6 +298,7 @@ export async function createSale(
           companyId: company.id,
           centreId: centre.id,
           ...saleData(d, buyerId, careOfId),
+          createdById: session.userId,
         },
       });
       await postSaleLedger(tx, {
@@ -334,7 +333,7 @@ export async function updateSale(
   _prev: SaleFormState,
   formData: FormData
 ): Promise<SaleFormState> {
-  await requireMerchant();
+  const session = await requireAdmin();
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
@@ -347,8 +346,6 @@ export async function updateSale(
         select: { companyId: true, centreId: true, date: true },
       });
       if (!existing) throw new Error("Sale not found.");
-      await assertDayOpen(tx, existing.companyId, existing.centreId, existing.date);
-      await assertDayOpen(tx, existing.companyId, existing.centreId, d.date);
 
       await tx.ledgerEntry.deleteMany({
         where: { sourceId: saleId, sourceType: { in: ["SALE", "PAYMENT"] } },
@@ -361,7 +358,11 @@ export async function updateSale(
         : null;
       await tx.sale.update({
         where: { id: saleId },
-        data: saleData(d, buyerId, careOfId),
+        data: {
+          ...saleData(d, buyerId, careOfId),
+          updatedById: session.userId,
+          updatedAt: new Date(),
+        },
       });
       await postSaleLedger(tx, {
         companyId: existing.companyId,

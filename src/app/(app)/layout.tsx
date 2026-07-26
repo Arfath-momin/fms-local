@@ -1,9 +1,16 @@
 import Link from "next/link";
+import type { Role } from "@/generated/prisma/enums";
 import { requireSession } from "@/lib/session";
 import { getActiveCompany, getCompanies } from "@/lib/company";
 import { getActiveCentre, getCentres } from "@/lib/centre";
 import { logout, switchCompany, switchCentre } from "./actions";
 import { NavLinks } from "./nav-links";
+
+const ROLE_LABELS: Record<Role, string> = {
+  ADMIN: "Admin",
+  ACCOUNTANT: "Accountant · entry only",
+  AUDITOR: "Auditor · read-only",
+};
 
 export default async function AppLayout({
   children,
@@ -90,12 +97,12 @@ export default async function AppLayout({
           </div>
         </div>
 
-        <NavLinks />
+        <NavLinks role={session.role} />
 
         <div className="mt-auto px-4 py-3 border-t border-white/10 text-[12px]">
           <div className="text-white">{session.name}</div>
           <div className="text-sidebar-ink/60">
-            {session.role === "MERCHANT" ? "Merchant" : "Auditor · read-only"}
+            {ROLE_LABELS[session.role]}
           </div>
           <form action={logout} className="mt-2">
             <button

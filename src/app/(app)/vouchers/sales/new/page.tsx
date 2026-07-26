@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { SaleType } from "@/generated/prisma/enums";
-import { requireSession } from "@/lib/session";
+import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { SALE_TYPES, SALE_TYPE_LABELS } from "@/lib/sale";
 import { createSale } from "../actions";
@@ -21,7 +21,7 @@ export default async function NewSalePage({
   searchParams: Promise<{ type?: string }>;
 }) {
   const session = await requireSession();
-  if (session.role !== "MERCHANT") redirect("/vouchers/sales");
+  if (!canEnter(session.role)) redirect("/vouchers/sales");
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 

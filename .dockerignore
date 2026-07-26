@@ -1,0 +1,24 @@
+# Build context hygiene — keep host state out of the image.
+node_modules
+.next
+.git
+.gitignore
+
+# Local-only runtime data. The container gets these as volumes.
+.pgdata
+uploads
+
+# Secrets never enter the image; compose injects them at runtime.
+.env
+.env.*
+!.env.example
+
+# Regenerated inside the builder stage — never copy the host's copy.
+src/generated
+
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+Dockerfile
+docker-compose.yml
+docs

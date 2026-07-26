@@ -1,21 +1,21 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { getClosedDateSet } from "@/lib/dayclose";
 import { getFlagsFor } from "@/lib/errorflag";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
-import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
-import { CorrectedBadge, LockMark } from "../../lock-mark";
+import { fmtDate, fmtMoney } from "@/lib/format";
+import { CorrectedBadge } from "../../lock-mark";
 import { NoCentreNotice } from "../../no-centre";
 
 export default async function SalesPage() {
   const session = await requireSession();
-  const isMerchant = session.role === "MERCHANT";
+  const mayEnter = canEnter(session.role);
+  const mayEdit = canEdit(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const [sales, closedDates] = await Promise.all([
+  const [sales] = await Promise.all([
     prisma.sale.findMany({
       where: { companyId: company.id, centreId: centre.id },
       include: {
@@ -24,7 +24,6 @@ export default async function SalesPage() {
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     }),
-    getClosedDateSet(company.id, centre.id),
   ]);
   const flags = await getFlagsFor("SALE", sales.map((s) => s.id));
 
@@ -38,7 +37,7 @@ export default async function SalesPage() {
             CareOf) ledger.
           </p>
         </div>
-        {isMerchant && (
+        {mayEnter && (
           <Link
             href="/vouchers/sales/new"
             className="bg-accent text-white px-4 py-2 text-[13px] font-semibold"
@@ -51,7 +50,7 @@ export default async function SalesPage() {
       {sales.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
           No sales for {company.name} · {centre.name} yet.
-          {isMerchant && " Use “New Sale” to record the first one."}
+          {mayEnter && " Use “New Sale” to record the first one."}
         </p>
       ) : (
         <div className="border border-line-strong bg-surface">
@@ -65,7 +64,7 @@ export default async function SalesPage() {
                 <th className="num-col">Amount</th>
                 <th className="num-col">Received</th>
                 <th className="num-col">Balance</th>
-                {isMerchant && <th className="w-16"></th>}
+                <th className="w-16"></th>
               </tr>
             </thead>
             <tbody>
@@ -77,7 +76,6 @@ export default async function SalesPage() {
                   <tr key={s.id}>
                     <td className="whitespace-nowrap">
                       {fmtDate(s.date)}
-                      <LockMark closed={closedDates.has(toInputDate(s.date))} />
                     </td>
                     <td className={`num ${struck}`}>{s.billNo}</td>
                     <td className={struck}>{SALE_TYPE_LABELS[s.type]}</td>
@@ -107,16 +105,14 @@ export default async function SalesPage() {
                     <td className={`num-col num ${struck} ${balance.greaterThan(0) ? "text-debit font-semibold" : "text-muted"}`}>
                       {fmtMoney(balance)}
                     </td>
-                    {isMerchant && (
-                      <td>
-                        <Link
-                          href={`/vouchers/sales/${s.id}`}
-                          className="text-accent underline underline-offset-2 text-[12px]"
-                        >
-                          {flag ? "View" : "Open"}
-                        </Link>
-                      </td>
-                    )}
+                    <td>
+                      <Link
+                        href={`/vouchers/sales/${s.id}`}
+                        className="text-accent underline underline-offset-2 text-[12px]"
+                      >
+                        {mayEdit && !flag ? "Edit" : "View"}
+                      </Link>
+                    </td>
                   </tr>
                 );
               })}

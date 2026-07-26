@@ -6,12 +6,12 @@ import { computeProfit, getTransactionRegister } from "@/lib/report";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
-import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { businessTodayDate, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 
 type SearchParams = { from?: string; to?: string };
 
 function parseRange(sp: SearchParams) {
-  const today = new Date(toInputDate(new Date()));
+  const today = businessTodayDate();
   const from =
     sp.from && /^\d{4}-\d{2}-\d{2}$/.test(sp.from)
       ? new Date(sp.from)
@@ -51,7 +51,7 @@ export default async function RegisterPage({
   ]);
 
   // Quick-range presets.
-  const now = new Date(toInputDate(new Date()));
+  const now = businessTodayDate();
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   const iso = (d: Date) => toInputDate(d);

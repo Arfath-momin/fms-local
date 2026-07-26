@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { AttachmentLinkedType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { requireMerchant } from "@/lib/session";
+import { requireEntry } from "@/lib/session";
 import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
 
 export type UploadState = { error: string } | null;
@@ -46,7 +46,7 @@ export async function uploadAttachment(
   _prev: UploadState,
   formData: FormData
 ): Promise<UploadState> {
-  await requireMerchant();
+  await requireEntry();
   if (!LINKED_TYPES.includes(linkedType))
     return { error: "Unsupported attachment target." };
 

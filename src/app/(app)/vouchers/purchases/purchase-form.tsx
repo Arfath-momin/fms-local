@@ -4,7 +4,7 @@ import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { PurchaseFormState } from "./actions";
 import type { PurchaseType } from "@/generated/prisma/enums";
-import { fmtMoney } from "@/lib/format";
+import { businessToday, fmtMoney } from "@/lib/format";
 
 const TYPE_OPTIONS: { value: PurchaseType; label: string }[] = [
   { value: "SOCIETY", label: "Society" },
@@ -58,7 +58,7 @@ export function PurchaseForm({
     initial?.lines?.length ? initial.lines : [BLANK_LINE]
   );
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = businessToday();
   const isLocal = type === "LOCAL";
 
   const grandTotal = useMemo(

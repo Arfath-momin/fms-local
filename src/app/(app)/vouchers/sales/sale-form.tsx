@@ -3,7 +3,7 @@
 import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { SaleType } from "@/generated/prisma/enums";
-import { fmtMoney } from "@/lib/format";
+import { businessToday, fmtMoney } from "@/lib/format";
 import type { SaleFormState } from "./actions";
 
 const inputCls =
@@ -71,7 +71,7 @@ export function SaleForm({
     action,
     null
   );
-  const today = new Date().toISOString().slice(0, 10);
+  const today = businessToday();
   const hasLines = type === "FISH_MILL" || type === "LOCAL";
   const [lines, setLines] = useState<SaleLineInit[]>(
     initial?.lines?.length ? initial.lines : [BLANK_LINE]

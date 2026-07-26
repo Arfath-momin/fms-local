@@ -1,42 +1,41 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
-import { toInputDate } from "@/lib/format";
-import { correctExpense, updateExpense } from "../actions";
+import { canEdit, canEnter, requireSession } from "@/lib/session";
+import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { updateExpense } from "../actions";
 import { ExpenseForm } from "../expense-form";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
+import { VoucherMeta } from "../../voucher-meta";
 
-export default async function EditExpensePage({
+export default async function ExpenseDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const session = await requireSession();
-  if (session.role !== "MERCHANT") redirect("/vouchers/expenses");
+  const mayEdit = canEdit(session.role);
+  const mayEnter = canEnter(session.role);
 
   const { id } = await params;
-  const expense = await prisma.expense.findUnique({ where: { id } });
+  const expense = await prisma.expense.findUnique({
+    where: { id },
+    include: {
+      party: { select: { name: true } },
+      createdBy: { select: { name: true } },
+      updatedBy: { select: { name: true } },
+    },
+  });
   if (!expense) notFound();
 
-  const [dayClose, flag] = await Promise.all([
-    prisma.dayClose.findUnique({
-      where: {
-        companyId_centreId_date: {
-          companyId: expense.companyId,
-          centreId: expense.centreId,
-          date: expense.date,
-        },
-      },
-    }),
-    prisma.errorFlag.findUnique({
-      where: {
-        linkedType_linkedId: { linkedType: "EXPENSE", linkedId: expense.id },
-      },
-    }),
-  ]);
+  // Historic flags from the old closed-day correction flow are still honoured.
+  const flag = await prisma.errorFlag.findUnique({
+    where: {
+      linkedType_linkedId: { linkedType: "EXPENSE", linkedId: expense.id },
+    },
+  });
 
   if (flag) {
     return (
@@ -64,15 +63,6 @@ export default async function EditExpensePage({
     );
   }
 
-  const initial = {
-    category: expense.category,
-    amount: expense.amount.toString(),
-    date: toInputDate(expense.date),
-    paid: expense.paid,
-    notes: expense.notes,
-    details: (expense.details as Record<string, string> | null) ?? {},
-  };
-
   const attachments = await getAttachments("EXPENSE", expense.id);
   const panel = (
     <AttachmentPanel
@@ -86,31 +76,49 @@ export default async function EditExpensePage({
         expense.id,
         `/vouchers/expenses/${expense.id}`
       )}
-      canUpload
+      canUpload={mayEnter}
     />
   );
 
-  if (dayClose) {
+  const meta = (
+    <VoucherMeta
+      createdBy={expense.createdBy}
+      createdAt={expense.createdAt}
+      updatedBy={expense.updatedBy}
+      updatedAt={expense.updatedAt}
+    />
+  );
+
+  if (!mayEdit) {
+    const details = (expense.details as Record<string, string> | null) ?? {};
     return (
       <div>
-        <h1 className="heading text-xl font-semibold mb-1">
-          Correct Expense (closed day)
-        </h1>
-        <p className="text-[13px] text-muted mb-4 max-w-lg">
-          This day is closed, so the original entry cannot be edited. Saving
-          here flags the original as an error — it stays visible,
-          struck-through — and records this corrected entry in its place.
-        </p>
-        <ExpenseForm
-          action={correctExpense.bind(null, expense.id)}
-          initial={initial}
-          submitLabel="Flag Original & Save Correction"
-          reasonField
-        />
+        <h1 className="heading text-xl font-semibold mb-4">Expense</h1>
+        <dl className="border border-line-strong bg-surface divide-y divide-line max-w-lg text-[13px]">
+          <Row label="Category" value={expense.category} />
+          <Row label="Vendor" value={expense.party.name} />
+          <Row label="Date" value={fmtDate(expense.date)} />
+          <Row label="Amount" value={fmtMoney(expense.amount)} />
+          <Row label="Paid" value={expense.paid ? "Yes" : "Outstanding"} />
+          {Object.entries(details).map(([k, v]) => (
+            <Row key={k} label={k} value={String(v)} />
+          ))}
+          {expense.notes && <Row label="Notes" value={expense.notes} />}
+        </dl>
+        {meta}
         {panel}
       </div>
     );
   }
+
+  const initial = {
+    category: expense.category,
+    amount: expense.amount.toString(),
+    date: toInputDate(expense.date),
+    paid: expense.paid,
+    notes: expense.notes,
+    details: (expense.details as Record<string, string> | null) ?? {},
+  };
 
   return (
     <div>
@@ -120,7 +128,17 @@ export default async function EditExpensePage({
         initial={initial}
         submitLabel="Save Changes"
       />
+      {meta}
       {panel}
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4 px-4 py-2">
+      <dt className="text-muted">{label}</dt>
+      <dd className="font-semibold">{value}</dd>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate } from "@/lib/format";
@@ -8,7 +8,7 @@ import { NoCentreNotice } from "../../no-centre";
 
 export default async function DeliveriesPage() {
   const session = await requireSession();
-  const isMerchant = session.role === "MERCHANT";
+  const mayEnter = canEnter(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
@@ -28,7 +28,7 @@ export default async function DeliveriesPage() {
             settlement or ledger.
           </p>
         </div>
-        {isMerchant && (
+        {mayEnter && (
           <Link
             href="/vouchers/deliveries/new"
             className="bg-accent text-white px-4 py-2 text-[13px] font-semibold"
@@ -41,7 +41,7 @@ export default async function DeliveriesPage() {
       {notes.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
           No delivery notes for {company.name} · {centre.name} yet.
-          {isMerchant && " Use “New Delivery Note” to record a dispatch."}
+          {mayEnter && " Use “New Delivery Note” to record a dispatch."}
         </p>
       ) : (
         <div className="border border-line-strong bg-surface">

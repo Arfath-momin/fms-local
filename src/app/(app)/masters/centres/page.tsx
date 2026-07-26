@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canAdminister, requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { getActiveCentre } from "@/lib/centre";
 import { fmtDate } from "@/lib/format";
@@ -7,7 +7,7 @@ import { CentreCreateForm } from "./centre-create-form";
 
 export default async function CentresPage() {
   const session = await requireSession();
-  const isMerchant = session.role === "MERCHANT";
+  const mayManage = canAdminister(session.role);
   const company = await getActiveCompany();
   const [centres, activeCentre] = await Promise.all([
     prisma.centre.findMany({
@@ -70,7 +70,7 @@ export default async function CentresPage() {
         </div>
       )}
 
-      {isMerchant && <CentreCreateForm />}
+      {mayManage && <CentreCreateForm />}
     </div>
   );
 }

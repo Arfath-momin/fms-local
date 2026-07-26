@@ -5,7 +5,7 @@ import { computeProfit } from "@/lib/report";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
-import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { businessTodayDate, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 
 function monthStart(d: Date) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
@@ -20,7 +20,7 @@ export default async function ProfitReportPage({
   const company = await getActiveCompany();
 
   const sp = await searchParams;
-  const today = new Date(toInputDate(new Date()));
+  const today = businessTodayDate();
   const from =
     sp.from && /^\d{4}-\d{2}-\d{2}$/.test(sp.from)
       ? new Date(sp.from)

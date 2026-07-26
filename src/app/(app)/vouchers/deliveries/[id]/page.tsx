@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
+import { VoucherMeta } from "../../voucher-meta";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -25,7 +26,8 @@ export default async function DeliveryNotePage({
   params: Promise<{ id: string }>;
 }) {
   const session = await requireSession();
-  const isMerchant = session.role === "MERCHANT";
+  const mayEdit = canEdit(session.role);
+  const mayEnter = canEnter(session.role);
   const { id } = await params;
 
   const note = await prisma.deliveryNote.findUnique({
@@ -34,6 +36,8 @@ export default async function DeliveryNotePage({
       company: { select: { name: true } },
       centre: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
+      createdBy: { select: { name: true } },
+      updatedBy: { select: { name: true } },
     },
   });
   if (!note) notFound();
@@ -58,7 +62,7 @@ export default async function DeliveryNotePage({
             {note.company.name} · {note.centre.name} · record only
           </p>
         </div>
-        {isMerchant && (
+        {mayEdit && (
           <Link
             href={`/vouchers/deliveries/${note.id}/edit`}
             className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
@@ -127,7 +131,14 @@ export default async function DeliveryNotePage({
           note.id,
           `/vouchers/deliveries/${note.id}`
         )}
-        canUpload={isMerchant}
+        canUpload={mayEnter}
+      />
+
+      <VoucherMeta
+        createdBy={note.createdBy}
+        createdAt={note.createdAt}
+        updatedBy={note.updatedBy}
+        updatedAt={note.updatedAt}
       />
     </div>
   );

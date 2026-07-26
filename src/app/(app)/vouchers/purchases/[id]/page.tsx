@@ -1,21 +1,23 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
-import { toInputDate } from "@/lib/format";
-import { correctPurchase, updatePurchase } from "../actions";
+import { canEdit, canEnter, requireSession } from "@/lib/session";
+import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
+import { updatePurchase } from "../actions";
 import { PurchaseForm, type PurchaseInit } from "../purchase-form";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
+import { VoucherMeta } from "../../voucher-meta";
 
-export default async function EditPurchasePage({
+export default async function PurchaseDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const session = await requireSession();
-  if (session.role !== "MERCHANT") redirect("/vouchers/purchases");
+  const mayEdit = canEdit(session.role);
+  const mayEnter = canEnter(session.role);
 
   const { id } = await params;
   const purchase = await prisma.purchase.findUnique({
@@ -23,26 +25,19 @@ export default async function EditPurchasePage({
     include: {
       party: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
+      createdBy: { select: { name: true } },
+      updatedBy: { select: { name: true } },
     },
   });
   if (!purchase) notFound();
 
-  const [dayClose, flag] = await Promise.all([
-    prisma.dayClose.findUnique({
-      where: {
-        companyId_centreId_date: {
-          companyId: purchase.companyId,
-          centreId: purchase.centreId,
-          date: purchase.date,
-        },
-      },
-    }),
-    prisma.errorFlag.findUnique({
-      where: {
-        linkedType_linkedId: { linkedType: "PURCHASE", linkedId: purchase.id },
-      },
-    }),
-  ]);
+  // Historic flags from the old closed-day correction flow are still honoured:
+  // the original stays visible and points at whatever replaced it.
+  const flag = await prisma.errorFlag.findUnique({
+    where: {
+      linkedType_linkedId: { linkedType: "PURCHASE", linkedId: purchase.id },
+    },
+  });
 
   if (flag) {
     return (
@@ -68,19 +63,6 @@ export default async function EditPurchasePage({
     );
   }
 
-  const initial: PurchaseInit = {
-    type: purchase.type,
-    partyName: purchase.party.name,
-    amount: purchase.amount.toString(),
-    paid: purchase.paid,
-    date: toInputDate(purchase.date),
-    lines: purchase.lines.map((l) => ({
-      particular: l.particular,
-      qtyKg: l.qtyKg.toString(),
-      pricePerKg: l.pricePerKg.toString(),
-    })),
-  };
-
   const attachments = await getAttachments("PURCHASE", purchase.id);
   const panel = (
     <AttachmentPanel
@@ -94,31 +76,76 @@ export default async function EditPurchasePage({
         purchase.id,
         `/vouchers/purchases/${purchase.id}`
       )}
-      canUpload
+      canUpload={mayEnter}
     />
   );
 
-  if (dayClose) {
+  const meta = (
+    <VoucherMeta
+      createdBy={purchase.createdBy}
+      createdAt={purchase.createdAt}
+      updatedBy={purchase.updatedBy}
+      updatedAt={purchase.updatedAt}
+    />
+  );
+
+  // Only an administrator may change a voucher after it is saved. Everyone else
+  // who can reach this page sees the same figures, read-only.
+  if (!mayEdit) {
     return (
       <div>
-        <h1 className="heading text-xl font-semibold mb-1">
-          Correct Purchase (closed day)
-        </h1>
-        <p className="text-[13px] text-muted mb-4 max-w-lg">
-          This day is closed, so the original entry cannot be edited. Saving here
-          flags the original as an error — it stays visible, struck-through — and
-          records this corrected entry in its place.
-        </p>
-        <PurchaseForm
-          action={correctPurchase.bind(null, purchase.id)}
-          initial={initial}
-          submitLabel="Flag Original & Save Correction"
-          reasonField
-        />
+        <h1 className="heading text-xl font-semibold mb-4">Purchase</h1>
+        <dl className="border border-line-strong bg-surface divide-y divide-line max-w-lg text-[13px]">
+          <Row label="Type" value={purchase.type} />
+          <Row label="Seller / Boat" value={purchase.party.name} />
+          <Row label="Date" value={fmtDate(purchase.date)} />
+          <Row label="Amount" value={fmtMoney(purchase.amount)} />
+          <Row label="Paid" value={purchase.paid ? "Yes" : "Outstanding"} />
+        </dl>
+
+        {purchase.lines.length > 0 && (
+          <div className="border border-line-strong bg-surface mt-4 max-w-lg">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>Particular</th>
+                  <th className="num-col">Qty</th>
+                  <th className="num-col">Rate</th>
+                  <th className="num-col">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {purchase.lines.map((l) => (
+                  <tr key={l.id}>
+                    <td>{l.particular}</td>
+                    <td className="num-col">{fmtKg(l.qtyKg)}</td>
+                    <td className="num-col">{fmtMoney(l.pricePerKg)}</td>
+                    <td className="num-col">{fmtMoney(l.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {meta}
         {panel}
       </div>
     );
   }
+
+  const initial: PurchaseInit = {
+    type: purchase.type,
+    partyName: purchase.party.name,
+    amount: purchase.amount.toString(),
+    paid: purchase.paid,
+    date: toInputDate(purchase.date),
+    lines: purchase.lines.map((l) => ({
+      particular: l.particular,
+      qtyKg: l.qtyKg.toString(),
+      pricePerKg: l.pricePerKg.toString(),
+    })),
+  };
 
   return (
     <div>
@@ -128,7 +155,17 @@ export default async function EditPurchasePage({
         initial={initial}
         submitLabel="Save Changes"
       />
+      {meta}
       {panel}
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4 px-4 py-2">
+      <dt className="text-muted">{label}</dt>
+      <dd className="font-semibold">{value}</dd>
     </div>
   );
 }

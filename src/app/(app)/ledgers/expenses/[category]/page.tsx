@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { ExpenseCategory } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEdit, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { getFlagsFor } from "@/lib/errorflag";
@@ -16,7 +16,7 @@ export default async function ExpenseCategoryPage({
   params: Promise<{ category: string }>;
 }) {
   const session = await requireSession();
-  const isMerchant = session.role === "MERCHANT";
+  const mayEdit = canEdit(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
@@ -71,7 +71,7 @@ export default async function ExpenseCategoryPage({
                 <th>Date</th>
                 <th>Notes</th>
                 <th className="num-col">Amount</th>
-                {isMerchant && <th className="w-16"></th>}
+                <th className="w-16"></th>
               </tr>
             </thead>
             <tbody>
@@ -84,16 +84,14 @@ export default async function ExpenseCategoryPage({
                   <td className={`num-col num text-debit ${struck}`}>
                     {fmtMoney(e.amount)}
                   </td>
-                  {isMerchant && (
-                    <td>
-                      <Link
-                        href={`/vouchers/expenses/${e.id}`}
-                        className="text-accent underline underline-offset-2 text-[12px]"
-                      >
-                        Edit
-                      </Link>
-                    </td>
-                  )}
+                  <td>
+                    <Link
+                      href={`/vouchers/expenses/${e.id}`}
+                      className="text-accent underline underline-offset-2 text-[12px]"
+                    >
+                      {mayEdit ? "Edit" : "View"}
+                    </Link>
+                  </td>
                 </tr>
                 );
               })}

@@ -2,22 +2,28 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { Role } from "@/generated/prisma/enums";
 
-const LINKS = [
+// `roles: undefined` means every signed-in role sees it. Auditors get no
+// Vouchers or Masters entry — they read ledgers and reports, and reach an
+// individual voucher only by drilling down from one of those.
+const LINKS: { href: string; label: string; roles?: Role[] }[] = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/vouchers", label: "Vouchers" },
-  { href: "/masters", label: "Masters" },
+  { href: "/vouchers", label: "Vouchers", roles: ["ADMIN", "ACCOUNTANT"] },
+  { href: "/masters", label: "Masters", roles: ["ADMIN", "ACCOUNTANT"] },
   { href: "/ledgers", label: "Ledgers" },
   { href: "/reports", label: "Reports" },
   { href: "/union", label: "Union" },
+  { href: "/admin/users", label: "Users", roles: ["ADMIN"] },
 ];
 
-export function NavLinks() {
+export function NavLinks({ role }: { role: Role }) {
   const pathname = usePathname();
+  const visible = LINKS.filter((l) => !l.roles || l.roles.includes(role));
 
   return (
     <nav className="py-2">
-      {LINKS.map((l) => {
+      {visible.map((l) => {
         const active =
           pathname === l.href || pathname.startsWith(l.href + "/");
         return (

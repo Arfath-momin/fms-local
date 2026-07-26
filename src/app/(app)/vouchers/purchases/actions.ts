@@ -5,11 +5,10 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { requireMerchant } from "@/lib/session";
+import { requireAdmin, requireEntry } from "@/lib/session";
 import { requireActiveScope } from "@/lib/centre";
 import { PURCHASE_SELLER_TYPE } from "@/lib/party";
 import { findOrCreateParty } from "@/lib/party-db";
-import { assertDayOpen } from "@/lib/dayclose";
 import { postLedgerEntry } from "@/lib/ledger";
 import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
 
@@ -143,7 +142,7 @@ export async function createPurchase(
   _prev: PurchaseFormState,
   formData: FormData
 ): Promise<PurchaseFormState> {
-  await requireMerchant();
+  const session = await requireEntry();
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
@@ -152,7 +151,6 @@ export async function createPurchase(
   let purchaseId: string;
   try {
     purchaseId = await prisma.$transaction(async (tx) => {
-      await assertDayOpen(tx, company.id, centre.id, d.date);
       const partyId = await findOrCreateParty(
         tx,
         d.partyName,
@@ -167,6 +165,7 @@ export async function createPurchase(
           amount: d.amount,
           paid: d.paid,
           date: d.date,
+          createdById: session.userId,
           lines: { create: d.lines },
         },
       });
@@ -197,7 +196,7 @@ export async function updatePurchase(
   _prev: PurchaseFormState,
   formData: FormData
 ): Promise<PurchaseFormState> {
-  await requireMerchant();
+  const session = await requireAdmin();
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
@@ -206,8 +205,6 @@ export async function updatePurchase(
     await prisma.$transaction(async (tx) => {
       const existing = await tx.purchase.findUnique({ where: { id: purchaseId } });
       if (!existing) throw new Error("Purchase not found.");
-      await assertDayOpen(tx, existing.companyId, existing.centreId, existing.date);
-      await assertDayOpen(tx, existing.companyId, existing.centreId, d.date);
 
       await tx.ledgerEntry.deleteMany({
         where: { sourceId: purchaseId, sourceType: { in: ["PURCHASE", "PAYMENT"] } },
@@ -227,6 +224,8 @@ export async function updatePurchase(
           amount: d.amount,
           paid: d.paid,
           date: d.date,
+          updatedById: session.userId,
+          updatedAt: new Date(),
           lines: { create: d.lines },
         },
       });
@@ -245,88 +244,6 @@ export async function updatePurchase(
     centreId: scope.centreId,
     linkedType: "PURCHASE",
     linkedId: purchaseId,
-    file: d.file,
-  });
-
-  revalidatePath("/vouchers/purchases");
-  redirect("/vouchers/purchases");
-}
-
-/**
- * Closed-day correction: flag the original (kept, struck-through), replace its
- * ledger + line rows with the correction's, and link the replacement.
- */
-export async function correctPurchase(
-  purchaseId: string,
-  _prev: PurchaseFormState,
-  formData: FormData
-): Promise<PurchaseFormState> {
-  await requireMerchant();
-  const parsed = parse(formData);
-  if ("error" in parsed) return { error: parsed.error };
-  const d = parsed.data;
-  const reason = String(formData.get("reason") ?? "").trim();
-
-  let replacementId: string;
-  let companyId: string;
-  let centreId: string;
-  try {
-    const result = await prisma.$transaction(async (tx) => {
-      const original = await tx.purchase.findUnique({ where: { id: purchaseId } });
-      if (!original) throw new Error("Purchase not found.");
-
-      const already = await tx.errorFlag.findUnique({
-        where: { linkedType_linkedId: { linkedType: "PURCHASE", linkedId: purchaseId } },
-      });
-      if (already) throw new Error("This purchase has already been corrected.");
-
-      const flag = await tx.errorFlag.create({
-        data: { linkedType: "PURCHASE", linkedId: purchaseId, reason: reason || null },
-      });
-      await tx.ledgerEntry.deleteMany({
-        where: { sourceId: purchaseId, sourceType: { in: ["PURCHASE", "PAYMENT"] } },
-      });
-
-      const partyId = await findOrCreateParty(
-        tx,
-        d.partyName,
-        PURCHASE_SELLER_TYPE[d.type]
-      );
-      const replacement = await tx.purchase.create({
-        data: {
-          companyId: original.companyId,
-          centreId: original.centreId,
-          partyId,
-          type: d.type,
-          amount: d.amount,
-          paid: d.paid,
-          date: d.date,
-          lines: { create: d.lines },
-        },
-      });
-      await postPurchaseLedger(tx, { ...replacement, ...d });
-      await tx.errorFlag.update({
-        where: { id: flag.id },
-        data: { correctingEntryId: replacement.id },
-      });
-      return {
-        replacementId: replacement.id,
-        companyId: original.companyId,
-        centreId: original.centreId,
-      };
-    });
-    replacementId = result.replacementId;
-    companyId = result.companyId;
-    centreId = result.centreId;
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not save correction." };
-  }
-
-  await saveAttachmentFile({
-    companyId,
-    centreId,
-    linkedType: "PURCHASE",
-    linkedId: replacementId,
     file: d.file,
   });
 

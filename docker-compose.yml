@@ -1,0 +1,121 @@
+name: fms
+
+# DATABASE_URL is derived from the Postgres service rather than read from .env
+# on purpose: the repo's local-dev .env points at the embedded Postgres on
+# localhost:5502, which is meaningless inside a container. Deriving it here
+# means a stray dev .env can never misdirect the deployed app.
+x-database-url: &database-url
+  postgresql://${POSTGRES_USER:-fms}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-fms}
+
+# Without a cap, container logs grow until the disk is full and every service
+# dies at once. This is the single most common self-hosting outage.
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+# Stops a compromised process inside a container from gaining privileges via
+# setuid binaries.
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  postgres:
+    # Pinned to a major version on purpose: Postgres will not start against a
+    # data directory written by a different major, so an unpinned tag turns a
+    # routine `docker compose pull` into an outage.
+    image: postgres:18-alpine
+    restart: unless-stopped
+    <<: [*logging, *hardening]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-fms}
+      TZ: ${TZ:-Asia/Kolkata}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Deliberately no `ports:` — Postgres is reachable only on the compose
+    # network, never from the public internet.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fms} -d ${POSTGRES_DB:-fms}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: applies pending migrations, then exits. The app waits for it to
+  # succeed, so a failed migration blocks the rollout instead of starting an app
+  # against a half-migrated schema.
+  migrate:
+    build:
+      context: .
+      target: builder
+    command: npx prisma migrate deploy
+    <<: [*logging, *hardening]
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    <<: [*logging, *hardening]
+    environment:
+      DATABASE_URL: *database-url
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      UPLOADS_DIR: /var/lib/fms/uploads
+      # Affects log timestamps and Postgres now(). It does NOT change how the
+      # app decides "today" — see the timezone note in docs/DEPLOYMENT.md.
+      TZ: ${TZ:-Asia/Kolkata}
+    volumes:
+      - uploads:/var/lib/fms/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    <<: [*logging, *hardening]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      FMS_DOMAIN: ${FMS_DOMAIN:?set FMS_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+  # Opt-in, never runs on `up`. Wipes transactional data and loads samples:
+  #   docker compose --profile seed run --rm seed
+  seed:
+    build:
+      context: .
+      target: builder
+    command: npm run db:seed
+    <<: [*logging, *hardening]
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["seed"]
+    restart: "no"
+
+volumes:
+  pgdata:
+  uploads:
+  caddy_data:
+  caddy_config:

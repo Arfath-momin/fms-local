@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { ExpenseFormState } from "./actions";
 import type { ExpenseCategory } from "@/generated/prisma/enums";
 import { EXPENSE_CATEGORIES, EXPENSE_SPECS } from "@/lib/expense";
-import { fmtMoney } from "@/lib/format";
+import { businessToday, fmtMoney } from "@/lib/format";
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -47,7 +47,7 @@ export function ExpenseForm({
   );
 
   const spec = EXPENSE_SPECS[category];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = businessToday();
 
   const computedTotal = useMemo(() => {
     if (spec.amountEntered) return null;

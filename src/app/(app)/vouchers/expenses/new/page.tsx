@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireSession } from "@/lib/session";
+import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { createExpense } from "../actions";
 import { ExpenseForm } from "../expense-form";
@@ -7,7 +7,7 @@ import { NoCentreNotice } from "../../../no-centre";
 
 export default async function NewExpensePage() {
   const session = await requireSession();
-  if (session.role !== "MERCHANT") redirect("/vouchers/expenses");
+  if (!canEnter(session.role)) redirect("/vouchers/expenses");
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 

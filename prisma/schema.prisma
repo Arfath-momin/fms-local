@@ -20,8 +20,9 @@ datasource db {
 // ---------- Auth ----------
 
 enum Role {
-  MERCHANT // full access
-  AUDITOR // read-only, no entry screens
+  ADMIN // full access; the only role that may edit an existing voucher
+  ACCOUNTANT // may enter vouchers and manage parties, but never edit a voucher
+  AUDITOR // read-only; no voucher menu, drill-down from ledgers only
 }
 
 model User {
@@ -30,7 +31,19 @@ model User {
   passwordHash String   @map("password_hash")
   name         String
   role         Role
+  // Accounts are deactivated, never deleted — vouchers reference their author
+  // and that history has to survive someone leaving.
+  isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
+
+  purchasesCreated     Purchase[]     @relation("PurchaseCreatedBy")
+  purchasesUpdated     Purchase[]     @relation("PurchaseUpdatedBy")
+  expensesCreated      Expense[]      @relation("ExpenseCreatedBy")
+  expensesUpdated      Expense[]      @relation("ExpenseUpdatedBy")
+  salesCreated         Sale[]         @relation("SaleCreatedBy")
+  salesUpdated         Sale[]         @relation("SaleUpdatedBy")
+  deliveryNotesCreated DeliveryNote[] @relation("DeliveryNoteCreatedBy")
+  deliveryNotesUpdated DeliveryNote[] @relation("DeliveryNoteUpdatedBy")
 
   @@map("users")
 }
@@ -126,20 +139,27 @@ enum PurchaseType {
 // the fish breakdown lives in the attached bill image. Local: party is the
 // seller ("Name"), amount is the sum of its line items.
 model Purchase {
-  id        String       @id @default(uuid())
-  companyId String       @map("company_id")
-  centreId  String       @map("centre_id")
-  partyId   String       @map("party_id")
-  type      PurchaseType
-  amount    Decimal      @db.Decimal(14, 2)
-  paid      Boolean      @default(true) // false → stays outstanding in the party ledger
-  date      DateTime     @db.Date
-  createdAt DateTime     @default(now()) @map("created_at")
+  id          String       @id @default(uuid())
+  companyId   String       @map("company_id")
+  centreId    String       @map("centre_id")
+  partyId     String       @map("party_id")
+  type        PurchaseType
+  amount      Decimal      @db.Decimal(14, 2)
+  paid        Boolean      @default(true) // false → stays outstanding in the party ledger
+  date        DateTime     @db.Date
+  createdAt   DateTime     @default(now()) @map("created_at")
+  // Null updatedAt means "never edited" — that is why this is not @updatedAt,
+  // which would also fire on insert.
+  updatedAt   DateTime?    @map("updated_at")
+  createdById String?      @map("created_by_id")
+  updatedById String?      @map("updated_by_id")
 
-  company Company        @relation(fields: [companyId], references: [id])
-  centre  Centre         @relation(fields: [centreId], references: [id])
-  party   Party          @relation(fields: [partyId], references: [id])
-  lines   PurchaseLine[]
+  company   Company        @relation(fields: [companyId], references: [id])
+  centre    Centre         @relation(fields: [centreId], references: [id])
+  party     Party          @relation(fields: [partyId], references: [id])
+  createdBy User?          @relation("PurchaseCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?          @relation("PurchaseUpdatedBy", fields: [updatedById], references: [id])
+  lines     PurchaseLine[]
 
   @@index([companyId, centreId, date])
   @@map("purchases")
@@ -176,21 +196,26 @@ enum ExpenseCategory {
 // plant, blocks, rate; Loaders/Ladies: boxes, rate; Rent: vehicle; etc.);
 // `amount` is always the total that flows to the ledger and the Profit report.
 model Expense {
-  id        String          @id @default(uuid())
-  companyId String          @map("company_id")
-  centreId  String          @map("centre_id")
-  partyId   String          @map("party_id") // expense vendor / category ledger
-  category  ExpenseCategory
-  amount    Decimal         @db.Decimal(14, 2)
-  paid      Boolean         @default(true)
-  details   Json?
-  notes     String?
-  date      DateTime        @db.Date
-  createdAt DateTime        @default(now()) @map("created_at")
+  id          String          @id @default(uuid())
+  companyId   String          @map("company_id")
+  centreId    String          @map("centre_id")
+  partyId     String          @map("party_id") // expense vendor / category ledger
+  category    ExpenseCategory
+  amount      Decimal         @db.Decimal(14, 2)
+  paid        Boolean         @default(true)
+  details     Json?
+  notes       String?
+  date        DateTime        @db.Date
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime?       @map("updated_at")
+  createdById String?         @map("created_by_id")
+  updatedById String?         @map("updated_by_id")
 
-  company Company @relation(fields: [companyId], references: [id])
-  centre  Centre  @relation(fields: [centreId], references: [id])
-  party   Party   @relation(fields: [partyId], references: [id])
+  company   Company @relation(fields: [companyId], references: [id])
+  centre    Centre  @relation(fields: [centreId], references: [id])
+  party     Party   @relation(fields: [partyId], references: [id])
+  createdBy User?   @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?   @relation("ExpenseUpdatedBy", fields: [updatedById], references: [id])
 
   @@index([companyId, centreId, category, date])
   @@map("expenses")
@@ -203,21 +228,26 @@ model Expense {
 // totals (box / big box / loose / pcs) are summed on the fly for display; the
 // note itself carries no accounting.
 model DeliveryNote {
-  id          String   @id @default(uuid())
-  companyId   String   @map("company_id")
-  centreId    String   @map("centre_id")
-  billNo      String   @map("bill_no")
-  date        DateTime @db.Date
+  id          String    @id @default(uuid())
+  companyId   String    @map("company_id")
+  centreId    String    @map("centre_id")
+  billNo      String    @map("bill_no")
+  date        DateTime  @db.Date
   recipient   String // the "To" field
-  vehicleNo   String   @map("vehicle_no")
-  advancePaid Decimal? @map("advance_paid") @db.Decimal(14, 2)
-  driverName  String?  @map("driver_name")
-  mobileNo    String?  @map("mobile_no")
-  createdAt   DateTime @default(now()) @map("created_at")
+  vehicleNo   String    @map("vehicle_no")
+  advancePaid Decimal?  @map("advance_paid") @db.Decimal(14, 2)
+  driverName  String?   @map("driver_name")
+  mobileNo    String?   @map("mobile_no")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime? @map("updated_at")
+  createdById String?   @map("created_by_id")
+  updatedById String?   @map("updated_by_id")
 
-  company Company            @relation(fields: [companyId], references: [id])
-  centre  Centre             @relation(fields: [centreId], references: [id])
-  lines   DeliveryNoteLine[]
+  company   Company            @relation(fields: [companyId], references: [id])
+  centre    Centre             @relation(fields: [centreId], references: [id])
+  createdBy User?              @relation("DeliveryNoteCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?              @relation("DeliveryNoteUpdatedBy", fields: [updatedById], references: [id])
+  lines     DeliveryNoteLine[]
 
   @@index([companyId, centreId, date])
   @@map("delivery_notes")
@@ -282,12 +312,17 @@ model Sale {
   // Factory-only:
   returnNote String? @map("return_note")
 
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime? @map("updated_at")
+  createdById String?   @map("created_by_id")
+  updatedById String?   @map("updated_by_id")
 
   company     Company    @relation(fields: [companyId], references: [id])
   centre      Centre     @relation(fields: [centreId], references: [id])
   party       Party      @relation("SaleBuyer", fields: [partyId], references: [id])
   careOfParty Party?     @relation("SaleCareOf", fields: [careOfPartyId], references: [id])
+  createdBy   User?      @relation("SaleCreatedBy", fields: [createdById], references: [id])
+  updatedBy   User?      @relation("SaleUpdatedBy", fields: [updatedById], references: [id])
   lines       SaleLine[]
 
   @@index([companyId, centreId, date])
@@ -368,7 +403,7 @@ model Attachment {
   centreId   String               @map("centre_id")
   linkedType AttachmentLinkedType @map("linked_type")
   linkedId   String               @map("linked_id")
-  imageUrl   String               @map("image_url")
+  storageKey String               @map("storage_key")
   uploadedAt DateTime             @default(now()) @map("uploaded_at")
 
   company Company @relation(fields: [companyId], references: [id])
@@ -380,8 +415,10 @@ model Attachment {
 
 // ---------- Day close & corrections ----------
 
-// A date with a DayClose row is locked — no direct edits via normal UI.
-// Trigger model: explicit "Close Day" merchant action.
+// RETIRED. Day closing was removed from the application: an Admin may edit any
+// voucher at any time, and only an Admin may edit at all. The table is kept so
+// no historic rows are destroyed and the feature can be revived, but nothing
+// writes to it and nothing reads it any more.
 model DayClose {
   id        String   @id @default(uuid())
   companyId String   @map("company_id")
@@ -403,9 +440,9 @@ enum ErrorFlagLinkedType {
   EXPENSE
 }
 
-// Closed-day corrections: the original row is never deleted; it gets an
-// ErrorFlag and a replacement record linked via correctingEntryId. Reports
-// exclude flagged records from totals but keep them visible in audit views.
+// RETIRED alongside DayClose — nothing creates flags any more. Existing rows
+// are still read: a flagged voucher stays visible, struck through, links to
+// whatever replaced it, and is excluded from report totals.
 model ErrorFlag {
   id                String              @id @default(uuid())
   linkedType        ErrorFlagLinkedType @map("linked_type")

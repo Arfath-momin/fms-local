@@ -2,14 +2,12 @@ import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { isDayClosed } from "@/lib/dayclose";
 import { computeDayBook } from "@/lib/report";
 import { NoCentreNotice } from "../../no-centre";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
-import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
-import { closeDay } from "./actions";
+import { businessTodayDate, fmtMoney, toInputDate } from "@/lib/format";
 
 const ZERO = new Prisma.Decimal(0);
 
@@ -18,7 +16,7 @@ export default async function DayBookPage({
 }: {
   searchParams: Promise<{ date?: string }>;
 }) {
-  const session = await requireSession();
+  await requireSession();
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
@@ -26,14 +24,9 @@ export default async function DayBookPage({
   const date =
     raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)
       ? new Date(raw)
-      : new Date(toInputDate(new Date()));
+      : businessTodayDate();
 
-  const [d, closed] = await Promise.all([
-    computeDayBook(company.id, date),
-    isDayClosed(company.id, centre.id, date),
-  ]);
-  const isMerchant = session.role === "MERCHANT";
-  const isFuture = date.getTime() > new Date(toInputDate(new Date())).getTime();
+  const d = await computeDayBook(company.id, date);
   const pfCls = d.profit.greaterThan(0)
     ? "text-credit"
     : d.profit.lessThan(0)
@@ -46,7 +39,7 @@ export default async function DayBookPage({
         <div>
           <h1 className="heading text-xl font-semibold">Day Book</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · company-wide P/L · Close Day locks {centre.name}
+            {company.name} · company-wide P/L · {centre.name}
           </p>
         </div>
         <form method="GET" className="flex items-center gap-2">
@@ -71,31 +64,6 @@ export default async function DayBookPage({
           </button>
         </form>
       </div>
-
-      {closed ? (
-        <div className="border border-line-strong bg-[#edece7] px-4 py-2.5 mb-3 flex items-center gap-2 text-[13px]">
-          <span aria-hidden>🔒</span>
-          <span className="font-semibold">
-            This day is closed — entries are final.
-          </span>
-          <span className="text-muted">
-            Corrections go through the error-flag flow on each voucher.
-          </span>
-        </div>
-      ) : (
-        isMerchant &&
-        !isFuture && (
-          <form action={closeDay} className="mb-3">
-            <input type="hidden" name="date" value={toInputDate(date)} />
-            <button
-              type="submit"
-              className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
-            >
-              🔒 Close Day — lock all entries for {fmtDate(date)}
-            </button>
-          </form>
-        )
-      )}
 
       {/* The daily row: Sale − (Purchase + Expense) = Profit */}
       <div className="border border-line-strong bg-surface">

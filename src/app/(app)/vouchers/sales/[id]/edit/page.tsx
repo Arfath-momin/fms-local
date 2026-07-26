@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEdit, requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { toInputDate } from "@/lib/format";
 import { updateSale } from "../../actions";
@@ -13,7 +13,7 @@ export default async function EditSalePage({
 }) {
   const session = await requireSession();
   const { id } = await params;
-  if (session.role !== "MERCHANT") redirect(`/vouchers/sales/${id}`);
+  if (!canEdit(session.role)) redirect(`/vouchers/sales/${id}`);
 
   const sale = await prisma.sale.findUnique({
     where: { id },
@@ -26,16 +26,6 @@ export default async function EditSalePage({
   if (!sale) notFound();
 
   // Closed days are final — corrections would go through the error-flag flow.
-  const dayClose = await prisma.dayClose.findUnique({
-    where: {
-      companyId_centreId_date: {
-        companyId: sale.companyId,
-        centreId: sale.centreId,
-        date: sale.date,
-      },
-    },
-  });
-  if (dayClose) redirect(`/vouchers/sales/${id}`);
 
   return (
     <div>

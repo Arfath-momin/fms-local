@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEdit, requireSession } from "@/lib/session";
 import { toInputDate } from "@/lib/format";
 import { updateDelivery } from "../../actions";
 import { DeliveryForm } from "../../delivery-form";
@@ -12,7 +12,7 @@ export default async function EditDeliveryPage({
 }) {
   const session = await requireSession();
   const { id } = await params;
-  if (session.role !== "MERCHANT") redirect(`/vouchers/deliveries/${id}`);
+  if (!canEdit(session.role)) redirect(`/vouchers/deliveries/${id}`);
 
   const note = await prisma.deliveryNote.findUnique({
     where: { id },

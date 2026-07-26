@@ -58,8 +58,11 @@ async function main() {
   }
 
   // --- users ---
+  // Development logins only — these passwords are in version control. Never
+  // run this seed against production; use `npm run user:create` there.
   const users = [
-    { email: "merchant@fms.local", name: "Merchant", role: "MERCHANT" as const, password: "merchant123" },
+    { email: "admin@fms.local", name: "Admin", role: "ADMIN" as const, password: "admin123" },
+    { email: "accountant@fms.local", name: "Accountant", role: "ACCOUNTANT" as const, password: "accountant123" },
     { email: "auditor@fms.local", name: "Auditor", role: "AUDITOR" as const, password: "auditor123" },
   ];
   for (const u of users) {

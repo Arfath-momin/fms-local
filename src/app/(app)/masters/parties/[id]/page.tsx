@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEnter, requireSession } from "@/lib/session";
 import { updateParty } from "../actions";
 import { PartyForm } from "../party-form";
 
@@ -10,7 +10,7 @@ export default async function EditPartyPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await requireSession();
-  if (session.role !== "MERCHANT") redirect("/masters/parties");
+  if (!canEnter(session.role)) redirect("/masters/parties");
 
   const { id } = await params;
   const party = await prisma.party.findUnique({ where: { id } });

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { requireMerchant } from "@/lib/session";
+import { requireAdmin, requireEntry } from "@/lib/session";
 import { requireActiveScope } from "@/lib/centre";
 import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
 
@@ -129,7 +129,7 @@ export async function createDelivery(
   _prev: DeliveryFormState,
   formData: FormData
 ): Promise<DeliveryFormState> {
-  await requireMerchant();
+  const session = await requireEntry();
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
@@ -148,6 +148,7 @@ export async function createDelivery(
         advancePaid: d.advancePaid,
         driverName: d.driverName,
         mobileNo: d.mobileNo,
+        createdById: session.userId,
         lines: {
           create: d.lines.map((l) => ({
             particulars: l.particulars,
@@ -182,7 +183,7 @@ export async function updateDelivery(
   _prev: DeliveryFormState,
   formData: FormData
 ): Promise<DeliveryFormState> {
-  await requireMerchant();
+  const session = await requireAdmin();
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
@@ -207,6 +208,8 @@ export async function updateDelivery(
           advancePaid: d.advancePaid,
           driverName: d.driverName,
           mobileNo: d.mobileNo,
+          updatedById: session.userId,
+          updatedAt: new Date(),
           lines: {
             create: d.lines.map((l) => ({
               particulars: l.particulars,

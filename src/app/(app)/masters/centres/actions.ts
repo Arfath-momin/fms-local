@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { requireMerchant } from "@/lib/session";
+import { requireAdmin } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { setActiveCentreCookie } from "@/lib/centre";
 
@@ -18,7 +18,7 @@ export async function createCentre(
   _prev: CentreFormState,
   formData: FormData
 ): Promise<CentreFormState> {
-  await requireMerchant();
+  await requireAdmin();
   const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
   if (!name) return { error: "Centre name is required." };
 
@@ -46,7 +46,7 @@ export async function renameCentre(
   _prev: CentreFormState,
   formData: FormData
 ): Promise<CentreFormState> {
-  await requireMerchant();
+  await requireAdmin();
   const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
   if (!name) return { error: "Centre name is required." };
 

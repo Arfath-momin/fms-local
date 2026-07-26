@@ -1,0 +1,99 @@
+// Creates or updates a single login account. Unlike `db:seed`, this touches
+// nothing else — no companies, no vouchers, no ledger entries — so it is the
+// only safe way to manage accounts on a live system.
+//
+//   npx tsx scripts/create-user.ts --email a@b.com --name "Asif" --role ADMIN
+//   npx tsx scripts/create-user.ts --email a@b.com --role AUDITOR --update
+//
+// Omit --password and a strong one is generated and printed once. Supply your
+// own with --password or the FMS_USER_PASSWORD environment variable (the env
+// var keeps it out of your shell history).
+import "dotenv/config";
+import { randomInt } from "node:crypto";
+import bcrypt from "bcryptjs";
+import { PrismaClient } from "../src/generated/prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+
+const ROLES = ["ADMIN", "ACCOUNTANT", "AUDITOR"] as const;
+type RoleName = (typeof ROLES)[number];
+
+const MIN_PASSWORD_LENGTH = 12;
+// Cost is stored inside the hash, so this can differ from older rows without
+// breaking bcrypt.compare() at login.
+const BCRYPT_COST = 12;
+
+function arg(name: string): string | undefined {
+  const i = process.argv.indexOf(`--${name}`);
+  return i !== -1 ? process.argv[i + 1] : undefined;
+}
+const flag = (name: string) => process.argv.includes(`--${name}`);
+
+function generatePassword(): string {
+  // Ambiguous characters removed — these get read aloud and retyped.
+  const alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < 20; i++) out += alphabet[randomInt(alphabet.length)];
+  return out;
+}
+
+function fail(message: string): never {
+  console.error(`error: ${message}`);
+  process.exit(1);
+}
+
+async function main() {
+  const email = arg("email")?.trim().toLowerCase();
+  const name = arg("name")?.trim();
+  const role = arg("role")?.trim().toUpperCase() as RoleName | undefined;
+  const update = flag("update");
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    fail("--email is required and must look like an email address");
+  if (!role || !ROLES.includes(role))
+    fail(`--role is required and must be one of: ${ROLES.join(", ")}`);
+
+  let password = arg("password") ?? process.env.FMS_USER_PASSWORD;
+  const generated = !password;
+  if (generated) password = generatePassword();
+  if (password!.length < MIN_PASSWORD_LENGTH)
+    fail(`password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+
+  if (!process.env.DATABASE_URL) fail("DATABASE_URL is not set");
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+  });
+
+  try {
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing && !update)
+      fail(`${email} already exists — pass --update to change it`);
+    if (!existing && !name) fail("--name is required when creating a new user");
+
+    const passwordHash = await bcrypt.hash(password!, BCRYPT_COST);
+
+    if (existing) {
+      await prisma.user.update({
+        where: { email },
+        data: { passwordHash, role, ...(name ? { name } : {}) },
+      });
+      console.log(`updated ${email} (${role})`);
+    } else {
+      await prisma.user.create({
+        data: { email, name: name!, role, passwordHash },
+      });
+      console.log(`created ${email} (${role})`);
+    }
+
+    if (generated) {
+      console.log(`\n  password: ${password}\n`);
+      console.log("Shown once and not stored anywhere. Save it now.");
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -3,6 +3,7 @@
 import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { DeliveryFormState } from "./actions";
+import { businessToday } from "@/lib/format";
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -59,7 +60,7 @@ export function DeliveryForm({
   const [lines, setLines] = useState<DeliveryLineInit[]>(
     initial?.lines?.length ? initial.lines : [BLANK_LINE]
   );
-  const today = new Date().toISOString().slice(0, 10);
+  const today = businessToday();
 
   const totals = useMemo(
     () =>

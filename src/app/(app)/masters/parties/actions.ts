@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireMerchant } from "@/lib/session";
+import { requireEntry } from "@/lib/session";
 import { PARTY_TYPES } from "@/lib/party";
 import type { PartyType } from "@/generated/prisma/enums";
 
@@ -28,7 +28,7 @@ export async function createParty(
   _prev: PartyFormState,
   formData: FormData
 ): Promise<PartyFormState> {
-  await requireMerchant();
+  await requireEntry();
   const parsed = parsePartyForm(formData);
   if ("error" in parsed) return { error: parsed.error };
 
@@ -42,7 +42,7 @@ export async function updateParty(
   _prev: PartyFormState,
   formData: FormData
 ): Promise<PartyFormState> {
-  await requireMerchant();
+  await requireEntry();
   const parsed = parsePartyForm(formData);
   if ("error" in parsed) return { error: parsed.error };
 
