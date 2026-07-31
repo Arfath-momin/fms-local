@@ -64,13 +64,15 @@ FROM base AS runner
 # database would start clean and then fail deep inside the connection pool
 # against localhost; empty, it fails immediately and says so.
 #
-# HOSTNAME is "::" rather than 0.0.0.0 because Railway's internal network — the
-# path its healthcheck and edge proxy both take to reach the container — is IPv6
-# only, and a server bound to 0.0.0.0 is invisible on it. Node opens "::"
-# dual-stack, so IPv4 callers (Caddy over the compose network) still connect.
+# HOSTNAME is what Next's standalone server binds — it reads process.env.HOSTNAME
+# and falls back to 0.0.0.0. That default is right for compose, where Caddy
+# reaches the app over IPv4. Railway needs IPv6 and cannot rely on this value
+# anyway: container runtimes set HOSTNAME to the container's own name and a
+# platform-injected value beats the image's, so scripts/start-prod.sh pins the
+# bind address there instead of trusting whatever arrives in the environment.
 ENV NODE_ENV=production \
     PORT=3000 \
-    HOSTNAME=:: \
+    HOSTNAME=0.0.0.0 \
     DATABASE_URL=
 
 RUN addgroup -g 1001 -S nodejs \

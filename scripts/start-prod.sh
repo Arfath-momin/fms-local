@@ -36,5 +36,15 @@ until node node_modules/prisma/build/index.js migrate deploy; do
 done
 
 cd /app
-echo "Starting Next.js server on ${HOSTNAME:-::}:${PORT:-3000}..."
+
+# Next's standalone server binds process.env.HOSTNAME. Pinned rather than
+# inherited for two reasons: Railway's internal network — the path both its
+# healthcheck and its edge proxy take to the container — is IPv6 only, and
+# container runtimes set HOSTNAME to the container's own name, which would bind
+# a single interface nothing else can route to and serve 502s from a process
+# that looks perfectly healthy in the logs. Node opens "::" dual-stack, so IPv4
+# callers still connect. Override with BIND_ADDRESS if a host lacks IPv6.
+export HOSTNAME="${BIND_ADDRESS:-::}"
+
+echo "Starting Next.js server on [${HOSTNAME}]:${PORT:-3000}..."
 exec node server.js
