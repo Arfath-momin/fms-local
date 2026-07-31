@@ -33,7 +33,7 @@ FROM base AS runner
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
-    UPLOADS_DIR=/var/lib/fms/uploads
+    UPLOADS_DIR=/app/uploads
 
 RUN addgroup -g 1001 -S nodejs \
  && adduser -u 1001 -S nextjs -G nodejs
@@ -45,7 +45,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 # Bill images live here on a named volume. Creating it owned by the runtime user
 # means Docker seeds the empty volume with the right ownership on first start.
-RUN mkdir -p /var/lib/fms/uploads && chown -R nextjs:nodejs /var/lib/fms
+RUN mkdir -p /app/uploads && chown -R nextjs:nodejs /app/uploads
 
 USER nextjs
 EXPOSE 3000

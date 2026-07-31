@@ -19,7 +19,8 @@ export function uploadsRoot(): string {
   // turbopackIgnore keeps the build tracer from concluding that an arbitrary
   // path may be read at runtime — without it, `output: "standalone"` copies the
   // entire project into the deploy bundle rather than just the traced files.
-  return path.resolve(/* turbopackIgnore: true */ process.env.UPLOADS_DIR ?? "uploads");
+  const configured = process.env.UPLOADS_DIR ?? process.env.RAILWAY_VOLUME_MOUNT_PATH;
+  return path.resolve(/* turbopackIgnore: true */ configured ?? "uploads");
 }
 
 /** Extensions we are willing to store, and the type we serve them back as. */
