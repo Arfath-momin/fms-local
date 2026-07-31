@@ -63,9 +63,14 @@ FROM base AS runner
 # into production. Left in place, a deployment that simply forgot to wire up its
 # database would start clean and then fail deep inside the connection pool
 # against localhost; empty, it fails immediately and says so.
+#
+# HOSTNAME is "::" rather than 0.0.0.0 because Railway's internal network — the
+# path its healthcheck and edge proxy both take to reach the container — is IPv6
+# only, and a server bound to 0.0.0.0 is invisible on it. Node opens "::"
+# dual-stack, so IPv4 callers (Caddy over the compose network) still connect.
 ENV NODE_ENV=production \
     PORT=3000 \
-    HOSTNAME=0.0.0.0 \
+    HOSTNAME=:: \
     DATABASE_URL=
 
 RUN addgroup -g 1001 -S nodejs \

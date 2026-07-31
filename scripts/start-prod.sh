@@ -18,8 +18,23 @@ set -eu
 
 echo "Applying Prisma migrations..."
 cd /app/.migrate
-node node_modules/prisma/build/index.js migrate deploy
-cd /app
 
-echo "Starting Next.js server..."
+# Retried because Railway's private network is not up the instant the container
+# is: for the first second or two `postgres.railway.internal` does not resolve,
+# and a migration that runs immediately fails with P1001 against a database that
+# is in fact perfectly healthy. A real schema error still fails, just five
+# attempts later. `until` shields the condition from `set -e`.
+attempt=1
+until node node_modules/prisma/build/index.js migrate deploy; do
+  if [ "$attempt" -ge 5 ]; then
+    echo "Migrations failed after ${attempt} attempts — refusing to start." >&2
+    exit 1
+  fi
+  echo "Attempt ${attempt} failed; retrying in 3s..." >&2
+  attempt=$((attempt + 1))
+  sleep 3
+done
+
+cd /app
+echo "Starting Next.js server on ${HOSTNAME:-::}:${PORT:-3000}..."
 exec node server.js
