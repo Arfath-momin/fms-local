@@ -28,12 +28,45 @@ COPY . .
 RUN npx prisma generate && npm run build
 
 
+# ---- migration toolchain ----------------------------------------------------
+# Platforms that run one container per service (Railway) have no equivalent of
+# compose's one-shot `migrate` service, so the app container has to apply its
+# own migrations at startup. The traced `node_modules` in .next/standalone
+# contains no Prisma CLI — it is a devDependency the compiled server never
+# imports — and `npx prisma` cannot fetch one at runtime as an unprivileged
+# user. So vendor a self-contained CLI here instead.
+#
+# Installed into its own prefix, never merged into the runtime node_modules:
+# overlaying these would silently replace the exact @prisma/client build that
+# `next build` traced. Versions are read out of the lockfile so this can never
+# drift from what the app itself was built against. `typescript` is an optional
+# peer of the CLI, needed only to load the TypeScript prisma.config.ts.
+FROM base AS migrator
+WORKDIR /migrate
+COPY package-lock.json ./lock.json
+RUN npm install --no-save --no-audit --no-fund --no-package-lock \
+      "prisma@$(node -p "require('./lock.json').packages['node_modules/prisma'].version")" \
+      "dotenv@$(node -p "require('./lock.json').packages['node_modules/dotenv'].version")" \
+      "typescript@$(node -p "require('./lock.json').packages['node_modules/typescript'].version")" \
+ && rm lock.json
+
+
 # ---- runtime ----------------------------------------------------------------
 FROM base AS runner
+# UPLOADS_DIR is deliberately NOT set here. src/lib/attachments.ts falls back to
+# RAILWAY_VOLUME_MOUNT_PATH and only then to a relative "uploads", which
+# resolves against WORKDIR to the same /app/uploads this used to hardcode.
+# Setting it would win over the ?? chain and strand every bill image on the
+# container filesystem, where a redeploy takes it with it.
+#
+# The base stage's placeholder DATABASE_URL is blanked so it cannot be inherited
+# into production. Left in place, a deployment that simply forgot to wire up its
+# database would start clean and then fail deep inside the connection pool
+# against localhost; empty, it fails immediately and says so.
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
-    UPLOADS_DIR=/app/uploads
+    DATABASE_URL=
 
 RUN addgroup -g 1001 -S nodejs \
  && adduser -u 1001 -S nextjs -G nodejs
@@ -43,6 +76,14 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
+# Everything `prisma migrate deploy` needs, kept together under one prefix so
+# the CLI, prisma.config.ts, the schema and the migrations all resolve from a
+# single working directory — see scripts/start-prod.sh.
+COPY --from=migrator --chown=nextjs:nodejs /migrate/node_modules ./.migrate/node_modules
+COPY --chown=nextjs:nodejs prisma.config.ts ./.migrate/
+COPY --chown=nextjs:nodejs prisma ./.migrate/prisma
+COPY --chown=nextjs:nodejs scripts/start-prod.sh ./scripts/start-prod.sh
+
 # Bill images live here on a named volume. Creating it owned by the runtime user
 # means Docker seeds the empty volume with the right ownership on first start.
 RUN mkdir -p /app/uploads && chown -R nextjs:nodejs /app/uploads
@@ -50,7 +91,13 @@ RUN mkdir -p /app/uploads && chown -R nextjs:nodejs /app/uploads
 USER nextjs
 EXPOSE 3000
 
+# Reads $PORT rather than hardcoding 3000: platforms that assign the port
+# themselves (Railway) override it, and a probe on the wrong port reports a
+# healthy container as dead.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/login >/dev/null 2>&1 || exit 1
+  CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/login" >/dev/null 2>&1 || exit 1
 
+# Plain server start: under compose the one-shot `migrate` service has already
+# run and the app must not race it. Railway has no such service and overrides
+# this with scripts/start-prod.sh (see railway.json).
 CMD ["node", "server.js"]
