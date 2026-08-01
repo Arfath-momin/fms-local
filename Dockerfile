@@ -75,7 +75,11 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     DATABASE_URL=
 
-RUN addgroup -g 1001 -S nodejs \
+# su-exec drops privileges without the signal-forwarding and reaping problems
+# `su` brings: it execs into the target user in the same PID, so the server
+# stays PID 1 and still receives SIGTERM on shutdown.
+RUN apk add --no-cache su-exec \
+ && addgroup -g 1001 -S nodejs \
  && adduser -u 1001 -S nextjs -G nodejs
 
 # standalone omits these two by design — copy them in or static assets 404.
@@ -90,12 +94,17 @@ COPY --from=migrator --chown=nextjs:nodejs /migrate/node_modules ./.migrate/node
 COPY --chown=nextjs:nodejs prisma.config.ts ./.migrate/
 COPY --chown=nextjs:nodejs prisma ./.migrate/prisma
 COPY --chown=nextjs:nodejs scripts/start-prod.sh ./scripts/start-prod.sh
+COPY --chown=nextjs:nodejs scripts/start-app.sh ./scripts/start-app.sh
 
-# Bill images live here on a named volume. Creating it owned by the runtime user
-# means Docker seeds the empty volume with the right ownership on first start.
+# Bill images live here when no volume is attached. An attached volume masks
+# this directory and arrives root-owned regardless, which is why the ownership
+# is re-applied at boot by scripts/start-app.sh rather than trusted from here.
 RUN mkdir -p /app/uploads && chown -R nextjs:nodejs /app/uploads
 
-USER nextjs
+# No `USER nextjs`: the container starts as root solely so start-app.sh can
+# chown the uploads mount, then drops to nextjs via su-exec before the server
+# starts. Setting USER here would make that chown impossible and put every bill
+# upload back to failing with EACCES.
 EXPOSE 3000
 
 # Reads $PORT rather than hardcoding 3000: platforms that assign the port
@@ -106,5 +115,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # Plain server start: under compose the one-shot `migrate` service has already
 # run and the app must not race it. Railway has no such service and overrides
-# this with scripts/start-prod.sh (see railway.json).
-CMD ["node", "server.js"]
+# this with scripts/start-prod.sh (see railway.json), which execs this same
+# script once migrations succeed.
+CMD ["sh", "./scripts/start-app.sh"]

@@ -46,5 +46,7 @@ cd /app
 # callers still connect. Override with BIND_ADDRESS if a host lacks IPv6.
 export HOSTNAME="${BIND_ADDRESS:-::}"
 
-echo "Starting Next.js server on [${HOSTNAME}]:${PORT:-3000}..."
-exec node server.js
+# Hands off to the shared launcher, which fixes ownership of the uploads volume
+# and drops from root to the nextjs user before starting the server. Migrations
+# above therefore run as root — they touch the database only, never the volume.
+exec sh /app/scripts/start-app.sh
