@@ -5,21 +5,37 @@ import { getActiveScope } from "@/lib/centre";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { getFlagsFor } from "@/lib/errorflag";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import { CorrectedBadge } from "../../lock-mark";
+import { DateWindow, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
-export default async function ExpensesPage() {
+export default async function ExpensesPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
   const session = await requireSession();
   const mayEnter = canEnter(session.role);
   const mayEdit = canEdit(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const [expenses] = await Promise.all([
+  const listWindow = parseListWindow(await searchParams);
+  const where = {
+    companyId: company.id,
+    centreId: centre.id,
+    ...dateWhere(listWindow),
+  };
+
+  const [expenses, total] = await Promise.all([
     prisma.expense.findMany({
-      where: { companyId: company.id, centreId: centre.id },
+      where,
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      skip: listWindow.skip,
+      take: listWindow.take,
     }),
+    prisma.expense.count({ where }),
   ]);
   const flags = await getFlagsFor(
     "EXPENSE",
@@ -45,10 +61,13 @@ export default async function ExpensesPage() {
         )}
       </div>
 
+      <DateWindow basePath="/vouchers/expenses" window={listWindow} />
+
       {expenses.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
-          No expenses for {company.name} yet.
-          {mayEnter && " Use “New Expense” to enter the first one."}
+          No expenses for {company.name} between {listWindow.from} and{" "}
+          {listWindow.to}. Widen the dates above to look further back.
+          {mayEnter && " Or use “New Expense” to enter one."}
         </p>
       ) : (
         <div className="border border-line-strong bg-surface max-w-2xl">
@@ -103,6 +122,10 @@ export default async function ExpensesPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {expenses.length > 0 && (
+        <Pager basePath="/vouchers/expenses" window={listWindow} total={total} />
       )}
     </div>
   );

@@ -4,7 +4,13 @@ import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { getFlagsFor } from "@/lib/errorflag";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import {
+  dateWhere,
+  parseListWindow,
+  type SearchParams,
+} from "@/lib/paging";
 import { CorrectedBadge } from "../../lock-mark";
+import { DateWindow, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
 const TYPE_LABELS = {
@@ -14,22 +20,36 @@ const TYPE_LABELS = {
   LOCAL: "Local",
 };
 
-export default async function PurchasesPage() {
+export default async function PurchasesPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
   const session = await requireSession();
   const mayEnter = canEnter(session.role);
   const mayEdit = canEdit(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const [purchases] = await Promise.all([
+  const listWindow = parseListWindow(await searchParams);
+  const where = {
+    companyId: company.id,
+    centreId: centre.id,
+    ...dateWhere(listWindow),
+  };
+
+  const [purchases, total] = await Promise.all([
     prisma.purchase.findMany({
-      where: { companyId: company.id, centreId: centre.id },
+      where,
       include: {
         party: { select: { name: true } },
         _count: { select: { lines: true } },
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      skip: listWindow.skip,
+      take: listWindow.take,
     }),
+    prisma.purchase.count({ where }),
   ]);
   const flags = await getFlagsFor(
     "PURCHASE",
@@ -55,10 +75,13 @@ export default async function PurchasesPage() {
         )}
       </div>
 
+      <DateWindow basePath="/vouchers/purchases" window={listWindow} />
+
       {purchases.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
-          No purchases for {company.name} yet.
-          {mayEnter && " Use “New Purchase” to enter the first one."}
+          No purchases for {company.name} between {listWindow.from} and{" "}
+          {listWindow.to}. Widen the dates above to look further back.
+          {mayEnter && " Or use “New Purchase” to enter one."}
         </p>
       ) : (
         <div className="border border-line-strong bg-surface">
@@ -127,6 +150,14 @@ export default async function PurchasesPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {purchases.length > 0 && (
+        <Pager
+          basePath="/vouchers/purchases"
+          window={listWindow}
+          total={total}
+        />
       )}
     </div>
   );

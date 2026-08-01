@@ -3,8 +3,8 @@ import Link from "next/link";
 const ITEMS = [
   {
     href: "/reports/register",
-    label: "Daily Transactions",
-    desc: "Every purchase, sale and expense across all centres for a day, month or year — with company-wide P/L below.",
+    label: "Transactions Report",
+    desc: "Day, month or year. A day lists every transaction; a month totals each day; a year totals each month — with purchase, sale, expense and P/L throughout.",
   },
   {
     href: "/reports/profit",

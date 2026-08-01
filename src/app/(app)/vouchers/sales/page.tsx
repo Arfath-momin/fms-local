@@ -5,25 +5,41 @@ import { getActiveScope } from "@/lib/centre";
 import { getFlagsFor } from "@/lib/errorflag";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import { CorrectedBadge } from "../../lock-mark";
+import { DateWindow, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
-export default async function SalesPage() {
+export default async function SalesPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
   const session = await requireSession();
   const mayEnter = canEnter(session.role);
   const mayEdit = canEdit(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const [sales] = await Promise.all([
+  const listWindow = parseListWindow(await searchParams);
+  const where = {
+    companyId: company.id,
+    centreId: centre.id,
+    ...dateWhere(listWindow),
+  };
+
+  const [sales, total] = await Promise.all([
     prisma.sale.findMany({
-      where: { companyId: company.id, centreId: centre.id },
+      where,
       include: {
         party: { select: { name: true } },
         careOfParty: { select: { name: true } },
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      skip: listWindow.skip,
+      take: listWindow.take,
     }),
+    prisma.sale.count({ where }),
   ]);
   const flags = await getFlagsFor("SALE", sales.map((s) => s.id));
 
@@ -47,10 +63,13 @@ export default async function SalesPage() {
         )}
       </div>
 
+      <DateWindow basePath="/vouchers/sales" window={listWindow} />
+
       {sales.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
-          No sales for {company.name} · {centre.name} yet.
-          {mayEnter && " Use “New Sale” to record the first one."}
+          No sales for {company.name} · {centre.name} between {listWindow.from}{" "}
+          and {listWindow.to}. Widen the dates above to look further back.
+          {mayEnter && " Or use “New Sale” to record one."}
         </p>
       ) : (
         <div className="border border-line-strong bg-surface">
@@ -119,6 +138,10 @@ export default async function SalesPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {sales.length > 0 && (
+        <Pager basePath="/vouchers/sales" window={listWindow} total={total} />
       )}
     </div>
   );

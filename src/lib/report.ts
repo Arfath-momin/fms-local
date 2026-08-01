@@ -218,6 +218,179 @@ export async function computeUnion(from: Date, to: Date): Promise<UnionReport> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Period breakdown — the Day / Month / Year report
+// ---------------------------------------------------------------------------
+
+export type PeriodBucket = {
+  /** "YYYY-MM-DD" for day buckets, "YYYY-MM" for month buckets. */
+  key: string;
+  /** Column label: "1".."31" for days, "Jan".."Dec" for months. */
+  label: string;
+  purchaseByType: Record<PurchaseType, Prisma.Decimal>;
+  saleByType: Record<SaleType, Prisma.Decimal>;
+  expenseByCategory: Record<ExpenseCategory, Prisma.Decimal>;
+  purchase: Prisma.Decimal;
+  sale: Prisma.Decimal;
+  expense: Prisma.Decimal;
+  profit: Prisma.Decimal;
+};
+
+export type PeriodBreakdown = {
+  buckets: PeriodBucket[];
+  total: PeriodBucket;
+};
+
+const MONTH_LABELS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+function emptyBucket(key: string, label: string): PeriodBucket {
+  return {
+    key,
+    label,
+    purchaseByType: { SOCIETY: ZERO, KFDC: ZERO, PRIVATE: ZERO, LOCAL: ZERO },
+    saleByType: { MARKET: ZERO, FISH_MILL: ZERO, FACTORY: ZERO, LOCAL: ZERO },
+    expenseByCategory: {
+      ICE: ZERO, LOADERS: ZERO, LADIES: ZERO,
+      BATHA: ZERO, CANTEEN: ZERO, RENT: ZERO,
+    },
+    purchase: ZERO,
+    sale: ZERO,
+    expense: ZERO,
+    profit: ZERO,
+  };
+}
+
+/**
+ * A @db.Date comes back as UTC midnight, so slicing the ISO string is what
+ * preserves the calendar day — the same reasoning as toInputDate() in format.ts.
+ * Never use local getDate()/getMonth() here; they would shift the day for any
+ * server not running in UTC.
+ */
+function bucketKeyOf(date: Date, bucket: "day" | "month"): string {
+  const iso = date.toISOString();
+  return bucket === "day" ? iso.slice(0, 10) : iso.slice(0, 7);
+}
+
+/**
+ * Purchase / sale / expense totals for [from, to], split by calendar day or by
+ * calendar month, and within each of those by voucher type or expense category.
+ *
+ * Grouping happens in Postgres — three groupBy queries, one per voucher table,
+ * keyed on (date, type) — so the cost is set by how many distinct day/type
+ * combinations exist in the range, not by how many vouchers were written. A
+ * full year is at most a few thousand grouped rows.
+ *
+ * Empty buckets are materialised deliberately: the report is meant to show
+ * every day of the month including the ones with no trade, so a quiet day reads
+ * as a zero rather than vanishing from the table.
+ *
+ * Flagged-error vouchers are excluded, matching computeProfit() so the two
+ * screens can never disagree.
+ */
+export async function computePeriodBreakdown(args: {
+  companyId: string;
+  /** null = every centre of the company. */
+  centreId: string | null;
+  from: Date;
+  to: Date;
+  bucket: "day" | "month";
+}): Promise<PeriodBreakdown> {
+  const { companyId, centreId, from, to, bucket } = args;
+  const scope = {
+    companyId,
+    ...(centreId ? { centreId } : {}),
+    date: { gte: from, lte: to },
+  };
+
+  const [flaggedPurchases, flaggedExpenses, flaggedSales] = await Promise.all([
+    getFlaggedIds("PURCHASE"),
+    getFlaggedIds("EXPENSE"),
+    getFlaggedIds("SALE"),
+  ]);
+
+  const [purchaseGroups, saleGroups, expenseGroups] = await Promise.all([
+    prisma.purchase.groupBy({
+      by: ["date", "type"],
+      where: { ...scope, id: { notIn: flaggedPurchases } },
+      _sum: { amount: true },
+    }),
+    prisma.sale.groupBy({
+      by: ["date", "type"],
+      where: { ...scope, id: { notIn: flaggedSales } },
+      _sum: { amount: true },
+    }),
+    prisma.expense.groupBy({
+      by: ["date", "category"],
+      where: { ...scope, id: { notIn: flaggedExpenses } },
+      _sum: { amount: true },
+    }),
+  ]);
+
+  // Pre-seed every bucket in the range so gaps render as zero rows.
+  const buckets = new Map<string, PeriodBucket>();
+  if (bucket === "day") {
+    for (
+      let t = from.getTime();
+      t <= to.getTime();
+      t += 24 * 60 * 60 * 1000
+    ) {
+      const d = new Date(t);
+      const key = d.toISOString().slice(0, 10);
+      buckets.set(key, emptyBucket(key, String(d.getUTCDate())));
+    }
+  } else {
+    const y = from.getUTCFullYear();
+    for (let m = 0; m < 12; m++) {
+      const key = `${y}-${String(m + 1).padStart(2, "0")}`;
+      buckets.set(key, emptyBucket(key, MONTH_LABELS[m]));
+    }
+  }
+
+  const total = emptyBucket("total", "Total");
+
+  for (const g of purchaseGroups) {
+    const b = buckets.get(bucketKeyOf(g.date, bucket));
+    if (!b) continue;
+    const amount = g._sum.amount ?? ZERO;
+    b.purchaseByType[g.type] = b.purchaseByType[g.type].add(amount);
+    b.purchase = b.purchase.add(amount);
+    total.purchaseByType[g.type] = total.purchaseByType[g.type].add(amount);
+    total.purchase = total.purchase.add(amount);
+  }
+
+  for (const g of saleGroups) {
+    const b = buckets.get(bucketKeyOf(g.date, bucket));
+    if (!b) continue;
+    const amount = g._sum.amount ?? ZERO;
+    b.saleByType[g.type] = b.saleByType[g.type].add(amount);
+    b.sale = b.sale.add(amount);
+    total.saleByType[g.type] = total.saleByType[g.type].add(amount);
+    total.sale = total.sale.add(amount);
+  }
+
+  for (const g of expenseGroups) {
+    const b = buckets.get(bucketKeyOf(g.date, bucket));
+    if (!b) continue;
+    const amount = g._sum.amount ?? ZERO;
+    b.expenseByCategory[g.category] =
+      b.expenseByCategory[g.category].add(amount);
+    b.expense = b.expense.add(amount);
+    total.expenseByCategory[g.category] =
+      total.expenseByCategory[g.category].add(amount);
+    total.expense = total.expense.add(amount);
+  }
+
+  for (const b of buckets.values()) {
+    b.profit = b.sale.sub(b.purchase).sub(b.expense);
+  }
+  total.profit = total.sale.sub(total.purchase).sub(total.expense);
+
+  return { buckets: [...buckets.values()], total };
+}
+
 export type RegisterRow = {
   id: string;
   date: Date;
@@ -231,17 +404,22 @@ export type RegisterRow = {
 };
 
 /**
- * The daily transactions register for [from, to] — every purchase, sale and
- * expense across ALL centres of a company, in one chronological list. Company
- * wide by design (P/L aggregates across centres). Flagged rows are excluded so
- * the register matches the P/L totals.
+ * The transactions register for [from, to] — every purchase, sale and expense
+ * in one chronological list. Flagged rows are excluded so the register matches
+ * the P/L totals.
+ *
+ * `centreId` narrows it to a single centre; null keeps the original
+ * company-wide behaviour, which is the honest scope for anything that reports
+ * profit (purchase and sale of the same fish can land in different centres).
  */
 export async function getTransactionRegister(
   companyId: string,
   from: Date,
-  to: Date
+  to: Date,
+  centreId: string | null = null
 ): Promise<RegisterRow[]> {
   const dateRange = { gte: from, lte: to };
+  const centreWhere = centreId ? { centreId } : {};
   const [flaggedPurchases, flaggedExpenses, flaggedSales] = await Promise.all([
     getFlaggedIds("PURCHASE"),
     getFlaggedIds("EXPENSE"),
@@ -250,11 +428,21 @@ export async function getTransactionRegister(
 
   const [purchases, sales, expenses] = await Promise.all([
     prisma.purchase.findMany({
-      where: { companyId, date: dateRange, id: { notIn: flaggedPurchases } },
+      where: {
+        companyId,
+        ...centreWhere,
+        date: dateRange,
+        id: { notIn: flaggedPurchases },
+      },
       include: { centre: { select: { name: true } }, party: { select: { name: true } } },
     }),
     prisma.sale.findMany({
-      where: { companyId, date: dateRange, id: { notIn: flaggedSales } },
+      where: {
+        companyId,
+        ...centreWhere,
+        date: dateRange,
+        id: { notIn: flaggedSales },
+      },
       include: {
         centre: { select: { name: true } },
         party: { select: { name: true } },
@@ -262,7 +450,12 @@ export async function getTransactionRegister(
       },
     }),
     prisma.expense.findMany({
-      where: { companyId, date: dateRange, id: { notIn: flaggedExpenses } },
+      where: {
+        companyId,
+        ...centreWhere,
+        date: dateRange,
+        id: { notIn: flaggedExpenses },
+      },
       include: { centre: { select: { name: true } }, party: { select: { name: true } } },
     }),
   ]);

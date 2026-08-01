@@ -6,6 +6,8 @@ import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { PARTY_TYPE_LABELS } from "@/lib/party";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
+import { DateWindow, Pager } from "../../../list-controls";
 import { NoCentreNotice } from "../../../no-centre";
 
 const SOURCE_LABELS = {
@@ -17,8 +19,10 @@ const SOURCE_LABELS = {
 
 export default async function PartyStatementPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   await requireSession();
   const { company, centre } = await getActiveScope();
@@ -28,10 +32,27 @@ export default async function PartyStatementPage({
   const party = await prisma.party.findUnique({ where: { id } });
   if (!party) notFound();
 
-  const entries = await prisma.ledgerEntry.findMany({
-    where: { companyId: company.id, centreId: centre.id, partyId: id },
-    orderBy: [{ date: "asc" }, { createdAt: "asc" }],
-  });
+  const listWindow = parseListWindow(await searchParams);
+  const scope = { companyId: company.id, centreId: centre.id, partyId: id };
+  const where = { ...scope, ...dateWhere(listWindow) };
+
+  // The statement is windowed, but the headline balance must not be: it is what
+  // the party owes *now*, not at the end of whichever month is on screen. So it
+  // comes from the newest entry overall rather than from the last row rendered.
+  const [entries, total, latest] = await Promise.all([
+    prisma.ledgerEntry.findMany({
+      where,
+      orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+      skip: listWindow.skip,
+      take: listWindow.take,
+    }),
+    prisma.ledgerEntry.count({ where }),
+    prisma.ledgerEntry.findFirst({
+      where: scope,
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      select: { runningBalance: true },
+    }),
+  ]);
 
   // Resolve source links for drill-down: each ledger entry's sourceId points at
   // its own voucher page (purchase / sale / expense). PAYMENT entries share the
@@ -56,8 +77,7 @@ export default async function PartyStatementPage({
   for (const e of expenses) links.set(e.id, `/vouchers/expenses/${e.id}`);
   for (const s of sales) links.set(s.id, `/vouchers/sales/${s.id}`);
 
-  const balance =
-    entries.at(-1)?.runningBalance ?? new Prisma.Decimal(0);
+  const balance = latest?.runningBalance ?? new Prisma.Decimal(0);
 
   return (
     <div className="max-w-3xl">
@@ -105,9 +125,16 @@ export default async function PartyStatementPage({
         </div>
       </div>
 
+      <DateWindow
+        basePath={`/ledgers/parties/${party.id}`}
+        window={listWindow}
+      />
+
       {entries.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
-          No transactions with {party.name} in {company.name} yet.
+          No transactions with {party.name} in {company.name} between{" "}
+          {listWindow.from} and {listWindow.to}. Widen the dates above to see
+          earlier activity.
         </p>
       ) : (
         <div className="border border-line-strong bg-surface">
@@ -155,6 +182,14 @@ export default async function PartyStatementPage({
             </tbody>
           </table>
         </div>
+      )}
+
+      {entries.length > 0 && (
+        <Pager
+          basePath={`/ledgers/parties/${party.id}`}
+          window={listWindow}
+          total={total}
+        />
       )}
     </div>
   );

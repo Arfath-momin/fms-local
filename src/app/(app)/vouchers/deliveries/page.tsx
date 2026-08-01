@@ -4,19 +4,37 @@ import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate } from "@/lib/format";
+import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
+import { DateWindow, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
-export default async function DeliveriesPage() {
+export default async function DeliveriesPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
   const session = await requireSession();
   const mayEnter = canEnter(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const notes = await prisma.deliveryNote.findMany({
-    where: { companyId: company.id, centreId: centre.id },
-    include: { lines: true },
-    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-  });
+  const listWindow = parseListWindow(await searchParams);
+  const where = {
+    companyId: company.id,
+    centreId: centre.id,
+    ...dateWhere(listWindow),
+  };
+
+  const [notes, total] = await Promise.all([
+    prisma.deliveryNote.findMany({
+      where,
+      include: { lines: true },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      skip: listWindow.skip,
+      take: listWindow.take,
+    }),
+    prisma.deliveryNote.count({ where }),
+  ]);
 
   return (
     <div>
@@ -38,10 +56,14 @@ export default async function DeliveriesPage() {
         )}
       </div>
 
+      <DateWindow basePath="/vouchers/deliveries" window={listWindow} />
+
       {notes.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
-          No delivery notes for {company.name} · {centre.name} yet.
-          {mayEnter && " Use “New Delivery Note” to record a dispatch."}
+          No delivery notes for {company.name} · {centre.name} between{" "}
+          {listWindow.from} and {listWindow.to}. Widen the dates above to look
+          further back.
+          {mayEnter && " Or use “New Delivery Note” to record a dispatch."}
         </p>
       ) : (
         <div className="border border-line-strong bg-surface">
@@ -86,6 +108,14 @@ export default async function DeliveriesPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {notes.length > 0 && (
+        <Pager
+          basePath="/vouchers/deliveries"
+          window={listWindow}
+          total={total}
+        />
       )}
     </div>
   );
