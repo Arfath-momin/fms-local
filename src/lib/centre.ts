@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { getActiveCompany, type CompanyInfo } from "@/lib/company";
@@ -7,14 +8,20 @@ const COOKIE_NAME = "fms_centre";
 
 export type CentreInfo = { id: string; name: string; companyId: string };
 
-/** All centres of a company, alphabetical. */
-export async function getCentres(companyId: string): Promise<CentreInfo[]> {
+/**
+ * All centres of a company, alphabetical. Memoised per request for the same
+ * reason as getCompanies(): getActiveCentre() calls it and so does the layout.
+ * cache() keys on companyId, so switching company still reads fresh.
+ */
+export const getCentres = cache(async function getCentres(
+  companyId: string
+): Promise<CentreInfo[]> {
   return prisma.centre.findMany({
     where: { companyId },
     orderBy: { name: "asc" },
     select: { id: true, name: true, companyId: true },
   });
-}
+});
 
 /**
  * The active centre within a company. The cookie only counts if it names a

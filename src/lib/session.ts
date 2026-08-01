@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -68,8 +69,13 @@ export async function createSession(session: Session) {
  * deactivated user keeps working, until it expires. The database is
  * authoritative for both; a primary-key lookup is cheap enough to pay per
  * request for that guarantee.
+ *
+ * cache() makes that "per request" literal. The layout calls this and so does
+ * every page inside it, which without memoisation is the same lookup two or
+ * three times per navigation. React clears the cache between requests, so a
+ * role change still takes effect on the very next one.
  */
-export async function getSession(): Promise<Session | null> {
+export const getSession = cache(async function getSession(): Promise<Session | null> {
   const token = (await cookies()).get(COOKIE_NAME)?.value;
   if (!token) return null;
 
@@ -94,7 +100,7 @@ export async function getSession(): Promise<Session | null> {
     name: user.name,
     role: user.role,
   };
-}
+});
 
 /** For pages/layouts: bounce to /login when unauthenticated. */
 export async function requireSession(): Promise<Session> {

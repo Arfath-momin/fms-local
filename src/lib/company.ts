@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 
@@ -6,12 +7,17 @@ const COOKIE_NAME = "fms_company";
 
 export type CompanyInfo = { id: string; name: string };
 
-export async function getCompanies(): Promise<CompanyInfo[]> {
+// Memoised per request: getActiveCompany() below calls this, and the app layout
+// calls both to render the switcher, which without cache() is the same query
+// twice on every navigation.
+export const getCompanies = cache(async function getCompanies(): Promise<
+  CompanyInfo[]
+> {
   return prisma.company.findMany({
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   });
-}
+});
 
 /**
  * The active company scopes every query and every entry (spec §2: everything
