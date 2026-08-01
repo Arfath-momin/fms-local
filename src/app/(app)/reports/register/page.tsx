@@ -8,9 +8,9 @@ import {
   getTransactionRegister,
   type PeriodBucket,
 } from "@/lib/report";
-import { PURCHASE_TYPES, PURCHASE_TYPE_LABELS } from "@/lib/purchase";
-import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
-import { SALE_TYPES, SALE_TYPE_LABELS } from "@/lib/sale";
+import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
+import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
+import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { businessToday, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { NoCentreNotice } from "../../no-centre";
 
@@ -190,7 +190,13 @@ export default async function RegisterPage({
             {v.label}
           </Link>
         ))}
-        <span className="ml-auto flex gap-2">
+        <Link
+          href={`/reports/register/export?view=${view}&period=${period}&scope=${scope}`}
+          className="ml-auto border border-line-strong bg-surface px-3 py-1 text-[12px] font-semibold hover:border-accent"
+        >
+          Export CSV
+        </Link>
+        <span className="flex gap-2">
           <Link
             href={href(view, period, "centre")}
             aria-current={!companyWide ? "page" : undefined}
@@ -380,43 +386,15 @@ async function BreakdownView({
 
   return (
     <>
-      <div className="border border-line-strong bg-surface mb-5 mt-3 overflow-x-auto">
-        <table className="ledger-table whitespace-nowrap">
+      <div className="border border-line-strong bg-surface mb-5 mt-3">
+        <table className="ledger-table">
           <thead>
             <tr>
-              <th rowSpan={2}>{bucket === "day" ? "Day" : "Month"}</th>
-              <th colSpan={PURCHASE_TYPES.length + 1} className="text-center border-l border-line-strong">
-                Purchase
-              </th>
-              <th colSpan={SALE_TYPES.length + 1} className="text-center border-l border-line-strong">
-                Sale
-              </th>
-              <th colSpan={EXPENSE_CATEGORIES.length + 1} className="text-center border-l border-line-strong">
-                Expense
-              </th>
-              <th rowSpan={2} className="num-col border-l border-line-strong">
-                Profit / Loss
-              </th>
-            </tr>
-            <tr>
-              {PURCHASE_TYPES.map((t, i) => (
-                <th key={t} className={`num-col ${i === 0 ? "border-l border-line-strong" : ""}`}>
-                  {PURCHASE_TYPE_LABELS[t]}
-                </th>
-              ))}
-              <th className="num-col font-bold">Total</th>
-              {SALE_TYPES.map((t, i) => (
-                <th key={t} className={`num-col ${i === 0 ? "border-l border-line-strong" : ""}`}>
-                  {SALE_TYPE_LABELS[t]}
-                </th>
-              ))}
-              <th className="num-col font-bold">Total</th>
-              {EXPENSE_CATEGORIES.map((c, i) => (
-                <th key={c} className={`num-col ${i === 0 ? "border-l border-line-strong" : ""}`}>
-                  {EXPENSE_CATEGORY_LABELS[c]}
-                </th>
-              ))}
-              <th className="num-col font-bold">Total</th>
+              <th>{bucket === "day" ? "Day" : "Month"}</th>
+              <th className="num-col">Purchase</th>
+              <th className="num-col">Expense</th>
+              <th className="num-col">Sale</th>
+              <th className="num-col">Profit / Loss</th>
             </tr>
           </thead>
           <tbody>
@@ -436,32 +414,11 @@ async function BreakdownView({
                       </Link>
                     )}
                   </td>
-                  {PURCHASE_TYPES.map((t, i) => (
-                    <td key={t} className={`num-col num ${i === 0 ? "border-l border-line-strong" : ""}`}>
-                      {money(b.purchaseByType[t])}
-                    </td>
-                  ))}
-                  <td className="num-col num font-semibold text-debit">
-                    {money(b.purchase)}
-                  </td>
-                  {SALE_TYPES.map((t, i) => (
-                    <td key={t} className={`num-col num ${i === 0 ? "border-l border-line-strong" : ""}`}>
-                      {money(b.saleByType[t])}
-                    </td>
-                  ))}
-                  <td className="num-col num font-semibold text-credit">
-                    {money(b.sale)}
-                  </td>
-                  {EXPENSE_CATEGORIES.map((c, i) => (
-                    <td key={c} className={`num-col num ${i === 0 ? "border-l border-line-strong" : ""}`}>
-                      {money(b.expenseByCategory[c])}
-                    </td>
-                  ))}
-                  <td className="num-col num font-semibold text-debit">
-                    {money(b.expense)}
-                  </td>
+                  <td className="num-col num text-debit">{money(b.purchase)}</td>
+                  <td className="num-col num text-debit">{money(b.expense)}</td>
+                  <td className="num-col num text-credit">{money(b.sale)}</td>
                   <td
-                    className={`num-col num font-semibold border-l border-line-strong ${profitClass(b.profit)}`}
+                    className={`num-col num font-semibold ${profitClass(b.profit)}`}
                   >
                     {money(b.profit)}
                   </td>
@@ -472,27 +429,10 @@ async function BreakdownView({
           <tfoot>
             <tr className="border-t border-line-strong font-bold">
               <td>Total</td>
-              {PURCHASE_TYPES.map((t, i) => (
-                <td key={t} className={`num-col num ${i === 0 ? "border-l border-line-strong" : ""}`}>
-                  {money(total.purchaseByType[t])}
-                </td>
-              ))}
               <td className="num-col num text-debit">{money(total.purchase)}</td>
-              {SALE_TYPES.map((t, i) => (
-                <td key={t} className={`num-col num ${i === 0 ? "border-l border-line-strong" : ""}`}>
-                  {money(total.saleByType[t])}
-                </td>
-              ))}
-              <td className="num-col num text-credit">{money(total.sale)}</td>
-              {EXPENSE_CATEGORIES.map((c, i) => (
-                <td key={c} className={`num-col num ${i === 0 ? "border-l border-line-strong" : ""}`}>
-                  {money(total.expenseByCategory[c])}
-                </td>
-              ))}
               <td className="num-col num text-debit">{money(total.expense)}</td>
-              <td
-                className={`num-col num border-l border-line-strong ${profitClass(total.profit)}`}
-              >
+              <td className="num-col num text-credit">{money(total.sale)}</td>
+              <td className={`num-col num ${profitClass(total.profit)}`}>
                 {money(total.profit)}
               </td>
             </tr>
