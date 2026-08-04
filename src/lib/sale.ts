@@ -1,4 +1,8 @@
-import "server-only";
+// Pure constants and labels — no database, no filesystem, no session. This
+// module is deliberately NOT marked `server-only`: the sale form is a Client
+// Component and needs the same buyer-type map and commission rate the server
+// action validates against. Marking it server-only forced the form to keep its
+// own copies, which is exactly how the two drift apart.
 import type { PartyType, SaleType } from "@/generated/prisma/enums";
 
 export const SALE_TYPES: SaleType[] = ["MARKET", "FISH_MILL", "FACTORY", "LOCAL"];

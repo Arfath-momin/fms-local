@@ -44,6 +44,8 @@ model User {
   salesUpdated         Sale[]         @relation("SaleUpdatedBy")
   deliveryNotesCreated DeliveryNote[] @relation("DeliveryNoteCreatedBy")
   deliveryNotesUpdated DeliveryNote[] @relation("DeliveryNoteUpdatedBy")
+  settlementsCreated   Settlement[]   @relation("SettlementCreatedBy")
+  settlementsUpdated   Settlement[]   @relation("SettlementUpdatedBy")
 
   @@map("users")
 }
@@ -63,6 +65,7 @@ model Company {
   ledgerEntries LedgerEntry[]
   attachments   Attachment[]
   dayCloses     DayClose[]
+  settlements   Settlement[]
 
   @@map("companies")
 }
@@ -86,6 +89,7 @@ model Centre {
   ledgerEntries LedgerEntry[]
   attachments   Attachment[]
   dayCloses     DayClose[]
+  settlements   Settlement[]
 
   @@unique([companyId, name])
   @@map("centres")
@@ -107,6 +111,12 @@ enum PartyType {
   CARE_OF // commission agent who pays immediately; a Fish Mill/Factory sale
   // "via CareOf" keeps the real buyer on the sale record but posts the ledger
   // to this CareOf party instead.
+  PURCHASE_GROUP // Society / KFDC / Private Parties / Local Individuals — the
+  // ledger a purchase settles against. The individual boat is recorded on the
+  // purchase as a column, not as its own ledger.
+  COMMISSION // the house's own 2% commission account — one per company/centre,
+  // credited by every Market sale. Modelled as a party so the commission
+  // ledger is an ordinary statement rather than a parallel reporting table.
 }
 
 model Party {
@@ -116,11 +126,13 @@ model Party {
   contactInfo String?   @map("contact_info")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  purchases     Purchase[]
-  expenses      Expense[]
-  ledgerEntries LedgerEntry[]
-  salesAsBuyer  Sale[]        @relation("SaleBuyer")
-  salesAsCareOf Sale[]        @relation("SaleCareOf")
+  purchases       Purchase[]
+  purchasesAsBoat Purchase[]    @relation("PurchaseBoat")
+  expenses        Expense[]
+  ledgerEntries   LedgerEntry[]
+  salesAsBuyer    Sale[]        @relation("SaleBuyer")
+  salesAsCareOf   Sale[]        @relation("SaleCareOf")
+  settlements     Settlement[]
 
   @@unique([name, type])
   @@map("parties")
@@ -142,10 +154,15 @@ model Purchase {
   id          String       @id @default(uuid())
   companyId   String       @map("company_id")
   centreId    String       @map("centre_id")
+  /// The ledger this purchase settles against: Society, KFDC, Private Parties
+  /// or Local Individuals. NOT the boat — see `boatId`.
   partyId     String       @map("party_id")
+  /// The individual boat (Society/KFDC/Private) or seller (Local). Recorded so
+  /// every statement row can name it, but it carries no ledger of its own:
+  /// money is owed to the group, not to the vessel.
+  boatId      String?      @map("boat_id")
   type        PurchaseType
   amount      Decimal      @db.Decimal(14, 2)
-  paid        Boolean      @default(true) // false → stays outstanding in the party ledger
   date        DateTime     @db.Date
   createdAt   DateTime     @default(now()) @map("created_at")
   // Null updatedAt means "never edited" — that is why this is not @updatedAt,
@@ -157,11 +174,13 @@ model Purchase {
   company   Company        @relation(fields: [companyId], references: [id])
   centre    Centre         @relation(fields: [centreId], references: [id])
   party     Party          @relation(fields: [partyId], references: [id])
+  boat      Party?         @relation("PurchaseBoat", fields: [boatId], references: [id])
   createdBy User?          @relation("PurchaseCreatedBy", fields: [createdById], references: [id])
   updatedBy User?          @relation("PurchaseUpdatedBy", fields: [updatedById], references: [id])
   lines     PurchaseLine[]
 
   @@index([companyId, centreId, date])
+  @@index([boatId])
   @@map("purchases")
 }
 
@@ -202,7 +221,6 @@ model Expense {
   partyId     String          @map("party_id") // expense vendor / category ledger
   category    ExpenseCategory
   amount      Decimal         @db.Decimal(14, 2)
-  paid        Boolean         @default(true)
   details     Json?
   notes       String?
   date        DateTime        @db.Date
@@ -282,8 +300,11 @@ enum SaleType {
 // (Fish Mill / Factory), to the CareOf party instead, while the real buyer
 // stays on the record. `amount` is the figure recognised as sale revenue and
 // posted to the ledger (Market → Net Bill; Fish Mill → table total rate;
-// Factory → bill amount total; Local → table total). `amountReceived` is what
-// has been collected; the shortfall stays outstanding in that ledger.
+// Factory → bill amount total; Local → table total).
+//
+// Collection is NOT recorded here. What a party has settled comes from Receipt
+// vouchers (see Settlement), so the outstanding figure is a property of the
+// party's running ledger rather than of a single bill.
 // Type-specific header fields all live here; only the relevant ones are set.
 model Sale {
   id            String   @id @default(uuid())
@@ -295,8 +316,7 @@ model Sale {
   billNo        String   @map("bill_no")
   date          DateTime @db.Date
 
-  amount         Decimal @db.Decimal(14, 2)
-  amountReceived Decimal @default(0) @map("amount_received") @db.Decimal(14, 2)
+  amount Decimal @db.Decimal(14, 2)
 
   // Market-only (recorded/displayed, not posted):
   totalBill  Decimal? @map("total_bill") @db.Decimal(14, 2) // gross incl. seller profit + expenses
@@ -349,6 +369,60 @@ model SaleLine {
   @@map("sale_lines")
 }
 
+// ---------- Settlements (payments & receipts) ----------
+
+enum SettlementKind {
+  PAYMENT // we pay a supplier — DEBITs their ledger
+  RECEIPT // a customer pays us — CREDITs their ledger
+}
+
+enum SettlementMode {
+  CASH
+  BANK
+  UPI
+  CHEQUE
+}
+
+/**
+ * A movement of money against a party, recorded as its own voucher.
+ * This is deliberately separate from Purchase and Sale. Settlement used to be
+ * implied by `Purchase.paid` and `Sale.amountReceived`, which posted a hidden
+ * offsetting ledger row sharing the voucher's own id — so a purchase and its
+ * payment were one indivisible record that could not be dated apart, paid in
+ * instalments, or corrected independently. A trade and its settlement are
+ * different events on different dates and each gets its own voucher.
+ * Settlements are party-level, not bill-level: a receipt reduces what the
+ * party owes across the whole relationship rather than being allocated to one
+ * invoice. That matches how the running outstanding is read off the statement.
+ */
+model Settlement {
+  id          String         @id @default(uuid())
+  companyId   String         @map("company_id")
+  centreId    String         @map("centre_id")
+  partyId     String         @map("party_id")
+  kind        SettlementKind
+  mode        SettlementMode @default(CASH)
+  amount      Decimal        @db.Decimal(14, 2)
+  date        DateTime       @db.Date
+  /// Cheque number, UPI reference, slip number — free text.
+  reference   String?
+  notes       String?
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime?      @map("updated_at")
+  createdById String?        @map("created_by_id")
+  updatedById String?        @map("updated_by_id")
+
+  company   Company @relation(fields: [companyId], references: [id])
+  centre    Centre  @relation(fields: [centreId], references: [id])
+  party     Party   @relation(fields: [partyId], references: [id])
+  createdBy User?   @relation("SettlementCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?   @relation("SettlementUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([companyId, centreId, date])
+  @@index([companyId, centreId, partyId])
+  @@map("settlements")
+}
+
 // ---------- Ledger ----------
 
 enum LedgerEntryType {
@@ -360,7 +434,9 @@ enum LedgerSourceType {
   PURCHASE
   SALE
   EXPENSE
-  PAYMENT
+  PAYMENT // money out — settles what we owe a supplier
+  RECEIPT // money in — settles what a customer owes us
+  COMMISSION // 2% agent commission earned on a Market sale
 }
 
 // One generic ledger table powers every party statement — no per-party-type
@@ -368,6 +444,12 @@ enum LedgerSourceType {
 // the party. DEBIT increases the balance, CREDIT decreases it.
 model LedgerEntry {
   id             String           @id @default(uuid())
+  // Monotonic insertion order. `created_at` only has millisecond precision, so
+  // entries written inside one transaction can tie — and a tie makes the
+  // running-balance window function non-deterministic, which is what let
+  // statements drift. (date, seq) is a total order, so a recompute always
+  // produces the same chain. Not a primary key; the uuid `id` stays.
+  seq            Int              @unique @default(autoincrement())
   companyId      String           @map("company_id")
   centreId       String           @map("centre_id")
   partyId        String           @map("party_id")
@@ -383,7 +465,9 @@ model LedgerEntry {
   centre  Centre  @relation(fields: [centreId], references: [id])
   party   Party   @relation(fields: [partyId], references: [id])
 
-  @@index([companyId, centreId, partyId, date])
+  // Covers both the statement read (ordered by date, seq) and the recompute
+  // window, which partitions on exactly this key.
+  @@index([companyId, centreId, partyId, date, seq])
   @@index([sourceType, sourceId])
   @@map("ledger_entries")
 }

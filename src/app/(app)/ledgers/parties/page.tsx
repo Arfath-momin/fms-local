@@ -19,7 +19,7 @@ export default async function PartyLedgersPage() {
     // per centre.
     prisma.ledgerEntry.findMany({
       where: { companyId: company.id, centreId: centre.id },
-      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ date: "desc" }, { seq: "desc" }],
       distinct: ["partyId"],
       select: { partyId: true, runningBalance: true },
     }),

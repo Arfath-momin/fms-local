@@ -100,7 +100,6 @@ export default async function PurchaseDetailPage({
           <Row label="Seller / Boat" value={purchase.party.name} />
           <Row label="Date" value={fmtDate(purchase.date)} />
           <Row label="Amount" value={fmtMoney(purchase.amount)} />
-          <Row label="Paid" value={purchase.paid ? "Yes" : "Outstanding"} />
         </dl>
 
         {purchase.lines.length > 0 && (
@@ -138,7 +137,6 @@ export default async function PurchaseDetailPage({
     type: purchase.type,
     partyName: purchase.party.name,
     amount: purchase.amount.toString(),
-    paid: purchase.paid,
     date: toInputDate(purchase.date),
     lines: purchase.lines.map((l) => ({
       particular: l.particular,

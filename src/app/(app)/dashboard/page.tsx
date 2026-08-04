@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { requireReports } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { computeDayBook, getBalancesAsOf } from "@/lib/report";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
@@ -40,13 +40,13 @@ function Tile({
 }
 
 export default async function DashboardPage() {
-  await requireSession();
+  await requireReports();
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
   const today = businessTodayDate();
 
   const [day, balances, recentSales] = await Promise.all([
-    computeDayBook(company.id, today),
+    computeDayBook(company.id, centre.id, today),
     getBalancesAsOf(company.id, centre.id, today),
     prisma.sale.findMany({
       where: { companyId: company.id, centreId: centre.id },
@@ -78,8 +78,9 @@ export default async function DashboardPage() {
     <div className="max-w-4xl">
       <h1 className="heading text-xl font-semibold mb-1">Dashboard</h1>
       <p className="text-muted text-[13px] mb-5">
-        {company.name} · {centre.name} · today, {fmtDate(today)}. P/L is
-        company-wide; outstanding balances are for this centre.
+        {company.name} · {centre.name} · today, {fmtDate(today)}. Every figure
+        below is for this company and centre only — use Union for the
+        cross-centre view.
       </p>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

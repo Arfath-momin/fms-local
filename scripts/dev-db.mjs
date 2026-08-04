@@ -5,7 +5,7 @@ import EmbeddedPostgres from "embedded-postgres";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-const DATA_DIR = path.resolve(import.meta.dirname, "..", ".pgdata");
+const DATA_DIR = path.resolve(process.env.HOME, ".pgdata-fms");
 const PORT = 5502;
 const DB_NAME = "fms";
 

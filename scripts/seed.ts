@@ -11,6 +11,7 @@ import type {
   LedgerSourceType,
 } from "../src/generated/prisma/enums";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { PURCHASE_GROUP_NAME } from "../src/lib/party";
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -22,6 +23,8 @@ const date = (s: string) => new Date(s);
 async function main() {
   // --- clear transactional data (idempotent re-run) ---
   await prisma.ledgerEntry.deleteMany();
+  // Before parties and centres: settlements reference both.
+  await prisma.settlement.deleteMany();
   await prisma.saleLine.deleteMany();
   await prisma.sale.deleteMany();
   await prisma.deliveryNoteLine.deleteMany();
@@ -126,6 +129,35 @@ async function main() {
   const bfm = companies["BFM"];
   const c1 = centres["BFM:Centre 1"];
 
+  /**
+   * Settlement is its own voucher now, so the seed creates a real Payment or
+   * Receipt and posts the ledger entry against *that* — never against the
+   * trade, which is what the old `paid` / `amountReceived` flags did.
+   */
+  async function settle(
+    kind: "PAYMENT" | "RECEIPT",
+    partyId: string,
+    amount: Prisma.Decimal,
+    on: Date
+  ) {
+    const st = await prisma.settlement.create({
+      data: {
+        companyId: bfm,
+        centreId: c1,
+        partyId,
+        kind,
+        mode: "CASH",
+        amount,
+        date: on,
+      },
+    });
+    await ledger(
+      bfm, c1, partyId,
+      kind === "PAYMENT" ? "DEBIT" : "CREDIT",
+      kind, st.id, amount, on
+    );
+  }
+
   // --- Purchases (BFM · Centre 1) ---
   async function purchase(
     type: "SOCIETY" | "KFDC" | "PRIVATE" | "LOCAL",
@@ -135,16 +167,20 @@ async function main() {
     on: Date,
     lines: { particular: string; qtyKg: number; pricePerKg: number }[] = []
   ) {
-    const partyType: PartyType = type === "LOCAL" ? "LOCAL_SELLER" : "BOAT";
-    const partyId = await party(partyName, partyType);
+    // The boat/seller is recorded on the purchase for display; the ledger
+    // belongs to the group (Society / KFDC / Private Parties / Local
+    // Individuals), which is what actually gets paid.
+    const boatType: PartyType = type === "LOCAL" ? "LOCAL_SELLER" : "BOAT";
+    const boatId = await party(partyName, boatType);
+    const partyId = await party(PURCHASE_GROUP_NAME[type], "PURCHASE_GROUP");
     const p = await prisma.purchase.create({
       data: {
         companyId: bfm,
         centreId: c1,
         partyId,
+        boatId,
         type,
         amount,
-        paid,
         date: on,
         lines: {
           create: lines.map((l) => ({
@@ -157,7 +193,7 @@ async function main() {
       },
     });
     await ledger(bfm, c1, partyId, "CREDIT", "PURCHASE", p.id, amount, on);
-    if (paid) await ledger(bfm, c1, partyId, "DEBIT", "PAYMENT", p.id, amount, on);
+    if (paid) await settle("PAYMENT", partyId, amount, on);
   }
 
   await purchase("SOCIETY", "Boat No. 12", D(45000), true, date("2026-07-20"));
@@ -178,10 +214,10 @@ async function main() {
   ) {
     const partyId = await party(vendorName, "EXPENSE_VENDOR");
     const e = await prisma.expense.create({
-      data: { companyId: bfm, centreId: c1, partyId, category, amount, paid: true, date: on, details },
+      data: { companyId: bfm, centreId: c1, partyId, category, amount, date: on, details },
     });
     await ledger(bfm, c1, partyId, "CREDIT", "EXPENSE", e.id, amount, on);
-    await ledger(bfm, c1, partyId, "DEBIT", "PAYMENT", e.id, amount, on);
+    await settle("PAYMENT", partyId, amount, on);
   }
 
   await expense("ICE", "Sagar Ice", D(1500), date("2026-07-21"), {
@@ -219,14 +255,12 @@ async function main() {
         billNo,
         date: on,
         amount,
-        amountReceived: received,
         vehicleNo: "KA-05-9090",
       },
     });
     const ledgerParty = careOfId ?? buyerId;
     await ledger(bfm, c1, ledgerParty, "DEBIT", "SALE", s.id, amount, on);
-    if (received.gt(0))
-      await ledger(bfm, c1, ledgerParty, "CREDIT", "PAYMENT", s.id, received, on);
+    if (received.gt(0)) await settle("RECEIPT", ledgerParty, received, on);
   }
 
   async function marketSale(
@@ -247,15 +281,19 @@ async function main() {
         billNo,
         date: on,
         amount: netBill,
-        amountReceived: received,
         place: "City Market",
         totalBill,
         commission: totalBill.mul(0.02),
       },
     });
     await ledger(bfm, c1, buyerId, "DEBIT", "SALE", s.id, netBill, on);
-    if (received.gt(0))
-      await ledger(bfm, c1, buyerId, "CREDIT", "PAYMENT", s.id, received, on);
+    // Every Market sale accrues 2% into the house commission account.
+    const commissionId = await party("Commission (2%)", "COMMISSION");
+    await ledger(
+      bfm, c1, commissionId, "DEBIT", "COMMISSION", s.id,
+      totalBill.mul(0.02), on
+    );
+    if (received.gt(0)) await settle("RECEIPT", buyerId, received, on);
   }
 
   await factorySale("Coastal Exports", "F-1001", D(52000), D(52000), null, date("2026-07-20"));

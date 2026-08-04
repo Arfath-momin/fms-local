@@ -99,7 +99,6 @@ export default async function ExpenseDetailPage({
           <Row label="Vendor" value={expense.party.name} />
           <Row label="Date" value={fmtDate(expense.date)} />
           <Row label="Amount" value={fmtMoney(expense.amount)} />
-          <Row label="Paid" value={expense.paid ? "Yes" : "Outstanding"} />
           {Object.entries(details).map(([k, v]) => (
             <Row key={k} label={k} value={String(v)} />
           ))}
@@ -115,7 +114,6 @@ export default async function ExpenseDetailPage({
     category: expense.category,
     amount: expense.amount.toString(),
     date: toInputDate(expense.date),
-    paid: expense.paid,
     notes: expense.notes,
     details: (expense.details as Record<string, string> | null) ?? {},
   };

@@ -6,7 +6,12 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { requireActiveScope } from "@/lib/centre";
-import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
+import {
+  linkStagedAttachment,
+  replaceStagedAttachment,
+  stageAttachmentFile,
+  validateImageFile,
+} from "@/lib/attachments";
 
 export type DeliveryFormState = { error: string } | null;
 
@@ -137,42 +142,45 @@ export async function createDelivery(
 
   let noteId: string;
   try {
-    const note = await prisma.deliveryNote.create({
-      data: {
+    // Staged before the write so a rejected image aborts the save instead of
+    // leaving a delivery note with no bill against it.
+    const staged = await stageAttachmentFile(d.file);
+    noteId = await prisma.$transaction(async (tx) => {
+      const note = await tx.deliveryNote.create({
+        data: {
+          companyId: company.id,
+          centreId: centre.id,
+          billNo: d.billNo,
+          date: d.date,
+          recipient: d.recipient,
+          vehicleNo: d.vehicleNo,
+          advancePaid: d.advancePaid,
+          driverName: d.driverName,
+          mobileNo: d.mobileNo,
+          createdById: session.userId,
+          lines: {
+            create: d.lines.map((l) => ({
+              particulars: l.particulars,
+              kg: l.kg,
+              box: l.box,
+              bigBox: l.bigBox,
+              loose: l.loose,
+              pcs: l.pcs,
+            })),
+          },
+        },
+      });
+      await linkStagedAttachment(tx, staged, {
         companyId: company.id,
         centreId: centre.id,
-        billNo: d.billNo,
-        date: d.date,
-        recipient: d.recipient,
-        vehicleNo: d.vehicleNo,
-        advancePaid: d.advancePaid,
-        driverName: d.driverName,
-        mobileNo: d.mobileNo,
-        createdById: session.userId,
-        lines: {
-          create: d.lines.map((l) => ({
-            particulars: l.particulars,
-            kg: l.kg,
-            box: l.box,
-            bigBox: l.bigBox,
-            loose: l.loose,
-            pcs: l.pcs,
-          })),
-        },
-      },
+        linkedType: "DELIVERY_NOTE",
+        linkedId: note.id,
+      });
+      return note.id;
     });
-    noteId = note.id;
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save delivery note." };
   }
-
-  await saveAttachmentFile({
-    companyId: company.id,
-    centreId: centre.id,
-    linkedType: "DELIVERY_NOTE",
-    linkedId: noteId,
-    file: d.file,
-  });
 
   revalidatePath("/vouchers/deliveries");
   redirect(`/vouchers/deliveries/${noteId}`);
@@ -188,9 +196,9 @@ export async function updateDelivery(
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
-  let scope: { companyId: string; centreId: string };
   try {
-    scope = await prisma.$transaction(async (tx) => {
+    const staged = await stageAttachmentFile(d.file);
+    await prisma.$transaction(async (tx) => {
       const existing = await tx.deliveryNote.findUnique({
         where: { id: deliveryNoteId },
         select: { companyId: true, centreId: true },
@@ -222,19 +230,18 @@ export async function updateDelivery(
           },
         },
       });
-      return existing;
+      // A newly chosen image replaces the old bill rather than piling up
+      // beside it; leaving the field empty keeps whatever is attached.
+      await replaceStagedAttachment(tx, staged, {
+        companyId: existing.companyId,
+        centreId: existing.centreId,
+        linkedType: "DELIVERY_NOTE",
+        linkedId: deliveryNoteId,
+      });
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save delivery note." };
   }
-
-  await saveAttachmentFile({
-    companyId: scope.companyId,
-    centreId: scope.centreId,
-    linkedType: "DELIVERY_NOTE",
-    linkedId: deliveryNoteId,
-    file: d.file,
-  });
 
   revalidatePath("/vouchers/deliveries");
   redirect(`/vouchers/deliveries/${deliveryNoteId}`);

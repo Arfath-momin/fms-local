@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
+import { getSession, landingPathFor } from "@/lib/session";
 
 export default async function Home() {
-  redirect((await getSession()) ? "/dashboard" : "/login");
+  const session = await getSession();
+  redirect(session ? landingPathFor(session.role) : "/login");
 }

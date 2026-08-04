@@ -25,7 +25,10 @@ export default async function EditSalePage({
   });
   if (!sale) notFound();
 
-  // Closed days are final — corrections would go through the error-flag flow.
+  // Drives the "choosing a new one replaces it" hint on the upload field.
+  const existingAttachments = await prisma.attachment.count({
+    where: { linkedType: "SALE", linkedId: sale.id },
+  });
 
   return (
     <div>
@@ -40,7 +43,6 @@ export default async function EditSalePage({
           date: toInputDate(sale.date),
           buyerName: sale.party.name,
           careOfName: sale.careOfParty?.name ?? "",
-          amountReceived: sale.amountReceived.toString(),
           place: sale.place ?? "",
           totalBill: sale.totalBill?.toString() ?? "",
           netBill: sale.type === "MARKET" ? sale.amount.toString() : "",
@@ -59,6 +61,7 @@ export default async function EditSalePage({
           })),
         }}
         submitLabel="Save Changes"
+        existingAttachments={existingAttachments}
       />
     </div>
   );

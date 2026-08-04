@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
-import { requireSession } from "@/lib/session";
+import { requireReports } from "@/lib/session";
 import { computeUnion } from "@/lib/report";
 import { businessTodayDate, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 
@@ -26,7 +26,7 @@ export default async function UnionPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireSession();
+  await requireReports();
   const sp = await searchParams;
   const { from, to } = parseRange(sp);
   const u = await computeUnion(from, to);

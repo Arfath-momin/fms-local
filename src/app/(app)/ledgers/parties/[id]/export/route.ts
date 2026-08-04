@@ -34,7 +34,7 @@ export async function GET(
 
   const entries = await prisma.ledgerEntry.findMany({
     where: { companyId: company.id, centreId: centre.id, partyId: id },
-    orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+    orderBy: [{ date: "asc" }, { seq: "asc" }],
   });
 
   const lines = [

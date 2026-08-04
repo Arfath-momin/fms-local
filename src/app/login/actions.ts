@@ -3,7 +3,7 @@
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { createSession } from "@/lib/session";
+import { createSession, landingPathFor } from "@/lib/session";
 
 export type LoginState = { error: string } | null;
 
@@ -20,21 +20,31 @@ export async function login(
     return { error: "Enter your email and password." };
   }
 
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-    return { error: "Email or password is incorrect." };
-  }
-  // Checked after the password so a wrong guess cannot reveal which accounts
-  // exist but are switched off.
-  if (!user.isActive) {
-    return { error: "This account has been deactivated. Ask an administrator." };
+  let landing: string;
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      return { error: "Email or password is incorrect." };
+    }
+    // Checked after the password so a wrong guess cannot reveal which accounts
+    // exist but are switched off.
+    if (!user.isActive) {
+      return { error: "This account has been deactivated. Ask an administrator." };
+    }
+
+    await createSession({
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    });
+    landing = landingPathFor(user.role);
+  } catch (error) {
+    console.error("Login error:", error);
+    return { error: "Unable to connect to the database. Please try again." };
   }
 
-  await createSession({
-    userId: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-  });
-  redirect("/dashboard");
+  // Outside the try: redirect() signals by throwing, so calling it inside
+  // would be caught by the handler above and reported as a database failure.
+  redirect(landing);
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
-import { requireSession } from "@/lib/session";
+import { requireReports } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { computeDayBook } from "@/lib/report";
 import { NoCentreNotice } from "../../no-centre";
@@ -16,7 +16,7 @@ export default async function DayBookPage({
 }: {
   searchParams: Promise<{ date?: string }>;
 }) {
-  await requireSession();
+  await requireReports();
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
@@ -26,7 +26,7 @@ export default async function DayBookPage({
       ? new Date(raw)
       : businessTodayDate();
 
-  const d = await computeDayBook(company.id, date);
+  const d = await computeDayBook(company.id, centre.id, date);
   const pfCls = d.profit.greaterThan(0)
     ? "text-credit"
     : d.profit.lessThan(0)
@@ -39,7 +39,7 @@ export default async function DayBookPage({
         <div>
           <h1 className="heading text-xl font-semibold">Day Book</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · company-wide P/L · {centre.name}
+            {company.name} · {centre.name}
           </p>
         </div>
         <form method="GET" className="flex items-center gap-2">

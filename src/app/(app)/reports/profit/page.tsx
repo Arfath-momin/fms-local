@@ -1,7 +1,8 @@
 import { Prisma } from "@/generated/prisma/client";
-import { requireSession } from "@/lib/session";
-import { getActiveCompany } from "@/lib/company";
+import { requireReports } from "@/lib/session";
+import { getActiveScope } from "@/lib/centre";
 import { computeProfit } from "@/lib/report";
+import { NoCentreNotice } from "../../no-centre";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
@@ -16,8 +17,9 @@ export default async function ProfitReportPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string }>;
 }) {
-  await requireSession();
-  const company = await getActiveCompany();
+  await requireReports();
+  const { company, centre } = await getActiveScope();
+  if (!centre) return <NoCentreNotice companyName={company.name} />;
 
   const sp = await searchParams;
   const today = businessTodayDate();
@@ -28,7 +30,7 @@ export default async function ProfitReportPage({
   const to =
     sp.to && /^\d{4}-\d{2}-\d{2}$/.test(sp.to) ? new Date(sp.to) : today;
 
-  const r = await computeProfit(company.id, from, to);
+  const r = await computeProfit(company.id, centre.id, from, to);
   const pfCls = r.profit.greaterThan(0)
     ? "text-credit"
     : r.profit.lessThan(0)
@@ -41,7 +43,7 @@ export default async function ProfitReportPage({
         <div>
           <h1 className="heading text-xl font-semibold">Profit</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · {fmtDate(from)} → {fmtDate(to)}
+            {company.name} · {centre.name} · {fmtDate(from)} → {fmtDate(to)}
           </p>
         </div>
         <form method="GET" className="flex items-end gap-2">

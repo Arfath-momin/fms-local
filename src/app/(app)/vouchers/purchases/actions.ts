@@ -7,10 +7,15 @@ import type { PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { requireActiveScope } from "@/lib/centre";
-import { PURCHASE_SELLER_TYPE } from "@/lib/party";
+import { PURCHASE_GROUP_NAME, PURCHASE_SELLER_TYPE } from "@/lib/party";
 import { findOrCreateParty } from "@/lib/party-db";
-import { postLedgerEntry } from "@/lib/ledger";
-import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
+import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
+import {
+  linkStagedAttachment,
+  replaceStagedAttachment,
+  stageAttachmentFile,
+  validateImageFile,
+} from "@/lib/attachments";
 
 export type PurchaseFormState = { error: string } | null;
 
@@ -27,7 +32,6 @@ type Parsed = {
   type: PurchaseType;
   partyName: string;
   amount: Prisma.Decimal;
-  paid: boolean;
   date: Date;
   lines: ParsedLine[];
   file: unknown;
@@ -42,7 +46,6 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     .trim()
     .replace(/\s+/g, " ");
   const dateRaw = String(formData.get("date") ?? "");
-  const paid = formData.get("paid") != null;
   const file = formData.get("bill");
 
   if (!PURCHASE_TYPES.includes(type))
@@ -86,7 +89,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     if (lines.length === 0)
       return { error: "Add at least one line item." };
     const amount = lines.reduce((a, l) => a.add(l.total), new Prisma.Decimal(0));
-    return { data: { type, partyName, amount, paid, date, lines, file } };
+    return { data: { type, partyName, amount, date, lines, file } };
   }
 
   const amountRaw = String(formData.get("amount") ?? "").trim();
@@ -97,7 +100,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
       type,
       partyName,
       amount: new Prisma.Decimal(amountRaw),
-      paid,
+
       date,
       lines: [],
       file,
@@ -106,36 +109,37 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
 }
 
 /**
- * Purchase ledger effect: CREDIT the seller (we owe them). When paid, an
- * immediate DEBIT PAYMENT nets it to zero but keeps the statement complete;
- * when unpaid, the CREDIT stands as an outstanding balance.
+ * Purchase ledger effect: CREDIT the seller, because we now owe them.
+ *
+ * Nothing here settles the debt. A purchase used to carry a "paid" checkbox
+ * that posted an offsetting DEBIT under the purchase's own id, which made the
+ * trade and its payment one record. Settlement is now a Payment voucher, so
+ * the balance this leaves standing is the real outstanding amount until one is
+ * entered against it.
  */
 async function postPurchaseLedger(
   tx: Prisma.TransactionClient,
-  p: { companyId: string; centreId: string; partyId: string; id: string; amount: Prisma.Decimal; date: Date; paid: boolean }
+  p: {
+    companyId: string;
+    centreId: string;
+    partyId: string;
+    id: string;
+    amount: Prisma.Decimal;
+    date: Date;
+  }
 ) {
-  await postLedgerEntry(tx, {
-    companyId: p.companyId,
-    centreId: p.centreId,
-    partyId: p.partyId,
-    type: "CREDIT",
-    sourceType: "PURCHASE",
-    sourceId: p.id,
-    amount: p.amount,
-    date: p.date,
-  });
-  if (p.paid) {
-    await postLedgerEntry(tx, {
+  await postLedgerEntries(tx, [
+    {
       companyId: p.companyId,
       centreId: p.centreId,
       partyId: p.partyId,
-      type: "DEBIT",
-      sourceType: "PAYMENT",
+      type: "CREDIT",
+      sourceType: "PURCHASE",
       sourceId: p.id,
       amount: p.amount,
       date: p.date,
-    });
-  }
+    },
+  ]);
 }
 
 export async function createPurchase(
@@ -148,10 +152,19 @@ export async function createPurchase(
   const d = parsed.data;
   const { company, centre } = await requireActiveScope();
 
-  let purchaseId: string;
   try {
-    purchaseId = await prisma.$transaction(async (tx) => {
+    // Staged before the transaction so a rejected image aborts the save
+    // instead of leaving a purchase with no bill against it.
+    const staged = await stageAttachmentFile(d.file);
+    await prisma.$transaction(async (tx) => {
+      // Two parties: the group that carries the ledger, and the boat/seller
+      // that is only named on the line.
       const partyId = await findOrCreateParty(
+        tx,
+        PURCHASE_GROUP_NAME[d.type],
+        "PURCHASE_GROUP"
+      );
+      const boatId = await findOrCreateParty(
         tx,
         d.partyName,
         PURCHASE_SELLER_TYPE[d.type]
@@ -161,28 +174,25 @@ export async function createPurchase(
           companyId: company.id,
           centreId: centre.id,
           partyId,
+          boatId,
           type: d.type,
           amount: d.amount,
-          paid: d.paid,
           date: d.date,
           createdById: session.userId,
           lines: { create: d.lines },
         },
       });
       await postPurchaseLedger(tx, { ...purchase, ...d });
-      return purchase.id;
+      await linkStagedAttachment(tx, staged, {
+        companyId: company.id,
+        centreId: centre.id,
+        linkedType: "PURCHASE",
+        linkedId: purchase.id,
+      });
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save purchase." };
   }
-
-  await saveAttachmentFile({
-    companyId: company.id,
-    centreId: centre.id,
-    linkedType: "PURCHASE",
-    linkedId: purchaseId,
-    file: d.file,
-  });
 
   revalidatePath("/vouchers/purchases");
   redirect("/vouchers/purchases");
@@ -202,16 +212,25 @@ export async function updatePurchase(
   const d = parsed.data;
 
   try {
+    const staged = await stageAttachmentFile(d.file);
     await prisma.$transaction(async (tx) => {
       const existing = await tx.purchase.findUnique({ where: { id: purchaseId } });
       if (!existing) throw new Error("Purchase not found.");
 
-      await tx.ledgerEntry.deleteMany({
-        where: { sourceId: purchaseId, sourceType: { in: ["PURCHASE", "PAYMENT"] } },
+      // Rebuilds the old party's statement too, in case this edit moves the
+      // purchase to a different seller.
+      await removeLedgerEntries(tx, {
+        sourceId: purchaseId,
+        sourceType: ["PURCHASE", "PAYMENT"],
       });
       await tx.purchaseLine.deleteMany({ where: { purchaseId } });
 
       const partyId = await findOrCreateParty(
+        tx,
+        PURCHASE_GROUP_NAME[d.type],
+        "PURCHASE_GROUP"
+      );
+      const boatId = await findOrCreateParty(
         tx,
         d.partyName,
         PURCHASE_SELLER_TYPE[d.type]
@@ -220,9 +239,9 @@ export async function updatePurchase(
         where: { id: purchaseId },
         data: {
           partyId,
+          boatId,
           type: d.type,
           amount: d.amount,
-          paid: d.paid,
           date: d.date,
           updatedById: session.userId,
           updatedAt: new Date(),
@@ -230,22 +249,18 @@ export async function updatePurchase(
         },
       });
       await postPurchaseLedger(tx, { ...purchase, ...d });
+      // A newly chosen image replaces the old bill rather than piling up
+      // beside it; leaving the field empty keeps whatever is attached.
+      await replaceStagedAttachment(tx, staged, {
+        companyId: existing.companyId,
+        centreId: existing.centreId,
+        linkedType: "PURCHASE",
+        linkedId: purchaseId,
+      });
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save purchase." };
   }
-
-  const scope = (await prisma.purchase.findUnique({
-    where: { id: purchaseId },
-    select: { companyId: true, centreId: true },
-  }))!;
-  await saveAttachmentFile({
-    companyId: scope.companyId,
-    centreId: scope.centreId,
-    linkedType: "PURCHASE",
-    linkedId: purchaseId,
-    file: d.file,
-  });
 
   revalidatePath("/vouchers/purchases");
   redirect("/vouchers/purchases");

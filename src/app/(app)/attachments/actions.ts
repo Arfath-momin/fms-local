@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { AttachmentLinkedType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireEntry } from "@/lib/session";
-import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
+import { linkStagedAttachment, stageAttachmentFile, validateImageFile } from "@/lib/attachments";
 
 export type UploadState = { error: string } | null;
 
@@ -60,13 +60,24 @@ export async function uploadAttachment(
   const scope = await scopeForLinked(linkedType, linkedId);
   if (!scope) return { error: "Could not find the record to attach to." };
 
-  await saveAttachmentFile({
-    companyId: scope.companyId,
-    centreId: scope.centreId,
-    linkedType,
-    linkedId,
-    file,
-  });
+  // Here the voucher already exists, so staging and linking happen back to
+  // back; the error is surfaced rather than swallowed, which is what used to
+  // make a failed upload look like a successful one.
+  try {
+    const staged = await stageAttachmentFile(file);
+    await prisma.$transaction((tx) =>
+      linkStagedAttachment(tx, staged, {
+        companyId: scope.companyId,
+        centreId: scope.centreId,
+        linkedType,
+        linkedId,
+      })
+    );
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Could not attach that image.",
+    };
+  }
 
   revalidatePath(revalidate);
   return null;

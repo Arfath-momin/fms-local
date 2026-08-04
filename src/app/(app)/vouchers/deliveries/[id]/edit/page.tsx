@@ -20,6 +20,11 @@ export default async function EditDeliveryPage({
   });
   if (!note) notFound();
 
+  // Drives the "choosing a new one replaces it" hint on the upload field.
+  const existingAttachments = await prisma.attachment.count({
+    where: { linkedType: "DELIVERY_NOTE", linkedId: note.id },
+  });
+
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-4">Edit Delivery Note</h1>
@@ -43,6 +48,7 @@ export default async function EditDeliveryPage({
           })),
         }}
         submitLabel="Save Changes"
+        existingAttachments={existingAttachments}
       />
     </div>
   );

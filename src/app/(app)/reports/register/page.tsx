@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
-import { requireSession } from "@/lib/session";
+import { requireReports } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import {
   computePeriodBreakdown,
@@ -11,6 +11,7 @@ import {
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
+import { SETTLEMENT_MODE_LABELS } from "@/lib/settlement";
 import { businessToday, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { NoCentreNotice } from "../../no-centre";
 
@@ -32,13 +33,19 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "year", label: "Year" },
 ];
 
+const ZERO = new Prisma.Decimal(0);
+
 const KIND_LABELS: Record<string, string> = {
   PURCHASE: "Purchase",
   SALE: "Sale",
   EXPENSE: "Expense",
+  PAYMENT: "Payment",
+  RECEIPT: "Receipt",
 };
 
 function subtypeLabel(kind: string, subtype: string) {
+  if (kind === "PAYMENT" || kind === "RECEIPT")
+    return SETTLEMENT_MODE_LABELS[subtype as keyof typeof SETTLEMENT_MODE_LABELS] ?? subtype;
   if (kind === "PURCHASE")
     return PURCHASE_TYPE_LABELS[subtype as keyof typeof PURCHASE_TYPE_LABELS] ?? subtype;
   if (kind === "SALE")
@@ -60,8 +67,10 @@ function parsePeriod(sp: SearchParams): {
   to: Date;
   label: string;
 } {
+  // Day is the default: opening the report should answer "what happened
+  // today", not present a month grid that has to be drilled into.
   const view: View =
-    sp.view === "day" || sp.view === "year" ? sp.view : "month";
+    sp.view === "month" || sp.view === "year" ? sp.view : "day";
   const today = businessToday(); // "YYYY-MM-DD" in IST
 
   if (view === "day") {
@@ -105,10 +114,25 @@ function parsePeriod(sp: SearchParams): {
   };
 }
 
-/** Same instant re-expressed for a different view, so switching tabs keeps place. */
-function periodFor(view: View, from: Date): string {
-  const iso = toInputDate(from);
-  return view === "day" ? iso : view === "month" ? iso.slice(0, 7) : iso.slice(0, 4);
+/**
+ * Same instant re-expressed for a different view, so switching tabs keeps
+ * place.
+ *
+ * Narrowing needs an anchor *inside* the range, and the start of it is a poor
+ * guess: switching from August to Day landed on the 1st, which for most of the
+ * month is a day with no trade — the report looked broken when it was merely
+ * pointed at an empty date. Today is the useful answer whenever the range
+ * contains it; otherwise fall back to where the range starts.
+ */
+function periodFor(view: View, from: Date, to: Date): string {
+  const today = businessToday();
+  const inRange = today >= toInputDate(from) && today <= toInputDate(to);
+  const anchor = inRange ? today : toInputDate(from);
+  return view === "day"
+    ? anchor
+    : view === "month"
+      ? anchor.slice(0, 7)
+      : anchor.slice(0, 4);
 }
 
 function href(view: View, period: string, scope: string) {
@@ -120,7 +144,7 @@ export default async function RegisterPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireSession();
+  await requireReports();
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
@@ -178,7 +202,7 @@ export default async function RegisterPage({
         {VIEWS.map((v) => (
           <Link
             key={v.id}
-            href={href(v.id, periodFor(v.id, from), scope)}
+            href={href(v.id, periodFor(v.id, from, to), scope)}
             aria-current={v.id === view ? "page" : undefined}
             className={
               "border px-3 py-1 text-[12px] font-semibold " +
@@ -258,21 +282,24 @@ async function DayView({
   date: Date;
   companyWide: boolean;
 }) {
+  // Both queries take the same scope, so the tiles under the table are always
+  // the totals of the table above them — no re-summing in JS.
   const [rows, pl] = await Promise.all([
     getTransactionRegister(companyId, date, date, centreId),
-    computeProfit(companyId, date, date),
+    computeProfit(companyId, centreId, date, date),
   ]);
 
-  // computeProfit is company-wide only, so when the report is scoped to one
-  // centre the tiles are summed from the rows instead — otherwise the totals
-  // under the table would not match the table above them.
-  const ZERO = new Prisma.Decimal(0);
-  const sum = (kind: string) =>
-    rows.filter((r) => r.kind === kind).reduce((a, r) => a.add(r.amount), ZERO);
-  const purchase = companyWide ? pl.purchase : sum("PURCHASE");
-  const sale = companyWide ? pl.sale : sum("SALE");
-  const expense = companyWide ? pl.expense : sum("EXPENSE");
-  const profit = sale.sub(purchase).sub(expense);
+  const { purchase, sale, expense, profit } = pl;
+
+  // Settlements are money moving, not trade, so they are totalled separately
+  // and deliberately left out of `profit` — counting a payment as a cost would
+  // charge the same purchase twice.
+  const settledOut = rows
+    .filter((r) => r.kind === "PAYMENT")
+    .reduce((a, r) => a.add(r.amount), ZERO);
+  const settledIn = rows
+    .filter((r) => r.kind === "RECEIPT")
+    .reduce((a, r) => a.add(r.amount), ZERO);
 
   return (
     <>
@@ -286,12 +313,14 @@ async function DayView({
               <th className="num-col">Purchase</th>
               <th className="num-col">Expense</th>
               <th className="num-col">Sale</th>
+              <th className="num-col">Paid</th>
+              <th className="num-col">Received</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-muted text-[13px] px-4 py-3">
+                <td colSpan={8} className="text-muted text-[13px] px-4 py-3">
                   No transactions on this date.
                 </td>
               </tr>
@@ -317,6 +346,12 @@ async function DayView({
                   <td className="num-col num text-credit">
                     {r.kind === "SALE" ? fmtMoney(r.amount) : ""}
                   </td>
+                  <td className="num-col num text-debit">
+                    {r.kind === "PAYMENT" ? fmtMoney(r.amount) : ""}
+                  </td>
+                  <td className="num-col num text-credit">
+                    {r.kind === "RECEIPT" ? fmtMoney(r.amount) : ""}
+                  </td>
                 </tr>
               ))
             )}
@@ -330,6 +365,8 @@ async function DayView({
                 <td className="num-col num text-debit">{fmtMoney(purchase)}</td>
                 <td className="num-col num text-debit">{fmtMoney(expense)}</td>
                 <td className="num-col num text-credit">{fmtMoney(sale)}</td>
+                <td className="num-col num text-debit">{fmtMoney(settledOut)}</td>
+                <td className="num-col num text-credit">{fmtMoney(settledIn)}</td>
               </tr>
             </tfoot>
           )}

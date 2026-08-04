@@ -7,17 +7,21 @@ import type { ExpenseCategory } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { requireActiveScope } from "@/lib/centre";
-import { postLedgerEntry } from "@/lib/ledger";
+import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
 import { EXPENSE_CATEGORIES, EXPENSE_SPECS, expenseVendorName } from "@/lib/expense";
-import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
+import {
+  linkStagedAttachment,
+  replaceStagedAttachment,
+  stageAttachmentFile,
+  validateImageFile,
+} from "@/lib/attachments";
 
 export type ExpenseFormState = { error: string } | null;
 
 type Parsed = {
   category: ExpenseCategory;
   amount: Prisma.Decimal;
-  paid: boolean;
   date: Date;
   notes: string | null;
   details: Record<string, string>;
@@ -31,7 +35,6 @@ const NUMBER = /^\d+(\.\d{1,3})?$/;
 function parse(formData: FormData): { error: string } | { data: Parsed } {
   const category = String(formData.get("category") ?? "") as ExpenseCategory;
   const dateRaw = String(formData.get("date") ?? "");
-  const paid = formData.get("paid") != null;
   const notes = String(formData.get("notes") ?? "").trim();
   const file = formData.get("bill");
 
@@ -70,8 +73,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   return {
     data: {
       category,
-      amount,
-      paid,
+      amount,
       date: new Date(dateRaw),
       notes: notes || null,
       details,
@@ -81,33 +83,33 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   };
 }
 
-/** Expense ledger effect: CREDIT the vendor; DEBIT PAYMENT when paid. */
+/**
+ * Expense ledger effect: CREDIT the vendor, because we now owe them. Settling
+ * it is a Payment voucher, not a flag on this record — see postPurchaseLedger.
+ */
 async function postExpenseLedger(
   tx: Prisma.TransactionClient,
-  e: { companyId: string; centreId: string; partyId: string; id: string; amount: Prisma.Decimal; date: Date; paid: boolean }
+  e: {
+    companyId: string;
+    centreId: string;
+    partyId: string;
+    id: string;
+    amount: Prisma.Decimal;
+    date: Date;
+  }
 ) {
-  await postLedgerEntry(tx, {
-    companyId: e.companyId,
-    centreId: e.centreId,
-    partyId: e.partyId,
-    type: "CREDIT",
-    sourceType: "EXPENSE",
-    sourceId: e.id,
-    amount: e.amount,
-    date: e.date,
-  });
-  if (e.paid) {
-    await postLedgerEntry(tx, {
+  await postLedgerEntries(tx, [
+    {
       companyId: e.companyId,
       centreId: e.centreId,
       partyId: e.partyId,
-      type: "DEBIT",
-      sourceType: "PAYMENT",
+      type: "CREDIT",
+      sourceType: "EXPENSE",
       sourceId: e.id,
       amount: e.amount,
       date: e.date,
-    });
-  }
+    },
+  ]);
 }
 
 export async function createExpense(
@@ -120,9 +122,11 @@ export async function createExpense(
   const d = parsed.data;
   const { company, centre } = await requireActiveScope();
 
-  let expenseId: string;
   try {
-    expenseId = await prisma.$transaction(async (tx) => {
+    // Staged before the transaction so a rejected image aborts the save
+    // instead of leaving an expense with no receipt against it.
+    const staged = await stageAttachmentFile(d.file);
+    await prisma.$transaction(async (tx) => {
       const partyId = await findOrCreateParty(tx, d.vendorName, "EXPENSE_VENDOR");
       const expense = await tx.expense.create({
         data: {
@@ -131,7 +135,6 @@ export async function createExpense(
           partyId,
           category: d.category,
           amount: d.amount,
-          paid: d.paid,
           date: d.date,
           notes: d.notes,
           details: d.details,
@@ -139,19 +142,16 @@ export async function createExpense(
         },
       });
       await postExpenseLedger(tx, { ...expense, ...d });
-      return expense.id;
+      await linkStagedAttachment(tx, staged, {
+        companyId: company.id,
+        centreId: centre.id,
+        linkedType: "EXPENSE",
+        linkedId: expense.id,
+      });
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save expense." };
   }
-
-  await saveAttachmentFile({
-    companyId: company.id,
-    centreId: centre.id,
-    linkedType: "EXPENSE",
-    linkedId: expenseId,
-    file: d.file,
-  });
 
   revalidatePath("/vouchers/expenses");
   redirect("/vouchers/expenses");
@@ -167,14 +167,17 @@ export async function updateExpense(
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
-  let scope: { companyId: string; centreId: string };
   try {
-    scope = await prisma.$transaction(async (tx) => {
+    const staged = await stageAttachmentFile(d.file);
+    await prisma.$transaction(async (tx) => {
       const existing = await tx.expense.findUnique({ where: { id: expenseId } });
       if (!existing) throw new Error("Expense not found.");
 
-      await tx.ledgerEntry.deleteMany({
-        where: { sourceId: expenseId, sourceType: { in: ["EXPENSE", "PAYMENT"] } },
+      // Rebuilds the old vendor's statement too, in case this edit moves the
+      // expense to a different vendor.
+      await removeLedgerEntries(tx, {
+        sourceId: expenseId,
+        sourceType: ["EXPENSE", "PAYMENT"],
       });
       const partyId = await findOrCreateParty(tx, d.vendorName, "EXPENSE_VENDOR");
       const expense = await tx.expense.update({
@@ -183,7 +186,6 @@ export async function updateExpense(
           partyId,
           category: d.category,
           amount: d.amount,
-          paid: d.paid,
           date: d.date,
           notes: d.notes,
           details: d.details,
@@ -192,19 +194,18 @@ export async function updateExpense(
         },
       });
       await postExpenseLedger(tx, { ...expense, ...d });
-      return { companyId: existing.companyId, centreId: existing.centreId };
+      // A newly chosen image replaces the old receipt rather than piling up
+      // beside it; leaving the field empty keeps whatever is attached.
+      await replaceStagedAttachment(tx, staged, {
+        companyId: existing.companyId,
+        centreId: existing.centreId,
+        linkedType: "EXPENSE",
+        linkedId: expenseId,
+      });
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save expense." };
   }
-
-  await saveAttachmentFile({
-    companyId: scope.companyId,
-    centreId: scope.centreId,
-    linkedType: "EXPENSE",
-    linkedId: expenseId,
-    file: d.file,
-  });
 
   revalidatePath("/vouchers/expenses");
   redirect("/vouchers/expenses");

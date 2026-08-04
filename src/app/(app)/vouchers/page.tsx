@@ -28,6 +28,26 @@ export default function VouchersPage() {
           </div>
         </Link>
         <Link
+          href="/vouchers/payments"
+          className="block px-4 py-3 hover:bg-background border-b border-line"
+        >
+          <div className="font-semibold text-[14px]">Payment</div>
+          <div className="text-muted text-[12px]">
+            Money paid out to a boat, seller or vendor — settles what we owe
+            them. Kept separate from the purchase it pays for.
+          </div>
+        </Link>
+        <Link
+          href="/vouchers/receipts"
+          className="block px-4 py-3 hover:bg-background border-b border-line"
+        >
+          <div className="font-semibold text-[14px]">Receipt</div>
+          <div className="text-muted text-[12px]">
+            Money collected from a buyer — settles what they owe us. Kept
+            separate from the sale it pays for.
+          </div>
+        </Link>
+        <Link
           href="/vouchers/deliveries"
           className="block px-4 py-3 hover:bg-background border-b border-line"
         >

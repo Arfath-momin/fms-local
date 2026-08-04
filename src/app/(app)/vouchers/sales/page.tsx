@@ -80,9 +80,8 @@ export default async function SalesPage({
                 <th>Bill No.</th>
                 <th>Type</th>
                 <th>Party</th>
+                <th>Vehicle No.</th>
                 <th className="num-col">Amount</th>
-                <th className="num-col">Received</th>
-                <th className="num-col">Balance</th>
                 <th className="w-16"></th>
               </tr>
             </thead>
@@ -90,7 +89,6 @@ export default async function SalesPage({
               {sales.map((s) => {
                 const flag = flags.get(s.id);
                 const struck = flag ? "line-through opacity-60" : "";
-                const balance = s.amount.sub(s.amountReceived);
                 return (
                   <tr key={s.id}>
                     <td className="whitespace-nowrap">
@@ -115,14 +113,11 @@ export default async function SalesPage({
                         />
                       )}
                     </td>
+                    <td className={`num ${struck}`}>
+                      {s.vehicleNo ?? <span className="text-muted">—</span>}
+                    </td>
                     <td className={`num-col num text-credit ${struck}`}>
                       {fmtMoney(s.amount)}
-                    </td>
-                    <td className={`num-col num ${struck}`}>
-                      {fmtMoney(s.amountReceived)}
-                    </td>
-                    <td className={`num-col num ${struck} ${balance.greaterThan(0) ? "text-debit font-semibold" : "text-muted"}`}>
-                      {fmtMoney(balance)}
                     </td>
                     <td>
                       <Link

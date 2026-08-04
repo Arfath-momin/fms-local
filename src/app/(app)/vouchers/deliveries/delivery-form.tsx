@@ -4,6 +4,7 @@ import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { DeliveryFormState } from "./actions";
 import { businessToday } from "@/lib/format";
+import { BillUpload } from "../bill-upload";
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -45,6 +46,7 @@ export function DeliveryForm({
   action,
   initial,
   submitLabel,
+  existingAttachments = 0,
 }: {
   action: (
     prev: DeliveryFormState,
@@ -52,6 +54,7 @@ export function DeliveryForm({
   ) => Promise<DeliveryFormState>;
   initial?: DeliveryInit;
   submitLabel: string;
+  existingAttachments?: number;
 }) {
   const [state, formAction, pending] = useActionState<DeliveryFormState, FormData>(
     action,
@@ -290,18 +293,11 @@ export function DeliveryForm({
         </button>
       </div>
 
-      <div>
-        <label htmlFor="bill" className={labelCls}>
-          Delivery note / bill image (optional)
-        </label>
-        <input
-          id="bill"
-          name="bill"
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          className="text-[13px]"
-        />
-      </div>
+      <BillUpload
+        label="Delivery note / bill image"
+        hint="Optional."
+        existingCount={existingAttachments}
+      />
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}
 

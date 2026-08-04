@@ -39,6 +39,25 @@ export const canEdit = (role: Role): boolean => role === "ADMIN";
 /** May manage users and centres. Admin only. */
 export const canAdminister = (role: Role): boolean => role === "ADMIN";
 
+/**
+ * May read analytics — the dashboard, the reports section and the union view.
+ *
+ * Accountants are deliberately excluded. They enter vouchers and maintain
+ * masters; turnover and profit figures are not part of that job. They keep
+ * access to Ledgers, because knowing what a party currently owes is required
+ * to record a payment or a receipt correctly.
+ */
+export const canViewReports = (role: Role): boolean =>
+  role === "ADMIN" || role === "AUDITOR";
+
+/**
+ * The first screen a role is allowed to see. Used for sign-in and for the
+ * bounce when someone reaches a page above their level, so nobody ever lands
+ * on a route that immediately redirects again.
+ */
+export const landingPathFor = (role: Role): string =>
+  canViewReports(role) ? "/dashboard" : "/vouchers";
+
 function secret() {
   const s = process.env.SESSION_SECRET;
   if (!s) throw new Error("SESSION_SECRET is not set");
@@ -131,6 +150,18 @@ export async function requireAdmin(): Promise<Session> {
       "Only an administrator can change or remove an existing record."
     );
   }
+  return session;
+}
+
+/**
+ * For analytics pages — dashboard, reports, union. Redirects rather than
+ * throwing: reaching one of these as an accountant is a navigation mistake,
+ * not an attack, so the honest response is to put them on their own home
+ * screen instead of showing an error.
+ */
+export async function requireReports(): Promise<Session> {
+  const session = await requireSession();
+  if (!canViewReports(session.role)) redirect(landingPathFor(session.role));
   return session;
 }
 

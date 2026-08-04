@@ -6,6 +6,7 @@ import type { ExpenseFormState } from "./actions";
 import type { ExpenseCategory } from "@/generated/prisma/enums";
 import { EXPENSE_CATEGORIES, EXPENSE_SPECS } from "@/lib/expense";
 import { businessToday, fmtMoney } from "@/lib/format";
+import { BillUpload } from "../bill-upload";
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -16,7 +17,6 @@ export type ExpenseInit = {
   category: ExpenseCategory;
   amount: string;
   date: string;
-  paid: boolean;
   notes: string | null;
   details: Record<string, string>;
 };
@@ -26,6 +26,7 @@ export function ExpenseForm({
   initial,
   submitLabel,
   reasonField,
+  existingAttachments = 0,
 }: {
   action: (
     prev: ExpenseFormState,
@@ -34,6 +35,7 @@ export function ExpenseForm({
   initial?: ExpenseInit;
   submitLabel: string;
   reasonField?: boolean;
+  existingAttachments?: number;
 }) {
   const [state, formAction, pending] = useActionState<ExpenseFormState, FormData>(
     action,
@@ -160,28 +162,11 @@ export function ExpenseForm({
         />
       </div>
 
-      <div>
-        <label htmlFor="bill" className={labelCls}>
-          Bill / Receipt (optional)
-        </label>
-        <input
-          id="bill"
-          name="bill"
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          className="text-[13px]"
-        />
-      </div>
-
-      <label className="flex items-center gap-2 text-[13px]">
-        <input
-          type="checkbox"
-          name="paid"
-          defaultChecked={initial ? initial.paid : true}
-          className="h-4 w-4"
-        />
-        Paid (uncheck to leave outstanding in the vendor ledger)
-      </label>
+      <BillUpload
+        label="Bill / Receipt"
+        hint="Optional."
+        existingCount={existingAttachments}
+      />
 
       {reasonField && (
         <div>

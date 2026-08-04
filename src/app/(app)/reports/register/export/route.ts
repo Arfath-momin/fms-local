@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
-import { getSession } from "@/lib/session";
+import { canViewReports, getSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { getActiveCentre } from "@/lib/centre";
 import {
@@ -8,7 +8,7 @@ import {
   computeProfit,
   getTransactionRegister,
 } from "@/lib/report";
-import { toInputDate } from "@/lib/format";
+import { businessToday, toInputDate } from "@/lib/format";
 
 type SearchParams = { view?: string; period?: string; scope?: string };
 
@@ -29,20 +29,22 @@ async function parsePeriod(sp: SearchParams): Promise<{
   to: Date;
   period: string;
 }> {
-  const view = (sp.view === "day" || sp.view === "year" ? sp.view : "month") as
+  // Mirrors the screen's default so an export taken straight after opening
+  // the report covers the same period the user was looking at.
+  const view = (sp.view === "month" || sp.view === "year" ? sp.view : "day") as
     | "day"
     | "month"
     | "year";
 
-  // Get today's date — normally this would use businessTodayDate() but for CSV
-  // export we just want the current UTC day. This is fine because export is
-  // triggered by the user's explicit action.
-  const today = new Date();
+  // India time, like every other "today" in the app. UTC is a day behind
+  // between midnight and 05:30 IST, so using it here would export a different
+  // day from the one the report on screen is showing.
+  const today = businessToday();
 
   if (view === "day") {
     const period = /^\d{4}-\d{2}-\d{2}$/.test(sp.period ?? "")
       ? sp.period!
-      : today.toISOString().slice(0, 10);
+      : today;
     const d = new Date(`${period}T00:00:00.000Z`);
     return { view, period, from: d, to: d };
   }
@@ -50,7 +52,7 @@ async function parsePeriod(sp: SearchParams): Promise<{
   if (view === "year") {
     const period = /^\d{4}$/.test(sp.period ?? "")
       ? sp.period!
-      : String(today.getUTCFullYear());
+      : today.slice(0, 4);
     const y = Number(period);
     return {
       view,
@@ -62,7 +64,7 @@ async function parsePeriod(sp: SearchParams): Promise<{
 
   const period = /^\d{4}-\d{2}$/.test(sp.period ?? "")
     ? sp.period!
-    : today.toISOString().slice(0, 7);
+    : today.slice(0, 7);
   const [y, m] = period.split("-").map(Number);
   return {
     view,
@@ -75,6 +77,10 @@ async function parsePeriod(sp: SearchParams): Promise<{
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
+  // A route handler is a public URL, so it repeats the page's permission check
+  // rather than relying on the export link being hidden from the UI.
+  if (!canViewReports(session.role))
+    return new NextResponse("Forbidden", { status: 403 });
 
   const url = new URL(req.url);
   const sp: SearchParams = {
@@ -96,18 +102,24 @@ export async function GET(req: Request) {
   let filename: string;
 
   if (view === "day") {
+    // Both queries share one scope, so the totals row always matches the rows
+    // above it — no re-summing in JS.
     const [rows, pl] = await Promise.all([
       getTransactionRegister(company.id, from, to, centreId),
-      computeProfit(company.id, from, to),
+      computeProfit(company.id, centreId, from, to),
     ]);
 
+    const { purchase, sale, expense, profit } = pl;
+
+    // Same split as the screen: settlements are totalled on their own and kept
+    // out of profit, so the CSV can never disagree with the report it came from.
     const ZERO = new Prisma.Decimal(0);
-    const sum = (kind: string) =>
-      rows.filter((r) => r.kind === kind).reduce((a, r) => a.add(r.amount), ZERO);
-    const purchase = companyWide ? pl.purchase : sum("PURCHASE");
-    const sale = companyWide ? pl.sale : sum("SALE");
-    const expense = companyWide ? pl.expense : sum("EXPENSE");
-    const profit = sale.sub(purchase).sub(expense);
+    const settledOut = rows
+      .filter((r) => r.kind === "PAYMENT")
+      .reduce((a, r) => a.add(r.amount), ZERO);
+    const settledIn = rows
+      .filter((r) => r.kind === "RECEIPT")
+      .reduce((a, r) => a.add(r.amount), ZERO);
 
     const lines = [
       [
@@ -117,6 +129,8 @@ export async function GET(req: Request) {
         "Purchase",
         "Expense",
         "Sale",
+        "Paid",
+        "Received",
       ].join(","),
       ...rows.map((r) =>
         [
@@ -126,12 +140,21 @@ export async function GET(req: Request) {
           r.kind === "PURCHASE" ? formatValue(r.amount) : "",
           r.kind === "EXPENSE" ? formatValue(r.amount) : "",
           r.kind === "SALE" ? formatValue(r.amount) : "",
+          r.kind === "PAYMENT" ? formatValue(r.amount) : "",
+          r.kind === "RECEIPT" ? formatValue(r.amount) : "",
         ].join(",")
       ),
       "",
-      ["Totals", "", "", formatValue(purchase), formatValue(expense), formatValue(sale)].join(
-        ","
-      ),
+      [
+        "Totals",
+        "",
+        "",
+        formatValue(purchase),
+        formatValue(expense),
+        formatValue(sale),
+        formatValue(settledOut),
+        formatValue(settledIn),
+      ].join(","),
       ["Profit/Loss", "", "", "", "", formatValue(profit)].join(","),
     ];
     csv = lines.join("\r\n");

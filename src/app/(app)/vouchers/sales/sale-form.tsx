@@ -5,6 +5,13 @@ import Link from "next/link";
 import type { SaleType } from "@/generated/prisma/enums";
 import { businessToday, fmtMoney } from "@/lib/format";
 import type { SaleFormState } from "./actions";
+import { BillUpload } from "../bill-upload";
+import { PartyCombobox } from "../../masters/party-combobox";
+import {
+  MARKET_COMMISSION_RATE,
+  SALE_BUYER_TYPE,
+  SALE_TYPE_LABELS,
+} from "@/lib/sale";
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -26,7 +33,6 @@ export type SaleInit = {
   date: string;
   buyerName: string;
   careOfName: string;
-  amountReceived: string;
   place: string;
   totalBill: string;
   netBill: string;
@@ -49,23 +55,18 @@ const BLANK_LINE: SaleLineInit = {
 
 const n = (v: string) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-const TYPE_LABELS: Record<SaleType, string> = {
-  MARKET: "Market",
-  FISH_MILL: "Fish Mill",
-  FACTORY: "Factory",
-  LOCAL: "Local",
-};
-
 export function SaleForm({
   type,
   action,
   initial,
   submitLabel,
+  existingAttachments = 0,
 }: {
   type: SaleType;
   action: (prev: SaleFormState, formData: FormData) => Promise<SaleFormState>;
   initial?: SaleInit;
   submitLabel: string;
+  existingAttachments?: number;
 }) {
   const [state, formAction, pending] = useActionState<SaleFormState, FormData>(
     action,
@@ -79,7 +80,6 @@ export function SaleForm({
   const [totalBill, setTotalBill] = useState(initial?.totalBill ?? "");
   const [netBill, setNetBill] = useState(initial?.netBill ?? "");
   const [factoryAmount, setFactoryAmount] = useState(initial?.amount ?? "");
-  const [received, setReceived] = useState(initial?.amountReceived ?? "");
 
   const setLine = (i: number, patch: Partial<SaleLineInit>) =>
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -100,8 +100,8 @@ export function SaleForm({
       : type === "FACTORY"
         ? n(factoryAmount)
         : lineTotal;
-  const commission = type === "MARKET" ? n(totalBill) * 0.02 : 0;
-  const balance = amount - n(received);
+  const commission =
+    type === "MARKET" ? n(totalBill) * MARKET_COMMISSION_RATE : 0;
 
   return (
     <form action={formAction} className="max-w-3xl space-y-4">
@@ -136,31 +136,21 @@ export function SaleForm({
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label htmlFor="buyerName" className={labelCls}>
-            {type === "MARKET" ? "Seller Name" : "Party Name"}
-          </label>
-          <input
-            id="buyerName"
-            name="buyerName"
-            required
-            defaultValue={initial?.buyerName ?? ""}
-            className={inputCls}
-          />
-        </div>
+        <PartyCombobox
+          name="buyerName"
+          label={type === "MARKET" ? "Seller Name" : "Party Name"}
+          types={[SALE_BUYER_TYPE[type]]}
+          defaultValue={initial?.buyerName ?? ""}
+        />
         {(type === "FISH_MILL" || type === "FACTORY") && (
-          <div>
-            <label htmlFor="careOfName" className={labelCls}>
-              CareOf (optional)
-            </label>
-            <input
-              id="careOfName"
-              name="careOfName"
-              defaultValue={initial?.careOfName ?? ""}
-              placeholder="Agent name — ledger posts here instead"
-              className={inputCls}
-            />
-          </div>
+          <PartyCombobox
+            name="careOfName"
+            label="CareOf (optional)"
+            types={["CARE_OF"]}
+            required={false}
+            defaultValue={initial?.careOfName ?? ""}
+            placeholder="Agent name — ledger posts here instead"
+          />
         )}
       </div>
 
@@ -176,6 +166,17 @@ export function SaleForm({
                 id="place"
                 name="place"
                 defaultValue={initial?.place ?? ""}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label htmlFor="vehicleNo" className={labelCls}>
+                Vehicle No.
+              </label>
+              <input
+                id="vehicleNo"
+                name="vehicleNo"
+                defaultValue={initial?.vehicleNo ?? ""}
                 className={inputCls}
               />
             </div>
@@ -364,37 +365,27 @@ export function SaleForm({
         </div>
       )}
 
-      {/* ---- Payment ---- */}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label htmlFor="amountReceived" className={labelCls}>
-            Amount Received (₹)
-          </label>
-          <input
-            id="amountReceived"
-            name="amountReceived"
-            inputMode="decimal"
-            value={received}
-            onChange={(e) => setReceived(e.target.value)}
-            className={inputCls + " num text-right"}
-          />
-        </div>
-        <div className="flex items-end">
-          <div className="w-full border border-line bg-surface px-4 py-2 text-[13px] flex justify-between">
-            <span className="text-muted">Balance {type === "MARKET" ? "(Net Bill − received)" : "(amount − received)"}</span>
-            <span className={"num font-semibold " + (balance > 0 ? "text-debit" : "")}>
-              {fmtMoney(balance)}
-            </span>
-          </div>
-        </div>
+      {/* Collection is not captured here. A sale records what the party owes;
+          money actually arriving is a Receipt voucher against that party, so
+          part-payments and later settlement have their own dated records. */}
+      <div className="border border-line bg-surface px-4 py-2 text-[13px] flex items-center justify-between gap-3">
+        <span className="text-muted">
+          This sale posts {fmtMoney(amount)} to the party&rsquo;s ledger.
+          Record money received as a Receipt.
+        </span>
+        <Link
+          href="/vouchers/receipts/new"
+          className="text-accent underline underline-offset-2 whitespace-nowrap"
+        >
+          New Receipt
+        </Link>
       </div>
 
-      <div>
-        <label htmlFor="bill" className={labelCls}>
-          {TYPE_LABELS[type]} bill image (optional)
-        </label>
-        <input id="bill" name="bill" type="file" accept="image/jpeg,image/png,image/webp" className="text-[13px]" />
-      </div>
+      <BillUpload
+        label={`${SALE_TYPE_LABELS[type]} bill image`}
+        hint="Optional."
+        existingCount={existingAttachments}
+      />
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}
 

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
@@ -44,7 +45,19 @@ export default async function SalePage({
   });
   if (!sale) notFound();
 
-  const balance = sale.amount.sub(sale.amountReceived);
+  // Collection is tracked against the party, not this bill, so the meaningful
+  // figure alongside the sale is what the ledger party currently owes overall.
+  const ledgerPartyId = sale.careOfPartyId ?? sale.partyId;
+  const latest = await prisma.ledgerEntry.findFirst({
+    where: {
+      companyId: sale.companyId,
+      centreId: sale.centreId,
+      partyId: ledgerPartyId,
+    },
+    orderBy: [{ date: "desc" }, { seq: "desc" }],
+    select: { runningBalance: true },
+  });
+  const outstanding = latest?.runningBalance ?? new Prisma.Decimal(0);
   const attachments = await getAttachments("SALE", sale.id);
   const isFishMill = sale.type === "FISH_MILL";
 
@@ -133,20 +146,25 @@ export default async function SalePage({
         </div>
       )}
 
-      <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-3 gap-3 mb-2">
+      <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-2 gap-3 mb-2">
         <Field label="Sale Amount" value={fmtMoney(sale.amount)} />
-        <Field label="Received" value={fmtMoney(sale.amountReceived)} />
         <div>
           <div className="text-[11px] uppercase tracking-wide text-muted font-semibold">
-            Balance
+            {(sale.careOfParty ?? sale.party).name} owes (all bills)
           </div>
           <div
             className={`num text-[14px] font-semibold ${
-              balance.greaterThan(0) ? "text-debit" : ""
+              outstanding.greaterThan(0) ? "text-debit" : "text-muted"
             }`}
           >
-            {fmtMoney(balance)}
+            {fmtMoney(outstanding)}
           </div>
+          <Link
+            href="/vouchers/receipts/new"
+            className="text-accent underline underline-offset-2 text-[12px]"
+          >
+            Record a receipt
+          </Link>
         </div>
       </div>
 

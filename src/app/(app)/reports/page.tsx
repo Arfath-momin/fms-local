@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireReports } from "@/lib/session";
 
 const ITEMS = [
   {
@@ -18,7 +19,9 @@ const ITEMS = [
   },
 ];
 
-export default function ReportsPage() {
+export default async function ReportsPage() {
+  await requireReports();
+
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-4">Reports</h1>

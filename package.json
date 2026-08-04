@@ -13,6 +13,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:studio": "prisma studio",
     "db:check": "tsx scripts/check-ledger.ts",
+    "db:verify": "tsx scripts/verify-ledger.ts",
     "user:create": "tsx scripts/create-user.ts"
   },
   "dependencies": {

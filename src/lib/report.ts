@@ -22,7 +22,7 @@ export async function getBalancesAsOf(
 ): Promise<Map<string, Prisma.Decimal>> {
   const latest = await prisma.ledgerEntry.findMany({
     where: { companyId, centreId, date: { lte: asOf } },
-    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    orderBy: [{ date: "desc" }, { seq: "desc" }],
     distinct: ["partyId"],
     select: { partyId: true, runningBalance: true },
   });
@@ -45,13 +45,22 @@ export type ProfitReport = {
  * received/outstanding) everywhere — that only moves a party's outstanding
  * balance, never the profit. Flagged-error vouchers stay visible in lists but
  * never count in totals.
+ *
+ * `centreId` scopes the figures to one centre; null aggregates every centre of
+ * the company. Callers that display a centre-scoped screen must pass the
+ * centre, or the totals will silently include trade from centres the user is
+ * not looking at. Note that a centre-scoped profit can look wrong when fish is
+ * bought in one centre and sold from another — the Union screen is the
+ * cross-centre view for that.
  */
 export async function computeProfit(
   companyId: string,
+  centreId: string | null,
   from: Date,
   to: Date
 ): Promise<ProfitReport> {
   const dateRange = { gte: from, lte: to };
+  const centreWhere = centreId ? { centreId } : {};
   const [flaggedPurchases, flaggedExpenses, flaggedSales] = await Promise.all([
     getFlaggedIds("PURCHASE"),
     getFlaggedIds("EXPENSE"),
@@ -61,17 +70,32 @@ export async function computeProfit(
   const [purchaseGroups, expenseGroups, saleGroups] = await Promise.all([
     prisma.purchase.groupBy({
       by: ["type"],
-      where: { companyId, date: dateRange, id: { notIn: flaggedPurchases } },
+      where: {
+        companyId,
+        ...centreWhere,
+        date: dateRange,
+        id: { notIn: flaggedPurchases },
+      },
       _sum: { amount: true },
     }),
     prisma.expense.groupBy({
       by: ["category"],
-      where: { companyId, date: dateRange, id: { notIn: flaggedExpenses } },
+      where: {
+        companyId,
+        ...centreWhere,
+        date: dateRange,
+        id: { notIn: flaggedExpenses },
+      },
       _sum: { amount: true },
     }),
     prisma.sale.groupBy({
       by: ["type"],
-      where: { companyId, date: dateRange, id: { notIn: flaggedSales } },
+      where: {
+        companyId,
+        ...centreWhere,
+        date: dateRange,
+        id: { notIn: flaggedSales },
+      },
       _sum: { amount: true },
     }),
   ]);
@@ -103,8 +127,12 @@ export async function computeProfit(
 }
 
 /** One day's figures — powers the Day Book screen and dashboard tiles. */
-export function computeDayBook(companyId: string, date: Date) {
-  return computeProfit(companyId, date, date);
+export function computeDayBook(
+  companyId: string,
+  centreId: string | null,
+  date: Date
+) {
+  return computeProfit(companyId, centreId, date, date);
 }
 
 export type UnionCentre = {
@@ -391,13 +419,31 @@ export async function computePeriodBreakdown(args: {
   return { buckets: [...buckets.values()], total };
 }
 
+export type RegisterKind =
+  | "PURCHASE"
+  | "SALE"
+  | "EXPENSE"
+  | "PAYMENT"
+  | "RECEIPT";
+
+/**
+ * PAYMENT and RECEIPT are money moving, not trade. They belong in the register
+ * — they are transactions the user entered and expects to see — but they must
+ * never reach the profit calculation, or settling a purchase would show up as
+ * a second cost. Callers total them in their own columns; see
+ * `isProfitKind()`.
+ */
+export const isProfitKind = (kind: RegisterKind): boolean =>
+  kind === "PURCHASE" || kind === "SALE" || kind === "EXPENSE";
+
 export type RegisterRow = {
   id: string;
   date: Date;
   createdAt: Date;
   centreName: string;
-  kind: "PURCHASE" | "SALE" | "EXPENSE";
-  subtype: string; // PurchaseType | SaleType | ExpenseCategory enum value
+  kind: RegisterKind;
+  /** PurchaseType | SaleType | ExpenseCategory | SettlementMode. */
+  subtype: string;
   partyName: string;
   amount: Prisma.Decimal;
   href: string;
@@ -426,7 +472,7 @@ export async function getTransactionRegister(
     getFlaggedIds("SALE"),
   ]);
 
-  const [purchases, sales, expenses] = await Promise.all([
+  const [purchases, sales, expenses, settlements] = await Promise.all([
     prisma.purchase.findMany({
       where: {
         companyId,
@@ -456,6 +502,12 @@ export async function getTransactionRegister(
         date: dateRange,
         id: { notIn: flaggedExpenses },
       },
+      include: { centre: { select: { name: true } }, party: { select: { name: true } } },
+    }),
+    // Settlements have no error-flag concept — that mechanism is retired and
+    // only ever covered the three trade vouchers.
+    prisma.settlement.findMany({
+      where: { companyId, ...centreWhere, date: dateRange },
       include: { centre: { select: { name: true } }, party: { select: { name: true } } },
     }),
   ]);
@@ -495,6 +547,17 @@ export async function getTransactionRegister(
       partyName: e.party.name,
       amount: e.amount,
       href: `/vouchers/expenses/${e.id}`,
+    })),
+    ...settlements.map((st) => ({
+      id: st.id,
+      date: st.date,
+      createdAt: st.createdAt,
+      centreName: st.centre.name,
+      kind: st.kind,
+      subtype: st.mode,
+      partyName: st.party.name,
+      amount: st.amount,
+      href: `/vouchers/${st.kind === "PAYMENT" ? "payments" : "receipts"}/${st.id}`,
     })),
   ];
 

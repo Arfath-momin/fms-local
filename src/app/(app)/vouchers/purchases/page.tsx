@@ -92,7 +92,6 @@ export default async function PurchasesPage({
                 <th>Boat / Seller</th>
                 <th>Type</th>
                 <th className="num-col">Total</th>
-                <th>Paid</th>
                 <th className="w-16"></th>
               </tr>
             </thead>
@@ -126,15 +125,6 @@ export default async function PurchasesPage({
                     <td className={struck}>{TYPE_LABELS[p.type]}</td>
                     <td className={`num-col num text-debit ${struck}`}>
                       {fmtMoney(p.amount)}
-                    </td>
-                    <td className={struck}>
-                      {p.paid ? (
-                        <span className="text-muted text-[12px]">Paid</span>
-                      ) : (
-                        <span className="text-debit text-[12px] font-semibold">
-                          Outstanding
-                        </span>
-                      )}
                     </td>
                     <td>
                       <Link

@@ -5,6 +5,9 @@ import Link from "next/link";
 import type { PurchaseFormState } from "./actions";
 import type { PurchaseType } from "@/generated/prisma/enums";
 import { businessToday, fmtMoney } from "@/lib/format";
+import { BillUpload } from "../bill-upload";
+import { PartyCombobox } from "../../masters/party-combobox";
+import { PURCHASE_GROUP_NAME, PURCHASE_SELLER_TYPE } from "@/lib/party";
 
 const TYPE_OPTIONS: { value: PurchaseType; label: string }[] = [
   { value: "SOCIETY", label: "Society" },
@@ -28,7 +31,6 @@ export type PurchaseInit = {
   type: PurchaseType;
   partyName: string;
   amount: string;
-  paid: boolean;
   date: string;
   lines: PurchaseLineInit[];
 };
@@ -40,6 +42,7 @@ export function PurchaseForm({
   initial,
   submitLabel,
   reasonField,
+  existingAttachments = 0,
 }: {
   action: (
     prev: PurchaseFormState,
@@ -48,6 +51,7 @@ export function PurchaseForm({
   initial?: PurchaseInit;
   submitLabel: string;
   reasonField?: boolean;
+  existingAttachments?: number;
 }) {
   const [state, formAction, pending] = useActionState<PurchaseFormState, FormData>(
     action,
@@ -60,6 +64,10 @@ export function PurchaseForm({
 
   const today = businessToday();
   const isLocal = type === "LOCAL";
+  // Society / KFDC / Private track the boat; Local tracks the seller. Same map
+  // the server action resolves with, so the picker can never offer a party
+  // kind the save would then reject.
+  const sellerType = PURCHASE_SELLER_TYPE[type];
 
   const grandTotal = useMemo(
     () =>
@@ -111,21 +119,21 @@ export function PurchaseForm({
         </div>
       </div>
 
+      {/* Keyed on the purchase type so switching Society ↔ Local re-runs the
+          search against the right master and clears a name from the other. */}
       <div>
-        <label htmlFor="partyName" className={labelCls}>
-          {isLocal ? "Seller Name" : "Boat Name"}
-        </label>
-        <input
-          id="partyName"
+        <PartyCombobox
+          key={sellerType}
           name="partyName"
-          required
+          label={isLocal ? "Seller Name" : "Boat Name"}
+          types={[sellerType]}
           defaultValue={initial?.partyName ?? ""}
           placeholder={isLocal ? "e.g. Ramesh" : "e.g. Boat No. 12"}
-          className={inputCls}
         />
         <p className="text-muted text-[12px] mt-1">
-          Each {isLocal ? "seller" : "boat"} keeps its own ledger — reusing the
-          same name adds to that ledger.
+          Recorded on this bill and shown against every line of the{" "}
+          <span className="font-medium">{PURCHASE_GROUP_NAME[type]}</span>{" "}
+          ledger, which is where the money is owed.
         </p>
       </div>
 
@@ -240,28 +248,15 @@ export function PurchaseForm({
         </div>
       )}
 
-      <div>
-        <label htmlFor="bill" className={labelCls}>
-          Bill / Receipt {isLocal ? "(optional)" : "— fish details stay on the bill"}
-        </label>
-        <input
-          id="bill"
-          name="bill"
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          className="text-[13px]"
-        />
-      </div>
-
-      <label className="flex items-center gap-2 text-[13px]">
-        <input
-          type="checkbox"
-          name="paid"
-          defaultChecked={initial ? initial.paid : true}
-          className="h-4 w-4"
-        />
-        Paid (uncheck to leave outstanding in the ledger)
-      </label>
+      <BillUpload
+        label="Bill / Receipt"
+        hint={
+          isLocal
+            ? "Optional."
+            : "The fish breakdown stays on the bill image, so attach it here."
+        }
+        existingCount={existingAttachments}
+      />
 
       {reasonField && (
         <div>

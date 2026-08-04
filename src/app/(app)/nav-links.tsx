@@ -6,14 +6,19 @@ import type { Role } from "@/generated/prisma/enums";
 
 // `roles: undefined` means every signed-in role sees it. Auditors get no
 // Vouchers or Masters entry — they read ledgers and reports, and reach an
-// individual voucher only by drilling down from one of those.
+// individual voucher only by drilling down from one of those. Accountants get
+// no analytics (Dashboard / Reports / Union) but keep Ledgers, which they need
+// to record payments and receipts against the right balance.
+//
+// This list only hides links; the pages enforce the same rule server-side via
+// requireReports(), so a typed URL cannot get past it.
 const LINKS: { href: string; label: string; roles?: Role[] }[] = [
-  { href: "/dashboard", label: "Dashboard" },
+  { href: "/dashboard", label: "Dashboard", roles: ["ADMIN", "AUDITOR"] },
   { href: "/vouchers", label: "Vouchers", roles: ["ADMIN", "ACCOUNTANT"] },
   { href: "/masters", label: "Masters", roles: ["ADMIN", "ACCOUNTANT"] },
   { href: "/ledgers", label: "Ledgers" },
-  { href: "/reports", label: "Reports" },
-  { href: "/union", label: "Union" },
+  { href: "/reports", label: "Reports", roles: ["ADMIN", "AUDITOR"] },
+  { href: "/union", label: "Union", roles: ["ADMIN", "AUDITOR"] },
   { href: "/admin/users", label: "Users", roles: ["ADMIN"] },
 ];
 

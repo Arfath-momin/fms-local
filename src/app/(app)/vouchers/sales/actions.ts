@@ -7,15 +7,25 @@ import type { SaleType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { requireActiveScope } from "@/lib/centre";
-import { postLedgerEntry } from "@/lib/ledger";
+import {
+  postLedgerEntries,
+  removeLedgerEntries,
+  type PostLedgerArgs,
+} from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
+import { COMMISSION_PARTY_NAME } from "@/lib/settlement";
 import {
   SALE_TYPES,
   SALE_BUYER_TYPE,
   SALE_TYPE_ALLOWS_CARE_OF,
   MARKET_COMMISSION_RATE,
 } from "@/lib/sale";
-import { saveAttachmentFile, validateImageFile } from "@/lib/attachments";
+import {
+  linkStagedAttachment,
+  replaceStagedAttachment,
+  stageAttachmentFile,
+  validateImageFile,
+} from "@/lib/attachments";
 
 export type SaleFormState = { error: string } | null;
 
@@ -43,7 +53,6 @@ type Parsed = {
   buyerName: string;
   careOfName: string | null;
   amount: Prisma.Decimal; // recognised sale + posted to ledger
-  amountReceived: Prisma.Decimal;
   // type-specific
   place: string | null;
   totalBill: Prisma.Decimal | null;
@@ -115,7 +124,6 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const billNo = clean(formData.get("billNo"));
   const dateRaw = String(formData.get("date") ?? "");
   const buyerName = clean(formData.get("buyerName"));
-  const receivedRaw = clean(formData.get("amountReceived"));
   const file = formData.get("bill");
 
   if (!billNo) return { error: "Enter the bill number." };
@@ -164,6 +172,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     if (!netBill || netBill.lte(0))
       return { error: "Net Bill must be a positive number." };
     base.place = clean(formData.get("place")) || null;
+    base.vehicleNo = clean(formData.get("vehicleNo")) || null;
     base.totalBill = totalBill;
     base.commission = totalBill.mul(MARKET_COMMISSION_RATE);
     amount = netBill; // Net Bill is what the seller owes us = the sale revenue
@@ -193,22 +202,20 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     amount = parsedLines.lines.reduce((a, l) => a.add(l.total), ZERO);
   }
 
-  let amountReceived = ZERO;
-  if (receivedRaw) {
-    const r = parseMoney(receivedRaw);
-    if (!r) return { error: "Amount received must be a number (up to 2 decimals)." };
-    amountReceived = r;
-  }
-  if (amountReceived.gt(amount))
-    return { error: "Amount received cannot exceed the sale amount." };
-
-  return { data: { ...base, amount, amountReceived } };
+  return { data: { ...base, amount } };
 }
 
 /**
- * Ledger effect of a sale: DEBIT the party who owes us (the buyer, or the
- * CareOf agent when routed via CareOf) for the full sale amount; CREDIT a
- * PAYMENT for whatever's been received. Any shortfall stands as outstanding.
+ * Ledger effect of a sale: DEBIT the party who owes us — the buyer, or the
+ * CareOf agent when routed via CareOf — for the full sale amount.
+ *
+ * Nothing is credited back here. Collection is a Receipt voucher against the
+ * party, so the balance this leaves standing is the real amount outstanding
+ * until one is entered.
+ *
+ * A Market sale additionally credits the house's own 2% commission account,
+ * which is what turns the commission from a number printed on the bill into a
+ * ledger with a running balance.
  */
 async function postSaleLedger(
   tx: Prisma.TransactionClient,
@@ -218,32 +225,44 @@ async function postSaleLedger(
     ledgerPartyId: string;
     id: string;
     amount: Prisma.Decimal;
-    amountReceived: Prisma.Decimal;
+    commission: Prisma.Decimal | null;
     date: Date;
   }
 ) {
-  await postLedgerEntry(tx, {
-    companyId: s.companyId,
-    centreId: s.centreId,
-    partyId: s.ledgerPartyId,
-    type: "DEBIT",
-    sourceType: "SALE",
-    sourceId: s.id,
-    amount: s.amount,
-    date: s.date,
-  });
-  if (s.amountReceived.gt(0)) {
-    await postLedgerEntry(tx, {
+  const entries: PostLedgerArgs[] = [
+    {
       companyId: s.companyId,
       centreId: s.centreId,
       partyId: s.ledgerPartyId,
-      type: "CREDIT",
-      sourceType: "PAYMENT",
+      type: "DEBIT" as const,
+      sourceType: "SALE" as const,
       sourceId: s.id,
-      amount: s.amountReceived,
+      amount: s.amount,
+      date: s.date,
+    },
+  ];
+
+  if (s.commission && s.commission.gt(0)) {
+    const commissionPartyId = await findOrCreateParty(
+      tx,
+      COMMISSION_PARTY_NAME,
+      "COMMISSION"
+    );
+    // DEBIT: commission earned is income accruing to us, so the account grows
+    // in the same direction as money owed to us.
+    entries.push({
+      companyId: s.companyId,
+      centreId: s.centreId,
+      partyId: commissionPartyId,
+      type: "DEBIT" as const,
+      sourceType: "COMMISSION" as const,
+      sourceId: s.id,
+      amount: s.commission,
       date: s.date,
     });
   }
+
+  await postLedgerEntries(tx, entries);
 }
 
 function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
@@ -254,7 +273,6 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
     billNo: d.billNo,
     date: d.date,
     amount: d.amount,
-    amountReceived: d.amountReceived,
     place: d.place,
     totalBill: d.totalBill,
     commission: d.commission,
@@ -288,6 +306,9 @@ export async function createSale(
 
   let saleId: string;
   try {
+    // Staged before the transaction so a rejected image aborts the save
+    // instead of leaving a sale with no bill against it.
+    const staged = await stageAttachmentFile(d.file);
     saleId = await prisma.$transaction(async (tx) => {
       const buyerId = await findOrCreateParty(tx, d.buyerName, SALE_BUYER_TYPE[d.type]);
       const careOfId = d.careOfName
@@ -307,22 +328,20 @@ export async function createSale(
         ledgerPartyId: careOfId ?? buyerId,
         id: sale.id,
         amount: d.amount,
-        amountReceived: d.amountReceived,
+        commission: d.commission,
         date: d.date,
+      });
+      await linkStagedAttachment(tx, staged, {
+        companyId: company.id,
+        centreId: centre.id,
+        linkedType: "SALE",
+        linkedId: sale.id,
       });
       return sale.id;
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save sale." };
   }
-
-  await saveAttachmentFile({
-    companyId: company.id,
-    centreId: centre.id,
-    linkedType: "SALE",
-    linkedId: saleId,
-    file: d.file,
-  });
 
   revalidatePath("/vouchers/sales");
   redirect(`/vouchers/sales/${saleId}`);
@@ -338,17 +357,20 @@ export async function updateSale(
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
-  let scope: { companyId: string; centreId: string };
   try {
-    scope = await prisma.$transaction(async (tx) => {
+    const staged = await stageAttachmentFile(d.file);
+    await prisma.$transaction(async (tx) => {
       const existing = await tx.sale.findUnique({
         where: { id: saleId },
         select: { companyId: true, centreId: true, date: true },
       });
       if (!existing) throw new Error("Sale not found.");
 
-      await tx.ledgerEntry.deleteMany({
-        where: { sourceId: saleId, sourceType: { in: ["SALE", "PAYMENT"] } },
+      // Rebuilds the old ledger party's statement too, in case this edit
+      // reassigns the buyer or routes the sale via a different CareOf agent.
+      await removeLedgerEntries(tx, {
+        sourceId: saleId,
+        sourceType: ["SALE", "PAYMENT", "RECEIPT", "COMMISSION"],
       });
       await tx.saleLine.deleteMany({ where: { saleId } });
 
@@ -370,22 +392,21 @@ export async function updateSale(
         ledgerPartyId: careOfId ?? buyerId,
         id: saleId,
         amount: d.amount,
-        amountReceived: d.amountReceived,
+        commission: d.commission,
         date: d.date,
       });
-      return { companyId: existing.companyId, centreId: existing.centreId };
+      // A newly chosen image replaces the old bill rather than piling up
+      // beside it; leaving the field empty keeps whatever is attached.
+      await replaceStagedAttachment(tx, staged, {
+        companyId: existing.companyId,
+        centreId: existing.centreId,
+        linkedType: "SALE",
+        linkedId: saleId,
+      });
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save sale." };
   }
-
-  await saveAttachmentFile({
-    companyId: scope.companyId,
-    centreId: scope.centreId,
-    linkedType: "SALE",
-    linkedId: saleId,
-    file: d.file,
-  });
 
   revalidatePath("/vouchers/sales");
   redirect(`/vouchers/sales/${saleId}`);

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
+import type { LedgerSourceType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
@@ -10,11 +11,13 @@ import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import { DateWindow, Pager } from "../../../list-controls";
 import { NoCentreNotice } from "../../../no-centre";
 
-const SOURCE_LABELS = {
+const SOURCE_LABELS: Record<LedgerSourceType, string> = {
   PURCHASE: "Purchase",
   SALE: "Sale",
   EXPENSE: "Expense",
   PAYMENT: "Payment",
+  RECEIPT: "Receipt",
+  COMMISSION: "Commission",
 };
 
 export default async function PartyStatementPage({
@@ -39,45 +42,82 @@ export default async function PartyStatementPage({
   // The statement is windowed, but the headline balance must not be: it is what
   // the party owes *now*, not at the end of whichever month is on screen. So it
   // comes from the newest entry overall rather than from the last row rendered.
-  const [entries, total, latest] = await Promise.all([
+  const [entries, total, latest, totals] = await Promise.all([
     prisma.ledgerEntry.findMany({
       where,
-      orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+      orderBy: [{ date: "asc" }, { seq: "asc" }],
       skip: listWindow.skip,
       take: listWindow.take,
     }),
     prisma.ledgerEntry.count({ where }),
     prisma.ledgerEntry.findFirst({
       where: scope,
-      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ date: "desc" }, { seq: "desc" }],
       select: { runningBalance: true },
+    }),
+    // Lifetime totals, not windowed — "how much have we billed this party and
+    // how much have they settled" is a question about the whole relationship,
+    // not about whichever month happens to be on screen. Grouped in Postgres,
+    // so it stays one indexed aggregate however long the statement gets.
+    prisma.ledgerEntry.groupBy({
+      by: ["type"],
+      where: scope,
+      _sum: { amount: true },
     }),
   ]);
 
   // Resolve source links for drill-down: each ledger entry's sourceId points at
-  // its own voucher page (purchase / sale / expense). PAYMENT entries share the
-  // source voucher's id, so they resolve to the same page.
+  // its own voucher page (purchase / sale / expense / settlement).
   const sourceIds = [...new Set(entries.map((e) => e.sourceId))];
-  const [sales, purchases, expenses] = await Promise.all([
+  const [sales, purchases, expenses, settlements] = await Promise.all([
     prisma.sale.findMany({
       where: { id: { in: sourceIds } },
       select: { id: true },
     }),
+    // The boat comes back with the purchase so the statement can name the
+    // vessel on each line — the whole point of moving the ledger to the group.
     prisma.purchase.findMany({
       where: { id: { in: sourceIds } },
-      select: { id: true },
+      select: { id: true, boat: { select: { name: true } } },
     }),
     prisma.expense.findMany({
       where: { id: { in: sourceIds } },
       select: { id: true },
     }),
+    prisma.settlement.findMany({
+      where: { id: { in: sourceIds } },
+      select: { id: true, kind: true },
+    }),
   ]);
+
+  const boatBySource = new Map(
+    purchases
+      .filter((p) => p.boat)
+      .map((p) => [p.id, p.boat!.name] as const)
+  );
+  // A group ledger is the only place a Boat column earns its keep; a vendor or
+  // buyer statement would just show an empty column on every row.
+  const showBoat = party.type === "PURCHASE_GROUP";
   const links = new Map<string, string>();
   for (const p of purchases) links.set(p.id, `/vouchers/purchases/${p.id}`);
   for (const e of expenses) links.set(e.id, `/vouchers/expenses/${e.id}`);
   for (const s of sales) links.set(s.id, `/vouchers/sales/${s.id}`);
+  for (const st of settlements)
+    links.set(
+      st.id,
+      `/vouchers/${st.kind === "PAYMENT" ? "payments" : "receipts"}/${st.id}`
+    );
 
   const balance = latest?.runningBalance ?? new Prisma.Decimal(0);
+
+  // DEBIT is what we have billed the party (sales); CREDIT is what they have
+  // settled plus anything we owe them (purchases, expenses). Outstanding is
+  // the difference, which is exactly the running balance.
+  const ZERO = new Prisma.Decimal(0);
+  const sumOf = (t: "DEBIT" | "CREDIT") =>
+    totals.find((g) => g.type === t)?._sum.amount ?? ZERO;
+  const totalDebit = sumOf("DEBIT");
+  const totalCredit = sumOf("CREDIT");
 
   return (
     <div className="max-w-3xl">
@@ -125,6 +165,23 @@ export default async function PartyStatementPage({
         </div>
       </div>
 
+      {/* Lifetime position with this party, independent of the date window
+          below — what we billed, what came back, and what is still open. */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <Summary label="Total billed" value={totalDebit} cls="text-debit" />
+        <Summary label="Total settled" value={totalCredit} cls="text-credit" />
+        <Summary
+          label="Receivable"
+          value={balance.greaterThan(0) ? balance : ZERO}
+          cls={balance.greaterThan(0) ? "text-debit" : "text-muted"}
+        />
+        <Summary
+          label="Payable"
+          value={balance.lessThan(0) ? balance.negated() : ZERO}
+          cls={balance.lessThan(0) ? "text-credit" : "text-muted"}
+        />
+      </div>
+
       <DateWindow
         basePath={`/ledgers/parties/${party.id}`}
         window={listWindow}
@@ -143,6 +200,7 @@ export default async function PartyStatementPage({
               <tr>
                 <th>Date</th>
                 <th>Particulars</th>
+                {showBoat && <th>Boat</th>}
                 <th className="num-col">Debit</th>
                 <th className="num-col">Credit</th>
                 <th className="num-col">Balance</th>
@@ -167,6 +225,13 @@ export default async function PartyStatementPage({
                         label
                       )}
                     </td>
+                    {showBoat && (
+                      <td>
+                        {boatBySource.get(e.sourceId) ?? (
+                          <span className="text-muted">—</span>
+                        )}
+                      </td>
+                    )}
                     <td className="num-col num text-debit">
                       {e.type === "DEBIT" ? fmtMoney(e.amount) : ""}
                     </td>
@@ -191,6 +256,27 @@ export default async function PartyStatementPage({
           total={total}
         />
       )}
+    </div>
+  );
+}
+
+function Summary({
+  label,
+  value,
+  cls,
+}: {
+  label: string;
+  value: Prisma.Decimal;
+  cls?: string;
+}) {
+  return (
+    <div className="border border-line bg-surface px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-muted font-semibold">
+        {label}
+      </div>
+      <div className={`num text-[15px] font-bold mt-0.5 ${cls ?? ""}`}>
+        {fmtMoney(value)}
+      </div>
     </div>
   );
 }
