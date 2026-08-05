@@ -129,7 +129,7 @@ export async function createSettlement(
   }
 
   revalidatePath(SETTLEMENT_PATH[kind]);
-  revalidatePath("/ledgers/parties");
+  revalidatePath("/ledgers", "layout");
   redirect(SETTLEMENT_PATH[kind]);
 }
 
@@ -192,6 +192,6 @@ export async function updateSettlement(
   }
 
   revalidatePath(SETTLEMENT_PATH[kind]);
-  revalidatePath("/ledgers/parties");
+  revalidatePath("/ledgers", "layout");
   redirect(SETTLEMENT_PATH[kind]);
 }

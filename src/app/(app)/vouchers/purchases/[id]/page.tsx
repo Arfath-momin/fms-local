@@ -24,6 +24,7 @@ export default async function PurchaseDetailPage({
     where: { id },
     include: {
       party: { select: { name: true } },
+      boat: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
       createdBy: { select: { name: true } },
       updatedBy: { select: { name: true } },
@@ -97,7 +98,11 @@ export default async function PurchaseDetailPage({
         <h1 className="heading text-xl font-semibold mb-4">Purchase</h1>
         <dl className="border border-line-strong bg-surface divide-y divide-line max-w-lg text-[13px]">
           <Row label="Type" value={purchase.type} />
-          <Row label="Seller / Boat" value={purchase.party.name} />
+          <Row label="Party (ledger)" value={purchase.party.name} />
+          <Row
+            label={purchase.type === "LOCAL" ? "Seller" : "Boat"}
+            value={purchase.boat?.name ?? "—"}
+          />
           <Row label="Date" value={fmtDate(purchase.date)} />
           <Row label="Amount" value={fmtMoney(purchase.amount)} />
         </dl>
@@ -136,6 +141,7 @@ export default async function PurchaseDetailPage({
   const initial: PurchaseInit = {
     type: purchase.type,
     partyName: purchase.party.name,
+    boatName: purchase.boat?.name ?? "",
     amount: purchase.amount.toString(),
     date: toInputDate(purchase.date),
     lines: purchase.lines.map((l) => ({

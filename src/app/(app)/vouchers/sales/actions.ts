@@ -344,6 +344,7 @@ export async function createSale(
   }
 
   revalidatePath("/vouchers/sales");
+  revalidatePath("/ledgers", "layout");
   redirect(`/vouchers/sales/${saleId}`);
 }
 
@@ -409,5 +410,6 @@ export async function updateSale(
   }
 
   revalidatePath("/vouchers/sales");
+  revalidatePath("/ledgers", "layout");
   redirect(`/vouchers/sales/${saleId}`);
 }

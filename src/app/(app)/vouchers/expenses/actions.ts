@@ -154,6 +154,7 @@ export async function createExpense(
   }
 
   revalidatePath("/vouchers/expenses");
+  revalidatePath("/ledgers", "layout");
   redirect("/vouchers/expenses");
 }
 
@@ -208,5 +209,6 @@ export async function updateExpense(
   }
 
   revalidatePath("/vouchers/expenses");
+  revalidatePath("/ledgers", "layout");
   redirect("/vouchers/expenses");
 }

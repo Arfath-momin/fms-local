@@ -15,7 +15,7 @@ const ITEMS = [
   {
     href: "/ledgers/parties",
     label: "Party Statements",
-    desc: "Per-centre statement for any boat, seller, buyer, vendor or CareOf agent — exportable as CSV.",
+    desc: "Per-centre statement for any purchase party, buyer, vendor or CareOf agent — exportable as CSV.",
   },
 ];
 

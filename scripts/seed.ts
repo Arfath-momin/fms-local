@@ -11,7 +11,7 @@ import type {
   LedgerSourceType,
 } from "../src/generated/prisma/enums";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PURCHASE_GROUP_NAME } from "../src/lib/party";
+import { FIXED_PURCHASE_PARTY } from "../src/lib/party";
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -161,18 +161,21 @@ async function main() {
   // --- Purchases (BFM · Centre 1) ---
   async function purchase(
     type: "SOCIETY" | "KFDC" | "PRIVATE" | "LOCAL",
-    partyName: string,
+    boatName: string,
     amount: Prisma.Decimal,
     paid: boolean,
     on: Date,
-    lines: { particular: string; qtyKg: number; pricePerKg: number }[] = []
+    lines: { particular: string; qtyKg: number; pricePerKg: number }[] = [],
+    /** Private only — the owner the money is owed to. */
+    privateParty?: string
   ) {
     // The boat/seller is recorded on the purchase for display; the ledger
-    // belongs to the group (Society / KFDC / Private Parties / Local
-    // Individuals), which is what actually gets paid.
+    // belongs to the party (Society / KFDC / Local Individuals, or the named
+    // private owner), which is what actually gets paid.
     const boatType: PartyType = type === "LOCAL" ? "LOCAL_SELLER" : "BOAT";
-    const boatId = await party(partyName, boatType);
-    const partyId = await party(PURCHASE_GROUP_NAME[type], "PURCHASE_GROUP");
+    const boatId = await party(boatName, boatType);
+    const partyName = FIXED_PURCHASE_PARTY[type] ?? privateParty!;
+    const partyId = await party(partyName, "PURCHASE_GROUP");
     const p = await prisma.purchase.create({
       data: {
         companyId: bfm,
@@ -198,7 +201,15 @@ async function main() {
 
   await purchase("SOCIETY", "Boat No. 12", D(45000), true, date("2026-07-20"));
   await purchase("KFDC", "Boat No. 7", D(32000), true, date("2026-07-21"));
-  await purchase("PRIVATE", "Boat No. 12", D(18500), false, date("2026-07-21"));
+  await purchase(
+    "PRIVATE",
+    "Boat No. 12",
+    D(18500),
+    false,
+    date("2026-07-21"),
+    [],
+    "Ravi Traders"
+  );
   await purchase("LOCAL", "Ramesh", D(15000), true, date("2026-07-21"), [
     { particular: "Prawn", qtyKg: 20, pricePerKg: 450 },
     { particular: "Mackerel", qtyKg: 50, pricePerKg: 120 },

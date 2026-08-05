@@ -7,7 +7,7 @@ import type { PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { requireActiveScope } from "@/lib/centre";
-import { PURCHASE_GROUP_NAME, PURCHASE_SELLER_TYPE } from "@/lib/party";
+import { FIXED_PURCHASE_PARTY, PURCHASE_BOAT_TYPE } from "@/lib/party";
 import { findOrCreateParty } from "@/lib/party-db";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import {
@@ -30,30 +30,44 @@ type ParsedLine = {
 
 type Parsed = {
   type: PurchaseType;
+  /** The ledger this purchase settles against. */
   partyName: string;
+  /** The boat (Society/KFDC/Private) or seller (Local) — recorded, not a ledger. */
+  boatName: string;
   amount: Prisma.Decimal;
   date: Date;
   lines: ParsedLine[];
   file: unknown;
 };
 
+const clean = (v: FormDataEntryValue | null) =>
+  String(v ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+
 const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
 const DECIMAL3 = /^\d+(\.\d{1,3})?$/;
 
 function parse(formData: FormData): { error: string } | { data: Parsed } {
   const type = String(formData.get("type") ?? "") as PurchaseType;
-  const partyName = String(formData.get("partyName") ?? "")
-    .trim()
-    .replace(/\s+/g, " ");
+  const boatName = clean(formData.get("boatName"));
   const dateRaw = String(formData.get("date") ?? "");
   const file = formData.get("bill");
 
   if (!PURCHASE_TYPES.includes(type))
     return { error: "Choose a purchase type." };
-  if (!partyName)
+  if (!boatName)
     return {
       error: type === "LOCAL" ? "Enter the seller name." : "Enter the boat name.",
     };
+
+  // Society / KFDC / Local settle against one standing account each, so the
+  // type names the ledger. Private has no single counterparty — the party is
+  // typed and carries its own ledger, with the boat alongside it as detail.
+  const fixed = FIXED_PURCHASE_PARTY[type];
+  const partyName = fixed ?? clean(formData.get("partyName"));
+  if (!partyName) return { error: "Enter the party name." };
+
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
 
   const badFile = validateImageFile(file);
@@ -89,7 +103,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     if (lines.length === 0)
       return { error: "Add at least one line item." };
     const amount = lines.reduce((a, l) => a.add(l.total), new Prisma.Decimal(0));
-    return { data: { type, partyName, amount, date, lines, file } };
+    return { data: { type, partyName, boatName, amount, date, lines, file } };
   }
 
   const amountRaw = String(formData.get("amount") ?? "").trim();
@@ -99,8 +113,8 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     data: {
       type,
       partyName,
+      boatName,
       amount: new Prisma.Decimal(amountRaw),
-
       date,
       lines: [],
       file,
@@ -157,17 +171,17 @@ export async function createPurchase(
     // instead of leaving a purchase with no bill against it.
     const staged = await stageAttachmentFile(d.file);
     await prisma.$transaction(async (tx) => {
-      // Two parties: the group that carries the ledger, and the boat/seller
-      // that is only named on the line.
+      // Two parties: the one that carries the ledger, and the boat/seller that
+      // is only named on the line.
       const partyId = await findOrCreateParty(
         tx,
-        PURCHASE_GROUP_NAME[d.type],
+        d.partyName,
         "PURCHASE_GROUP"
       );
       const boatId = await findOrCreateParty(
         tx,
-        d.partyName,
-        PURCHASE_SELLER_TYPE[d.type]
+        d.boatName,
+        PURCHASE_BOAT_TYPE[d.type]
       );
       const purchase = await tx.purchase.create({
         data: {
@@ -195,6 +209,7 @@ export async function createPurchase(
   }
 
   revalidatePath("/vouchers/purchases");
+  revalidatePath("/ledgers", "layout");
   redirect("/vouchers/purchases");
 }
 
@@ -227,13 +242,13 @@ export async function updatePurchase(
 
       const partyId = await findOrCreateParty(
         tx,
-        PURCHASE_GROUP_NAME[d.type],
+        d.partyName,
         "PURCHASE_GROUP"
       );
       const boatId = await findOrCreateParty(
         tx,
-        d.partyName,
-        PURCHASE_SELLER_TYPE[d.type]
+        d.boatName,
+        PURCHASE_BOAT_TYPE[d.type]
       );
       const purchase = await tx.purchase.update({
         where: { id: purchaseId },
@@ -263,5 +278,6 @@ export async function updatePurchase(
   }
 
   revalidatePath("/vouchers/purchases");
+  revalidatePath("/ledgers", "layout");
   redirect("/vouchers/purchases");
 }

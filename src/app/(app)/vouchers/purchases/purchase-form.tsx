@@ -7,7 +7,11 @@ import type { PurchaseType } from "@/generated/prisma/enums";
 import { businessToday, fmtMoney } from "@/lib/format";
 import { BillUpload } from "../bill-upload";
 import { PartyCombobox } from "../../masters/party-combobox";
-import { PURCHASE_GROUP_NAME, PURCHASE_SELLER_TYPE } from "@/lib/party";
+import {
+  FIXED_PURCHASE_PARTY,
+  PURCHASE_BOAT_TYPE,
+  purchasePartyIsTyped,
+} from "@/lib/party";
 
 const TYPE_OPTIONS: { value: PurchaseType; label: string }[] = [
   { value: "SOCIETY", label: "Society" },
@@ -29,7 +33,10 @@ export type PurchaseLineInit = {
 
 export type PurchaseInit = {
   type: PurchaseType;
+  /** Ledger party — only editable on Private, fixed by the type otherwise. */
   partyName: string;
+  /** Boat (Society/KFDC/Private) or seller name (Local). */
+  boatName: string;
   amount: string;
   date: string;
   lines: PurchaseLineInit[];
@@ -67,7 +74,11 @@ export function PurchaseForm({
   // Society / KFDC / Private track the boat; Local tracks the seller. Same map
   // the server action resolves with, so the picker can never offer a party
   // kind the save would then reject.
-  const sellerType = PURCHASE_SELLER_TYPE[type];
+  const boatType = PURCHASE_BOAT_TYPE[type];
+  // Private is the only type without a standing counterparty, so it is the
+  // only one that asks who the money is owed to.
+  const asksForParty = purchasePartyIsTyped(type);
+  const fixedParty = FIXED_PURCHASE_PARTY[type];
 
   const grandTotal = useMemo(
     () =>
@@ -119,21 +130,53 @@ export function PurchaseForm({
         </div>
       </div>
 
+      {/* Private buys from a different owner each time, so the ledger is named
+          here. The others settle against one standing account, which the type
+          already picks — asking again would only invite a typo that splits it. */}
+      {asksForParty && (
+        <div>
+          <PartyCombobox
+            name="partyName"
+            label="Party Name"
+            types={["PURCHASE_GROUP"]}
+            // Only a purchase that was already Private has a party worth
+            // restoring; switching type on an edit must not prefill "Society"
+            // into the field that names a private owner.
+            defaultValue={initial?.type === "PRIVATE" ? initial.partyName : ""}
+            placeholder="e.g. Ravi Traders"
+          />
+          <p className="text-muted text-[12px] mt-1">
+            The private party this purchase is owed to. They get their own
+            ledger, and payments settle against it.
+          </p>
+        </div>
+      )}
+
       {/* Keyed on the purchase type so switching Society ↔ Local re-runs the
           search against the right master and clears a name from the other. */}
       <div>
         <PartyCombobox
-          key={sellerType}
-          name="partyName"
+          key={boatType}
+          name="boatName"
           label={isLocal ? "Seller Name" : "Boat Name"}
-          types={[sellerType]}
-          defaultValue={initial?.partyName ?? ""}
+          types={[boatType]}
+          defaultValue={initial?.boatName ?? ""}
           placeholder={isLocal ? "e.g. Ramesh" : "e.g. Boat No. 12"}
         />
         <p className="text-muted text-[12px] mt-1">
-          Recorded on this bill and shown against every line of the{" "}
-          <span className="font-medium">{PURCHASE_GROUP_NAME[type]}</span>{" "}
-          ledger, which is where the money is owed.
+          {asksForParty ? (
+            <>
+              Which boat the fish came from. Recorded on this bill and shown
+              against the line on the party&rsquo;s statement — it carries no
+              ledger of its own.
+            </>
+          ) : (
+            <>
+              Recorded on this bill and shown against every line of the{" "}
+              <span className="font-medium">{fixedParty}</span> ledger, which is
+              where the money is owed.
+            </>
+          )}
         </p>
       </div>
 

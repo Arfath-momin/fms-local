@@ -5,25 +5,37 @@ import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { getFlaggedIds } from "@/lib/errorflag";
+import { sectionLedgers } from "@/lib/ledger-index";
+import { EXPENSE_LEDGER_TYPES } from "@/lib/party";
 import { fmtMoney } from "@/lib/format";
+import { LedgerTable } from "../ledger-list";
 import { NoCentreNotice } from "../../no-centre";
 
-// Each category is its own mini ledger (spec §2 Expense), scoped to the centre.
+// Two views of the same spend, because the merchant asks two questions of it:
+// "what did ice cost this month" (category) and "what do I still owe the ice
+// plant" (vendor). Categories are the spec's mini ledgers; the vendor ledgers
+// are ordinary party statements that payments settle against.
 export default async function ExpenseLedgersPage() {
   await requireSession();
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const groups = await prisma.expense.groupBy({
-    by: ["category"],
-    where: {
-      companyId: company.id,
-      centreId: centre.id,
-      id: { notIn: await getFlaggedIds("EXPENSE") },
-    },
-    _sum: { amount: true },
-    _count: true,
-  });
+  const [groups, vendors] = await Promise.all([
+    prisma.expense.groupBy({
+      by: ["category"],
+      where: {
+        companyId: company.id,
+        centreId: centre.id,
+        id: { notIn: await getFlaggedIds("EXPENSE") },
+      },
+      _sum: { amount: true },
+      _count: true,
+    }),
+    sectionLedgers(
+      { companyId: company.id, centreId: centre.id },
+      EXPENSE_LEDGER_TYPES
+    ),
+  ]);
   const byCategory = new Map(groups.map((g) => [g.category, g]));
 
   const total = groups.reduce(
@@ -33,11 +45,17 @@ export default async function ExpenseLedgersPage() {
 
   return (
     <div className="max-w-2xl">
-      <div className="flex items-end justify-between mb-4">
+      <Link
+        href="/ledgers"
+        className="text-muted text-[12px] underline underline-offset-2"
+      >
+        ← Ledgers
+      </Link>
+      <div className="flex items-end justify-between mt-1 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">Expense Ledgers</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · {centre.name} · one mini ledger per category.
+            {company.name} · {centre.name} · by category, then by vendor.
           </p>
         </div>
         <div className="text-right">
@@ -50,6 +68,11 @@ export default async function ExpenseLedgersPage() {
         </div>
       </div>
 
+      <h2 className="heading text-[15px] font-semibold mb-1">By category</h2>
+      <p className="text-muted text-[12px] mb-2">
+        What was spent under each head — ice, loaders, ladies, batha, canteen,
+        rent.
+      </p>
       <div className="border border-line-strong bg-surface">
         <table className="ledger-table">
           <thead>
@@ -82,6 +105,16 @@ export default async function ExpenseLedgersPage() {
           </tbody>
         </table>
       </div>
+
+      <h2 className="heading text-[15px] font-semibold mt-6 mb-1">By vendor</h2>
+      <p className="text-muted text-[12px] mb-2">
+        A running statement per vendor — negative means we still owe them.
+        Payment vouchers settle against these.
+      </p>
+      <LedgerTable
+        rows={vendors}
+        empty={`No expense vendors have a ledger in ${centre.name} yet.`}
+      />
     </div>
   );
 }

@@ -1,81 +1,49 @@
 import Link from "next/link";
-import { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { PARTY_TYPE_LABELS } from "@/lib/party";
-import { fmtMoney } from "@/lib/format";
+import { sectionLedgers } from "@/lib/ledger-index";
+import { LEDGER_PARTY_TYPES } from "@/lib/party";
+import { LedgerTable } from "../ledger-list";
 import { NoCentreNotice } from "../../no-centre";
 
+/**
+ * Every ledger in one list — the escape hatch for "I know the name, not the
+ * category". The partitioned sections off /ledgers are the way in for everyday
+ * use; this stays for search.
+ *
+ * Boats and Local sellers are absent by design: they are name registries, not
+ * ledgers (see RECORD_ONLY_PARTY_TYPES), and listing them here filled the page
+ * with rows that were permanently zero because nothing ever posts to them.
+ */
 export default async function PartyLedgersPage() {
   await requireSession();
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const [parties, latestEntries] = await Promise.all([
-    prisma.party.findMany({ orderBy: { name: "asc" } }),
-    // Latest entry per party = current balance within this centre (distinct
-    // picks the first row per party in this ordering). Ledgers are isolated
-    // per centre.
-    prisma.ledgerEntry.findMany({
-      where: { companyId: company.id, centreId: centre.id },
-      orderBy: [{ date: "desc" }, { seq: "desc" }],
-      distinct: ["partyId"],
-      select: { partyId: true, runningBalance: true },
-    }),
-  ]);
-  const balances = new Map(
-    latestEntries.map((e) => [e.partyId, e.runningBalance])
+  const rows = await sectionLedgers(
+    { companyId: company.id, centreId: centre.id },
+    LEDGER_PARTY_TYPES
   );
-  const ZERO = new Prisma.Decimal(0);
+  rows.sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="max-w-2xl">
-      <h1 className="heading text-xl font-semibold mb-1">Party Ledgers</h1>
+      <Link
+        href="/ledgers"
+        className="text-muted text-[12px] underline underline-offset-2"
+      >
+        ← Ledgers
+      </Link>
+      <h1 className="heading text-xl font-semibold mt-1 mb-1">All Ledgers</h1>
       <p className="text-muted text-[13px] mb-4">
         {company.name} · {centre.name} · positive balance = party owes us.
       </p>
 
-      <div className="border border-line-strong bg-surface">
-        <table className="ledger-table">
-          <thead>
-            <tr>
-              <th>Party</th>
-              <th>Type</th>
-              <th className="num-col">Balance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {parties.map((p) => {
-              const bal = balances.get(p.id) ?? ZERO;
-              return (
-                <tr key={p.id}>
-                  <td className="font-medium">
-                    <Link
-                      href={`/ledgers/parties/${p.id}`}
-                      className="text-accent underline underline-offset-2"
-                    >
-                      {p.name}
-                    </Link>
-                  </td>
-                  <td>{PARTY_TYPE_LABELS[p.type]}</td>
-                  <td
-                    className={`num-col num font-semibold ${
-                      bal.greaterThan(0)
-                        ? "text-debit"
-                        : bal.lessThan(0)
-                          ? "text-credit"
-                          : ""
-                    }`}
-                  >
-                    {fmtMoney(bal)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <LedgerTable
+        rows={rows}
+        showType
+        empty={`No ledgers have any activity in ${centre.name} yet.`}
+      />
     </div>
   );
 }

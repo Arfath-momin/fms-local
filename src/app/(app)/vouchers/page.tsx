@@ -14,7 +14,7 @@ export default function VouchersPage() {
           <div className="font-semibold text-[14px]">Purchase</div>
           <div className="text-muted text-[12px]">
             Society, KFDC, Private and Local. Upload the bill, enter the total,
-            posts to the boat/seller ledger.
+            posts to the purchase party&rsquo;s ledger.
           </div>
         </Link>
         <Link
@@ -33,7 +33,7 @@ export default function VouchersPage() {
         >
           <div className="font-semibold text-[14px]">Payment</div>
           <div className="text-muted text-[12px]">
-            Money paid out to a boat, seller or vendor — settles what we owe
+            Money paid out to a purchase party or vendor — settles what we owe
             them. Kept separate from the purchase it pays for.
           </div>
         </Link>

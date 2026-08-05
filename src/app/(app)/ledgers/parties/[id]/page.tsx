@@ -5,7 +5,7 @@ import type { LedgerSourceType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { PARTY_TYPE_LABELS } from "@/lib/party";
+import { ledgerSectionFor, PARTY_TYPE_LABELS } from "@/lib/party";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import { DateWindow, Pager } from "../../../list-controls";
@@ -95,9 +95,10 @@ export default async function PartyStatementPage({
       .filter((p) => p.boat)
       .map((p) => [p.id, p.boat!.name] as const)
   );
-  // A group ledger is the only place a Boat column earns its keep; a vendor or
-  // buyer statement would just show an empty column on every row.
+  // A purchase party's ledger is the only place a Boat column earns its keep;
+  // a vendor or buyer statement would just show an empty column on every row.
   const showBoat = party.type === "PURCHASE_GROUP";
+  const section = ledgerSectionFor(party.type);
   const links = new Map<string, string>();
   for (const p of purchases) links.set(p.id, `/vouchers/purchases/${p.id}`);
   for (const e of expenses) links.set(e.id, `/vouchers/expenses/${e.id}`);
@@ -121,11 +122,13 @@ export default async function PartyStatementPage({
 
   return (
     <div className="max-w-3xl">
+      {/* Back to the section this party belongs to, not to a flat list —
+          whoever opened this statement came from one of the sections. */}
       <Link
-        href="/ledgers/parties"
+        href={section.href}
         className="text-muted text-[12px] underline underline-offset-2"
       >
-        ← Party Ledgers
+        ← {section.label}
       </Link>
       <div className="flex items-end justify-between mt-1 mb-4">
         <div>

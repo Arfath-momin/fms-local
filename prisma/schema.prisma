@@ -101,8 +101,10 @@ model Centre {
 // across BFM and B2B. Balances are never stored here; they are derived from
 // LedgerEntry per company.
 enum PartyType {
-  BOAT // Society / KFDC / Private purchases are tracked per boat
-  LOCAL_SELLER // "Name" on a Local purchase
+  BOAT // the vessel named on a Society / KFDC / Private purchase. A name
+  // registry only — nothing ever posts a LedgerEntry against it, because the
+  // money is owed to the party that sent the boat, not to the boat.
+  LOCAL_SELLER // "Name" on a Local purchase. Also registry-only.
   MARKET_BUYER
   FACTORY
   FISH_MILL
@@ -111,9 +113,11 @@ enum PartyType {
   CARE_OF // commission agent who pays immediately; a Fish Mill/Factory sale
   // "via CareOf" keeps the real buyer on the sale record but posts the ledger
   // to this CareOf party instead.
-  PURCHASE_GROUP // Society / KFDC / Private Parties / Local Individuals — the
-  // ledger a purchase settles against. The individual boat is recorded on the
-  // purchase as a column, not as its own ledger.
+  PURCHASE_GROUP // whoever a purchase is owed to. Society, KFDC and Local
+  // Individuals are one standing account each, fixed by the purchase type;
+  // a Private purchase names its own owner, who gets a ledger of their own.
+  // The individual boat is recorded on the purchase as a column, never as a
+  // ledger. See src/lib/party.ts (FIXED_PURCHASE_PARTY).
   COMMISSION // the house's own 2% commission account — one per company/centre,
   // credited by every Market sale. Modelled as a party so the commission
   // ledger is an ordinary statement rather than a parallel reporting table.
@@ -154,8 +158,9 @@ model Purchase {
   id          String       @id @default(uuid())
   companyId   String       @map("company_id")
   centreId    String       @map("centre_id")
-  /// The ledger this purchase settles against: Society, KFDC, Private Parties
-  /// or Local Individuals. NOT the boat — see `boatId`.
+  /// The ledger this purchase settles against: Society, KFDC, Local
+  /// Individuals, or — for a Private purchase — the named owner. NOT the boat,
+  /// see `boatId`.
   partyId     String       @map("party_id")
   /// The individual boat (Society/KFDC/Private) or seller (Local). Recorded so
   /// every statement row can name it, but it carries no ledger of its own:
