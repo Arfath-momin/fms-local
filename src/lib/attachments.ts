@@ -159,16 +159,29 @@ export async function linkStagedAttachment(
 }
 
 /**
+ * Drop every attachment row pointing at one record — used when its bill is
+ * replaced, and when the voucher itself is deleted.
+ *
+ * The rows go, but their files stay on disk: an unreferenced image costs
+ * nothing, while deleting the bytes would make the change unrecoverable. That
+ * matters most on the delete path, where the row it documented is gone for
+ * good and the image is all that is left of the bill.
+ */
+export async function unlinkAttachments(
+  tx: Prisma.TransactionClient,
+  linkedType: AttachmentLinkedType,
+  linkedId: string
+): Promise<void> {
+  await tx.attachment.deleteMany({ where: { linkedType, linkedId } });
+}
+
+/**
  * Replace a voucher's bill image on edit.
  *
  * Re-submitting the form with a new file used to *append* a second image, so a
  * corrected bill left the wrong one on the record alongside it. Editing with
  * the file field left empty keeps whatever is already attached, because the
  * browser cannot round-trip an existing file into the input.
- *
- * The old rows go, but their files stay on disk: an unreferenced image costs
- * nothing, while deleting the bytes would make the change unrecoverable if the
- * edit itself is later rolled back.
  */
 export async function replaceStagedAttachment(
   tx: Prisma.TransactionClient,
@@ -176,8 +189,6 @@ export async function replaceStagedAttachment(
   args: LinkArgs
 ): Promise<void> {
   if (!staged) return;
-  await tx.attachment.deleteMany({
-    where: { linkedType: args.linkedType, linkedId: args.linkedId },
-  });
+  await unlinkAttachments(tx, args.linkedType, args.linkedId);
   await linkStagedAttachment(tx, staged, args);
 }

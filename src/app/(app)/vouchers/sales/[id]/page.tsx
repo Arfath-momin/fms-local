@@ -8,7 +8,9 @@ import { fmtDate, fmtMoney } from "@/lib/format";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
+import { DeleteVoucher } from "../../delete-voucher";
 import { VoucherMeta } from "../../voucher-meta";
+import { deleteSale } from "../actions";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -188,6 +190,18 @@ export default async function SalePage({
         updatedBy={sale.updatedBy}
         updatedAt={sale.updatedAt}
       />
+
+      {mayEdit && (
+        <DeleteVoucher
+          action={deleteSale.bind(null, sale.id)}
+          noun="sale"
+          warning={
+            sale.commission
+              ? "The buyer's ledger entry and the 2% commission entry both go with it, and each affected running balance is rebuilt without them."
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }

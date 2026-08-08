@@ -133,6 +133,45 @@ export async function createSettlement(
   redirect(SETTLEMENT_PATH[kind]);
 }
 
+/**
+ * Delete a payment or receipt outright.
+ *
+ * `kind` is checked against the stored row rather than trusted: the two kinds
+ * share this action and every view behind it, so a payment id arriving on the
+ * receipts route must not delete anything. Removing the entry pushes the
+ * party's balance back to what it owed before the money moved.
+ */
+export async function deleteSettlement(
+  settlementId: string,
+  kind: SettlementKind,
+  _prev: SettlementFormState
+): Promise<SettlementFormState> {
+  await requireAdmin();
+  if (!isSettlementKind(kind)) return { error: "Unknown voucher type." };
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.settlement.findUnique({
+        where: { id: settlementId },
+        select: { kind: true },
+      });
+      if (!existing || existing.kind !== kind)
+        throw new Error("Voucher not found.");
+
+      await removeLedgerEntries(tx, { sourceId: settlementId });
+      await tx.settlement.delete({ where: { id: settlementId } });
+    });
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Could not delete the voucher.",
+    };
+  }
+
+  revalidatePath(SETTLEMENT_PATH[kind]);
+  revalidatePath("/ledgers", "layout");
+  redirect(SETTLEMENT_PATH[kind]);
+}
+
 export async function updateSettlement(
   settlementId: string,
   kind: SettlementKind,

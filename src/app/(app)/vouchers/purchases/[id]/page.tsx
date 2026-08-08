@@ -3,11 +3,12 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
-import { updatePurchase } from "../actions";
+import { deletePurchase, updatePurchase } from "../actions";
 import { PurchaseForm, type PurchaseInit } from "../purchase-form";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
+import { DeleteVoucher } from "../../delete-voucher";
 import { VoucherMeta } from "../../voucher-meta";
 
 export default async function PurchaseDetailPage({
@@ -161,6 +162,10 @@ export default async function PurchaseDetailPage({
       />
       {meta}
       {panel}
+      <DeleteVoucher
+        action={deletePurchase.bind(null, purchase.id)}
+        noun="purchase"
+      />
     </div>
   );
 }

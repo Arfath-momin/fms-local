@@ -16,7 +16,9 @@ import {
 } from "@/lib/settlement";
 import { DateWindow, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
+import { DeleteVoucher } from "../delete-voucher";
 import { VoucherMeta } from "../voucher-meta";
+import { deleteSettlement } from "./actions";
 
 // Payments and Receipts are the same voucher with opposite signs, so they
 // share these views rather than each carrying a near-identical copy. The kind
@@ -240,6 +242,18 @@ export async function SettlementDetailPage({
         updatedBy={settlement.updatedBy}
         updatedAt={settlement.updatedAt}
       />
+
+      {canEdit(session.role) && (
+        <DeleteVoucher
+          action={deleteSettlement.bind(null, settlement.id, kind)}
+          noun={SETTLEMENT_KIND_LABELS[kind].toLowerCase()}
+          warning={
+            isPayment
+              ? "The ledger entry goes with it, so the supplier's balance returns to what we owed before this payment."
+              : "The ledger entry goes with it, so the customer's balance returns to what they owed before this receipt."
+          }
+        />
+      )}
     </div>
   );
 }

@@ -20,10 +20,12 @@ import {
   SALE_TYPE_ALLOWS_CARE_OF,
   MARKET_COMMISSION_RATE,
 } from "@/lib/sale";
+import { clearErrorFlag } from "@/lib/errorflag";
 import {
   linkStagedAttachment,
   replaceStagedAttachment,
   stageAttachmentFile,
+  unlinkAttachments,
   validateImageFile,
 } from "@/lib/attachments";
 
@@ -346,6 +348,43 @@ export async function createSale(
   revalidatePath("/vouchers/sales");
   revalidatePath("/ledgers", "layout");
   redirect(`/vouchers/sales/${saleId}`);
+}
+
+/**
+ * Delete a sale outright.
+ *
+ * A Market sale posts to two ledgers — the buyer (or the CareOf agent) and the
+ * house commission account — and removeLedgerEntries repairs both, because it
+ * collects the affected scopes from the entries themselves rather than from
+ * the sale record. Ledger entries go before the row for the reason spelled out
+ * on deletePurchase; the sale's lines cascade with it.
+ */
+export async function deleteSale(
+  saleId: string,
+  _prev: SaleFormState
+): Promise<SaleFormState> {
+  await requireAdmin();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.sale.findUnique({
+        where: { id: saleId },
+        select: { id: true },
+      });
+      if (!existing) throw new Error("Sale not found.");
+
+      await removeLedgerEntries(tx, { sourceId: saleId });
+      await unlinkAttachments(tx, "SALE", saleId);
+      await clearErrorFlag(tx, "SALE", saleId);
+      await tx.sale.delete({ where: { id: saleId } });
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not delete sale." };
+  }
+
+  revalidatePath("/vouchers/sales");
+  revalidatePath("/ledgers", "layout");
+  redirect("/vouchers/sales");
 }
 
 export async function updateSale(

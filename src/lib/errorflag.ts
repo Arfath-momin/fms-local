@@ -1,4 +1,5 @@
 import "server-only";
+import type { Prisma } from "@/generated/prisma/client";
 import type { ErrorFlagLinkedType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 
@@ -33,6 +34,22 @@ export async function getFlagsFor(
       },
     ])
   );
+}
+
+/**
+ * Drop the flag on a voucher that is being deleted.
+ *
+ * Nothing creates flags any more, but historic ones are still read, and
+ * (linked_type, linked_id) is unique — a flag left behind would describe a
+ * record that no longer exists and keep excluding a now-absent id from report
+ * totals. Deleting the voucher deletes its flag with it.
+ */
+export async function clearErrorFlag(
+  tx: Prisma.TransactionClient,
+  linkedType: ErrorFlagLinkedType,
+  linkedId: string
+): Promise<void> {
+  await tx.errorFlag.deleteMany({ where: { linkedType, linkedId } });
 }
 
 /** All flagged ids of a type — for excluding from report totals. */

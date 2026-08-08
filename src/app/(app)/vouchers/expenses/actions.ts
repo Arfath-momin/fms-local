@@ -10,10 +10,12 @@ import { requireActiveScope } from "@/lib/centre";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
 import { EXPENSE_CATEGORIES, EXPENSE_SPECS, expenseVendorName } from "@/lib/expense";
+import { clearErrorFlag } from "@/lib/errorflag";
 import {
   linkStagedAttachment,
   replaceStagedAttachment,
   stageAttachmentFile,
+  unlinkAttachments,
   validateImageFile,
 } from "@/lib/attachments";
 
@@ -73,7 +75,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   return {
     data: {
       category,
-      amount,
+      amount,
       date: new Date(dateRaw),
       notes: notes || null,
       details,
@@ -151,6 +153,40 @@ export async function createExpense(
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save expense." };
+  }
+
+  revalidatePath("/vouchers/expenses");
+  revalidatePath("/ledgers", "layout");
+  redirect("/vouchers/expenses");
+}
+
+/**
+ * Delete an expense outright. Ledger entries first so the vendor's running
+ * balance is rebuilt without it — see deletePurchase for why the order matters.
+ */
+export async function deleteExpense(
+  expenseId: string,
+  _prev: ExpenseFormState
+): Promise<ExpenseFormState> {
+  await requireAdmin();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.expense.findUnique({
+        where: { id: expenseId },
+        select: { id: true },
+      });
+      if (!existing) throw new Error("Expense not found.");
+
+      await removeLedgerEntries(tx, { sourceId: expenseId });
+      await unlinkAttachments(tx, "EXPENSE", expenseId);
+      await clearErrorFlag(tx, "EXPENSE", expenseId);
+      await tx.expense.delete({ where: { id: expenseId } });
+    });
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Could not delete expense.",
+    };
   }
 
   revalidatePath("/vouchers/expenses");

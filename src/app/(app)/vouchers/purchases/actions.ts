@@ -10,10 +10,12 @@ import { requireActiveScope } from "@/lib/centre";
 import { FIXED_PURCHASE_PARTY, PURCHASE_BOAT_TYPE } from "@/lib/party";
 import { findOrCreateParty } from "@/lib/party-db";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
+import { clearErrorFlag } from "@/lib/errorflag";
 import {
   linkStagedAttachment,
   replaceStagedAttachment,
   stageAttachmentFile,
+  unlinkAttachments,
   validateImageFile,
 } from "@/lib/attachments";
 
@@ -206,6 +208,47 @@ export async function createPurchase(
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save purchase." };
+  }
+
+  revalidatePath("/vouchers/purchases");
+  revalidatePath("/ledgers", "layout");
+  redirect("/vouchers/purchases");
+}
+
+/**
+ * Delete a purchase outright.
+ *
+ * The ledger entries are removed *before* the row, so removeLedgerEntries can
+ * read the scopes it has to repair while they still exist and rebuild the
+ * seller's running balance from what is left — dropping the purchase first
+ * would strand its CREDIT on a statement for a transaction that is gone.
+ * Lines cascade with the row (see schema); the attachment rows are unlinked
+ * explicitly and their image files stay on disk.
+ */
+export async function deletePurchase(
+  purchaseId: string,
+  _prev: PurchaseFormState
+): Promise<PurchaseFormState> {
+  await requireAdmin();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.purchase.findUnique({
+        where: { id: purchaseId },
+        select: { id: true },
+      });
+      if (!existing) throw new Error("Purchase not found.");
+
+      // No sourceType filter: nothing keyed to this voucher should outlive it.
+      await removeLedgerEntries(tx, { sourceId: purchaseId });
+      await unlinkAttachments(tx, "PURCHASE", purchaseId);
+      await clearErrorFlag(tx, "PURCHASE", purchaseId);
+      await tx.purchase.delete({ where: { id: purchaseId } });
+    });
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Could not delete purchase.",
+    };
   }
 
   revalidatePath("/vouchers/purchases");

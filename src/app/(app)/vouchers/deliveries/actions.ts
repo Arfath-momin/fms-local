@@ -6,10 +6,12 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { requireActiveScope } from "@/lib/centre";
+import { clearErrorFlag } from "@/lib/errorflag";
 import {
   linkStagedAttachment,
   replaceStagedAttachment,
   stageAttachmentFile,
+  unlinkAttachments,
   validateImageFile,
 } from "@/lib/attachments";
 
@@ -184,6 +186,41 @@ export async function createDelivery(
 
   revalidatePath("/vouchers/deliveries");
   redirect(`/vouchers/deliveries/${noteId}`);
+}
+
+/**
+ * Delete a delivery note outright.
+ *
+ * No ledger repair here, unlike every other voucher: a delivery note is a pure
+ * dispatch record and never posted an entry, so there is nothing to rebuild.
+ * Its lines cascade with the row.
+ */
+export async function deleteDelivery(
+  deliveryNoteId: string,
+  _prev: DeliveryFormState
+): Promise<DeliveryFormState> {
+  await requireAdmin();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.deliveryNote.findUnique({
+        where: { id: deliveryNoteId },
+        select: { id: true },
+      });
+      if (!existing) throw new Error("Delivery note not found.");
+
+      await unlinkAttachments(tx, "DELIVERY_NOTE", deliveryNoteId);
+      await clearErrorFlag(tx, "DELIVERY_NOTE", deliveryNoteId);
+      await tx.deliveryNote.delete({ where: { id: deliveryNoteId } });
+    });
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Could not delete delivery note.",
+    };
+  }
+
+  revalidatePath("/vouchers/deliveries");
+  redirect("/vouchers/deliveries");
 }
 
 export async function updateDelivery(

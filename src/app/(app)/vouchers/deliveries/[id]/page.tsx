@@ -7,7 +7,9 @@ import { fmtDate, fmtMoney } from "@/lib/format";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
+import { DeleteVoucher } from "../../delete-voucher";
 import { VoucherMeta } from "../../voucher-meta";
+import { deleteDelivery } from "../actions";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -140,6 +142,14 @@ export default async function DeliveryNotePage({
         updatedBy={note.updatedBy}
         updatedAt={note.updatedAt}
       />
+
+      {mayEdit && (
+        <DeleteVoucher
+          action={deleteDelivery.bind(null, note.id)}
+          noun="delivery note"
+          warning="The note and its line items are removed. No ledger is affected — a delivery note carries no accounting."
+        />
+      )}
     </div>
   );
 }

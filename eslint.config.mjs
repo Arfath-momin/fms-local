@@ -13,6 +13,18 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // useActionState fixes the action signature as (prevState, formData),
+      // and most of ours ignore one or both — a delete needs neither. The
+      // codebase already marks those with a leading underscore; this makes the
+      // convention the rule rather than a wall of warnings.
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;
