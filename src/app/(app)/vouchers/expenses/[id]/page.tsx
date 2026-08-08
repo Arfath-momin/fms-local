@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { deleteExpense, updateExpense } from "../actions";
@@ -21,8 +22,13 @@ export default async function ExpenseDetailPage({
   const mayEnter = canEnter(session.role);
 
   const { id } = await params;
-  const expense = await prisma.expense.findUnique({
-    where: { id },
+  const { company, centre } = await getActiveScope();
+  if (!centre) notFound();
+
+  const expense = await prisma.expense.findFirst({
+    // Scoped, not just found by id. A voucher belonging to another company or
+    // centre must not open — let alone be editable — from the scope you are in.
+    where: { id, companyId: company.id, centreId: centre.id },
     include: {
       party: { select: { name: true } },
       createdBy: { select: { name: true } },
@@ -126,6 +132,7 @@ export default async function ExpenseDetailPage({
         action={updateExpense.bind(null, expense.id)}
         initial={initial}
         submitLabel="Save Changes"
+        scope={scopeFieldValues({ company, centre })}
       />
       {meta}
       {panel}

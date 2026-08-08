@@ -4,7 +4,9 @@ import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { DeliveryFormState } from "./actions";
 import { businessToday } from "@/lib/format";
+import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
+import { ScopeFields } from "../scope-fields";
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -47,6 +49,7 @@ export function DeliveryForm({
   initial,
   submitLabel,
   existingAttachments = 0,
+  scope,
 }: {
   action: (
     prev: DeliveryFormState,
@@ -55,6 +58,7 @@ export function DeliveryForm({
   initial?: DeliveryInit;
   submitLabel: string;
   existingAttachments?: number;
+  scope: FormScope;
 }) {
   const [state, formAction, pending] = useActionState<DeliveryFormState, FormData>(
     action,
@@ -88,6 +92,7 @@ export function DeliveryForm({
 
   return (
     <form action={formAction} className="max-w-3xl space-y-4">
+      <ScopeFields scope={scope} />
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="billNo" className={labelCls}>

@@ -5,7 +5,9 @@ import Link from "next/link";
 import type { PurchaseFormState } from "./actions";
 import type { PurchaseType } from "@/generated/prisma/enums";
 import { businessToday, fmtMoney } from "@/lib/format";
+import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
+import { ScopeFields } from "../scope-fields";
 import { PartyCombobox } from "../../masters/party-combobox";
 import {
   FIXED_PURCHASE_PARTY,
@@ -50,6 +52,7 @@ export function PurchaseForm({
   submitLabel,
   reasonField,
   existingAttachments = 0,
+  scope,
 }: {
   action: (
     prev: PurchaseFormState,
@@ -59,6 +62,7 @@ export function PurchaseForm({
   submitLabel: string;
   reasonField?: boolean;
   existingAttachments?: number;
+  scope: FormScope;
 }) {
   const [state, formAction, pending] = useActionState<PurchaseFormState, FormData>(
     action,
@@ -95,6 +99,7 @@ export function PurchaseForm({
 
   return (
     <form action={formAction} className="max-w-2xl space-y-4">
+      <ScopeFields scope={scope} />
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="type" className={labelCls}>

@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { toInputDate } from "@/lib/format";
@@ -15,8 +16,13 @@ export default async function EditSalePage({
   const { id } = await params;
   if (!canEdit(session.role)) redirect(`/vouchers/sales/${id}`);
 
-  const sale = await prisma.sale.findUnique({
-    where: { id },
+  const { company, centre } = await getActiveScope();
+  if (!centre) notFound();
+
+  const sale = await prisma.sale.findFirst({
+    // Scoped, not just found by id. A voucher belonging to another company or
+    // centre must not open — let alone be editable — from the scope you are in.
+    where: { id, companyId: company.id, centreId: centre.id },
     include: {
       party: { select: { name: true } },
       careOfParty: { select: { name: true } },
@@ -62,6 +68,7 @@ export default async function EditSalePage({
         }}
         submitLabel="Save Changes"
         existingAttachments={existingAttachments}
+        scope={scopeFieldValues({ company, centre })}
       />
     </div>
   );

@@ -6,7 +6,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { PartyType, SettlementKind, SettlementMode } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
-import { requireActiveScope } from "@/lib/centre";
+import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { findOrCreateParty } from "@/lib/party-db";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import {
@@ -89,7 +89,9 @@ export async function createSettlement(
   const parsed = parse(kind, formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
-  const { company, centre } = await requireActiveScope();
+  const scoped = await requireSubmittedScope(formData);
+  if ("error" in scoped) return { error: scoped.error };
+  const { company, centre } = scoped.scope;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -149,10 +151,15 @@ export async function deleteSettlement(
   await requireAdmin();
   if (!isSettlementKind(kind)) return { error: "Unknown voucher type." };
 
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { error: "No centre is selected." };
+
   try {
     await prisma.$transaction(async (tx) => {
-      const existing = await tx.settlement.findUnique({
-        where: { id: settlementId },
+      const existing = await tx.settlement.findFirst({
+        // Scoped: an admin may only change or remove a voucher that belongs to
+        // the company and centre they are currently working in.
+        where: { id: settlementId, companyId: company.id, centreId: centre.id },
         select: { kind: true },
       });
       if (!existing || existing.kind !== kind)
@@ -185,10 +192,15 @@ export async function updateSettlement(
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { error: "No centre is selected." };
+
   try {
     await prisma.$transaction(async (tx) => {
-      const existing = await tx.settlement.findUnique({
-        where: { id: settlementId },
+      const existing = await tx.settlement.findFirst({
+        // Scoped: an admin may only change or remove a voucher that belongs to
+        // the company and centre they are currently working in.
+        where: { id: settlementId, companyId: company.id, centreId: centre.id },
         select: { companyId: true, centreId: true, kind: true },
       });
       if (!existing) throw new Error("Voucher not found.");

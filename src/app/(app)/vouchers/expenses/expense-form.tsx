@@ -6,7 +6,9 @@ import type { ExpenseFormState } from "./actions";
 import type { ExpenseCategory } from "@/generated/prisma/enums";
 import { EXPENSE_CATEGORIES, EXPENSE_SPECS } from "@/lib/expense";
 import { businessToday, fmtMoney } from "@/lib/format";
+import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
+import { ScopeFields } from "../scope-fields";
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -27,6 +29,7 @@ export function ExpenseForm({
   submitLabel,
   reasonField,
   existingAttachments = 0,
+  scope,
 }: {
   action: (
     prev: ExpenseFormState,
@@ -36,6 +39,7 @@ export function ExpenseForm({
   submitLabel: string;
   reasonField?: boolean;
   existingAttachments?: number;
+  scope: FormScope;
 }) {
   const [state, formAction, pending] = useActionState<ExpenseFormState, FormData>(
     action,
@@ -66,6 +70,7 @@ export function ExpenseForm({
 
   return (
     <form action={formAction} className="max-w-lg space-y-4">
+      <ScopeFields scope={scope} />
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="category" className={labelCls}>

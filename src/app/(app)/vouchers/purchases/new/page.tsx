@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { canEnter, requireSession } from "@/lib/session";
-import { getActiveScope } from "@/lib/centre";
+import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { createPurchase } from "../actions";
 import { PurchaseForm } from "../purchase-form";
 import { NoCentreNotice } from "../../../no-centre";
@@ -18,7 +18,11 @@ export default async function NewPurchasePage() {
       <p className="text-muted text-[13px] mb-4">
         Entering for {company.name} · {centre.name}.
       </p>
-      <PurchaseForm action={createPurchase} submitLabel="Save Purchase" />
+      <PurchaseForm
+        action={createPurchase}
+        submitLabel="Save Purchase"
+        scope={scopeFieldValues({ company, centre })}
+      />
     </div>
   );
 }

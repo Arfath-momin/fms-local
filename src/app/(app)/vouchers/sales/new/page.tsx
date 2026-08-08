@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { SaleType } from "@/generated/prisma/enums";
 import { canEnter, requireSession } from "@/lib/session";
-import { getActiveScope } from "@/lib/centre";
+import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { SALE_TYPES, SALE_TYPE_LABELS } from "@/lib/sale";
 import { createSale } from "../actions";
 import { SaleForm } from "../sale-form";
@@ -67,7 +67,12 @@ export default async function NewSalePage({
           Change type
         </Link>
       </p>
-      <SaleForm type={type} action={createSale} submitLabel="Save Sale" />
+      <SaleForm
+        type={type}
+        action={createSale}
+        submitLabel="Save Sale"
+        scope={scopeFieldValues({ company, centre })}
+      />
     </div>
   );
 }

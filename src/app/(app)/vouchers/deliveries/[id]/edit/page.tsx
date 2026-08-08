@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, requireSession } from "@/lib/session";
 import { toInputDate } from "@/lib/format";
 import { updateDelivery } from "../../actions";
@@ -14,8 +15,13 @@ export default async function EditDeliveryPage({
   const { id } = await params;
   if (!canEdit(session.role)) redirect(`/vouchers/deliveries/${id}`);
 
-  const note = await prisma.deliveryNote.findUnique({
-    where: { id },
+  const { company, centre } = await getActiveScope();
+  if (!centre) notFound();
+
+  const note = await prisma.deliveryNote.findFirst({
+    // Scoped, not just found by id. A voucher belonging to another company or
+    // centre must not open — let alone be editable — from the scope you are in.
+    where: { id, companyId: company.id, centreId: centre.id },
     include: { lines: { orderBy: { id: "asc" } } },
   });
   if (!note) notFound();
@@ -49,6 +55,7 @@ export default async function EditDeliveryPage({
         }}
         submitLabel="Save Changes"
         existingAttachments={existingAttachments}
+        scope={scopeFieldValues({ company, centre })}
       />
     </div>
   );

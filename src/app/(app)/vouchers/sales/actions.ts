@@ -6,7 +6,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { SaleType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
-import { requireActiveScope } from "@/lib/centre";
+import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import {
   postLedgerEntries,
   removeLedgerEntries,
@@ -304,7 +304,9 @@ export async function createSale(
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
-  const { company, centre } = await requireActiveScope();
+  const scoped = await requireSubmittedScope(formData);
+  if ("error" in scoped) return { error: scoped.error };
+  const { company, centre } = scoped.scope;
 
   let saleId: string;
   try {
@@ -365,10 +367,15 @@ export async function deleteSale(
 ): Promise<SaleFormState> {
   await requireAdmin();
 
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { error: "No centre is selected." };
+
   try {
     await prisma.$transaction(async (tx) => {
-      const existing = await tx.sale.findUnique({
-        where: { id: saleId },
+      const existing = await tx.sale.findFirst({
+        // Scoped: an admin may only change or remove a voucher that belongs to
+        // the company and centre they are currently working in.
+        where: { id: saleId, companyId: company.id, centreId: centre.id },
         select: { id: true },
       });
       if (!existing) throw new Error("Sale not found.");
@@ -397,11 +404,16 @@ export async function updateSale(
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { error: "No centre is selected." };
+
   try {
     const staged = await stageAttachmentFile(d.file);
     await prisma.$transaction(async (tx) => {
-      const existing = await tx.sale.findUnique({
-        where: { id: saleId },
+      const existing = await tx.sale.findFirst({
+        // Scoped: an admin may only change or remove a voucher that belongs to
+        // the company and centre they are currently working in.
+        where: { id: saleId, companyId: company.id, centreId: centre.id },
         select: { companyId: true, centreId: true, date: true },
       });
       if (!existing) throw new Error("Sale not found.");

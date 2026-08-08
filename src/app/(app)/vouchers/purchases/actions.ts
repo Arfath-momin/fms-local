@@ -6,7 +6,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
-import { requireActiveScope } from "@/lib/centre";
+import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { FIXED_PURCHASE_PARTY, PURCHASE_BOAT_TYPE } from "@/lib/party";
 import { findOrCreateParty } from "@/lib/party-db";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
@@ -166,7 +166,9 @@ export async function createPurchase(
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
-  const { company, centre } = await requireActiveScope();
+  const scoped = await requireSubmittedScope(formData);
+  if ("error" in scoped) return { error: scoped.error };
+  const { company, centre } = scoped.scope;
 
   try {
     // Staged before the transaction so a rejected image aborts the save
@@ -231,10 +233,15 @@ export async function deletePurchase(
 ): Promise<PurchaseFormState> {
   await requireAdmin();
 
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { error: "No centre is selected." };
+
   try {
     await prisma.$transaction(async (tx) => {
-      const existing = await tx.purchase.findUnique({
-        where: { id: purchaseId },
+      const existing = await tx.purchase.findFirst({
+        // Scoped: an admin may only change or remove a voucher that belongs to
+        // the company and centre they are currently working in.
+        where: { id: purchaseId, companyId: company.id, centreId: centre.id },
         select: { id: true },
       });
       if (!existing) throw new Error("Purchase not found.");
@@ -269,10 +276,15 @@ export async function updatePurchase(
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { error: "No centre is selected." };
+
   try {
     const staged = await stageAttachmentFile(d.file);
     await prisma.$transaction(async (tx) => {
-      const existing = await tx.purchase.findUnique({ where: { id: purchaseId } });
+      const existing = await tx.purchase.findFirst({
+        where: { id: purchaseId, companyId: company.id, centreId: centre.id },
+      });
       if (!existing) throw new Error("Purchase not found.");
 
       // Rebuilds the old party's statement too, in case this edit moves the

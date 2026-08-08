@@ -160,8 +160,13 @@ export async function SettlementDetailPage({
   id: string;
 }) {
   const session = await requireSession();
-  const settlement = await prisma.settlement.findUnique({
-    where: { id },
+  const { company, centre } = await getActiveScope();
+  if (!centre) notFound();
+
+  const settlement = await prisma.settlement.findFirst({
+    // Scoped, not just found by id. A voucher belonging to another company or
+    // centre must not open — let alone be editable — from the scope you are in.
+    where: { id, companyId: company.id, centreId: centre.id },
     include: {
       party: { select: { id: true, name: true, type: true } },
       centre: { select: { name: true } },

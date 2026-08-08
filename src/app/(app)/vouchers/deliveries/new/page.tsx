@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { canEnter, requireSession } from "@/lib/session";
-import { getActiveScope } from "@/lib/centre";
+import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { createDelivery } from "../actions";
 import { DeliveryForm } from "../delivery-form";
 import { NoCentreNotice } from "../../../no-centre";
@@ -19,7 +19,11 @@ export default async function NewDeliveryPage() {
         Recording a dispatch for {company.name} · {centre.name}. This is a
         record only — no ledger or settlement.
       </p>
-      <DeliveryForm action={createDelivery} submitLabel="Save Delivery Note" />
+      <DeliveryForm
+        action={createDelivery}
+        submitLabel="Save Delivery Note"
+        scope={scopeFieldValues({ company, centre })}
+      />
     </div>
   );
 }

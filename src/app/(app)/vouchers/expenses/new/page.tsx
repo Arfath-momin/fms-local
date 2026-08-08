@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { canEnter, requireSession } from "@/lib/session";
-import { getActiveScope } from "@/lib/centre";
+import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { createExpense } from "../actions";
 import { ExpenseForm } from "../expense-form";
 import { NoCentreNotice } from "../../../no-centre";
@@ -17,7 +17,11 @@ export default async function NewExpensePage() {
       <p className="text-muted text-[13px] mb-4">
         Entering for {company.name} · {centre.name}.
       </p>
-      <ExpenseForm action={createExpense} submitLabel="Save Expense" />
+      <ExpenseForm
+        action={createExpense}
+        submitLabel="Save Expense"
+        scope={scopeFieldValues({ company, centre })}
+      />
     </div>
   );
 }

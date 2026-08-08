@@ -11,7 +11,9 @@ import {
   SETTLEMENT_PARTY_TYPES,
   SETTLEMENT_PATH,
 } from "@/lib/settlement";
+import type { FormScope } from "@/lib/scope";
 import { PartyCombobox, type PartyOption } from "../../masters/party-combobox";
+import { ScopeFields } from "../scope-fields";
 import type { SettlementFormState } from "./actions";
 
 const inputCls =
@@ -34,6 +36,7 @@ export function SettlementForm({
   action,
   initial,
   submitLabel,
+  scope,
 }: {
   kind: SettlementKind;
   action: (
@@ -42,6 +45,7 @@ export function SettlementForm({
   ) => Promise<SettlementFormState>;
   initial?: SettlementInit;
   submitLabel: string;
+  scope: FormScope;
 }) {
   const [state, formAction, pending] = useActionState<
     SettlementFormState,
@@ -61,6 +65,7 @@ export function SettlementForm({
 
   return (
     <form action={formAction} className="max-w-lg space-y-4">
+      <ScopeFields scope={scope} />
       <PartyCombobox
         name="partyName"
         typeFieldName="partyType"

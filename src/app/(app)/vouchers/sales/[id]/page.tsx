@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { getActiveScope } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtMoney } from "@/lib/format";
@@ -33,8 +34,13 @@ export default async function SalePage({
   const mayEnter = canEnter(session.role);
   const { id } = await params;
 
-  const sale = await prisma.sale.findUnique({
-    where: { id },
+  const { company, centre } = await getActiveScope();
+  if (!centre) notFound();
+
+  const sale = await prisma.sale.findFirst({
+    // Scoped, not just found by id. A voucher belonging to another company or
+    // centre must not open — let alone be editable — from the scope you are in.
+    where: { id, companyId: company.id, centreId: centre.id },
     include: {
       company: { select: { name: true } },
       centre: { select: { name: true } },

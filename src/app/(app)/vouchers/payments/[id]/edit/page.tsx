@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, requireSession } from "@/lib/session";
 import { SETTLEMENT_KIND_LABELS } from "@/lib/settlement";
 import { updateSettlement } from "../../../settlements/actions";
@@ -15,8 +16,13 @@ export default async function Page({
   const { id } = await params;
   if (!canEdit(session.role)) redirect(`/vouchers/payments/${id}`);
 
-  const settlement = await prisma.settlement.findUnique({
-    where: { id },
+  const { company, centre } = await getActiveScope();
+  if (!centre) notFound();
+
+  const settlement = await prisma.settlement.findFirst({
+    // Scoped, not just found by id. A voucher belonging to another company or
+    // centre must not open — let alone be editable — from the scope you are in.
+    where: { id, companyId: company.id, centreId: centre.id },
     include: { party: { select: { name: true, type: true } } },
   });
   if (!settlement || settlement.kind !== "PAYMENT") notFound();
@@ -31,6 +37,7 @@ export default async function Page({
         action={updateSettlement.bind(null, settlement.id, "PAYMENT")}
         initial={settlementInitial(settlement)}
         submitLabel="Save Changes"
+        scope={scopeFieldValues({ company, centre })}
       />
     </div>
   );

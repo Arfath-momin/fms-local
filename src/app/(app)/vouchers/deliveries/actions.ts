@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
-import { requireActiveScope } from "@/lib/centre";
+import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { clearErrorFlag } from "@/lib/errorflag";
 import {
   linkStagedAttachment,
@@ -140,7 +140,9 @@ export async function createDelivery(
   const parsed = parse(formData);
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
-  const { company, centre } = await requireActiveScope();
+  const scoped = await requireSubmittedScope(formData);
+  if ("error" in scoped) return { error: scoped.error };
+  const { company, centre } = scoped.scope;
 
   let noteId: string;
   try {
@@ -201,10 +203,15 @@ export async function deleteDelivery(
 ): Promise<DeliveryFormState> {
   await requireAdmin();
 
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { error: "No centre is selected." };
+
   try {
     await prisma.$transaction(async (tx) => {
-      const existing = await tx.deliveryNote.findUnique({
-        where: { id: deliveryNoteId },
+      const existing = await tx.deliveryNote.findFirst({
+        // Scoped: an admin may only change or remove a voucher that belongs to
+        // the company and centre they are currently working in.
+        where: { id: deliveryNoteId, companyId: company.id, centreId: centre.id },
         select: { id: true },
       });
       if (!existing) throw new Error("Delivery note not found.");
@@ -233,11 +240,16 @@ export async function updateDelivery(
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { error: "No centre is selected." };
+
   try {
     const staged = await stageAttachmentFile(d.file);
     await prisma.$transaction(async (tx) => {
-      const existing = await tx.deliveryNote.findUnique({
-        where: { id: deliveryNoteId },
+      const existing = await tx.deliveryNote.findFirst({
+        // Scoped: an admin may only change or remove a voucher that belongs to
+        // the company and centre they are currently working in.
+        where: { id: deliveryNoteId, companyId: company.id, centreId: centre.id },
         select: { companyId: true, centreId: true },
       });
       if (!existing) throw new Error("Delivery note not found.");

@@ -5,7 +5,9 @@ import Link from "next/link";
 import type { SaleType } from "@/generated/prisma/enums";
 import { businessToday, fmtMoney } from "@/lib/format";
 import type { SaleFormState } from "./actions";
+import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
+import { ScopeFields } from "../scope-fields";
 import { PartyCombobox } from "../../masters/party-combobox";
 import {
   MARKET_COMMISSION_RATE,
@@ -61,12 +63,14 @@ export function SaleForm({
   initial,
   submitLabel,
   existingAttachments = 0,
+  scope,
 }: {
   type: SaleType;
   action: (prev: SaleFormState, formData: FormData) => Promise<SaleFormState>;
   initial?: SaleInit;
   submitLabel: string;
   existingAttachments?: number;
+  scope: FormScope;
 }) {
   const [state, formAction, pending] = useActionState<SaleFormState, FormData>(
     action,
@@ -105,6 +109,7 @@ export function SaleForm({
 
   return (
     <form action={formAction} className="max-w-3xl space-y-4">
+      <ScopeFields scope={scope} />
       <input type="hidden" name="type" value={type} />
 
       <div className="grid grid-cols-2 gap-4">
