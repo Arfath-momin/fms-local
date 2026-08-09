@@ -36,16 +36,18 @@ model User {
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  purchasesCreated     Purchase[]     @relation("PurchaseCreatedBy")
-  purchasesUpdated     Purchase[]     @relation("PurchaseUpdatedBy")
-  expensesCreated      Expense[]      @relation("ExpenseCreatedBy")
-  expensesUpdated      Expense[]      @relation("ExpenseUpdatedBy")
-  salesCreated         Sale[]         @relation("SaleCreatedBy")
-  salesUpdated         Sale[]         @relation("SaleUpdatedBy")
-  deliveryNotesCreated DeliveryNote[] @relation("DeliveryNoteCreatedBy")
-  deliveryNotesUpdated DeliveryNote[] @relation("DeliveryNoteUpdatedBy")
-  settlementsCreated   Settlement[]   @relation("SettlementCreatedBy")
-  settlementsUpdated   Settlement[]   @relation("SettlementUpdatedBy")
+  purchasesCreated     Purchase[]      @relation("PurchaseCreatedBy")
+  purchasesUpdated     Purchase[]      @relation("PurchaseUpdatedBy")
+  expensesCreated      Expense[]       @relation("ExpenseCreatedBy")
+  expensesUpdated      Expense[]       @relation("ExpenseUpdatedBy")
+  salesCreated         Sale[]          @relation("SaleCreatedBy")
+  salesUpdated         Sale[]          @relation("SaleUpdatedBy")
+  deliveryNotesCreated DeliveryNote[]  @relation("DeliveryNoteCreatedBy")
+  deliveryNotesUpdated DeliveryNote[]  @relation("DeliveryNoteUpdatedBy")
+  settlementsCreated   Settlement[]    @relation("SettlementCreatedBy")
+  settlementsUpdated   Settlement[]    @relation("SettlementUpdatedBy")
+  reviewsRequested     ReviewRequest[] @relation("ReviewRequestedBy")
+  reviewsResolved      ReviewRequest[] @relation("ReviewResolvedBy")
 
   @@map("users")
 }
@@ -57,15 +59,16 @@ model Company {
   name      String   @unique // "BFM" / "B2B"
   createdAt DateTime @default(now()) @map("created_at")
 
-  centres       Centre[]
-  purchases     Purchase[]
-  deliveryNotes DeliveryNote[]
-  sales         Sale[]
-  expenses      Expense[]
-  ledgerEntries LedgerEntry[]
-  attachments   Attachment[]
-  dayCloses     DayClose[]
-  settlements   Settlement[]
+  centres        Centre[]
+  purchases      Purchase[]
+  deliveryNotes  DeliveryNote[]
+  sales          Sale[]
+  expenses       Expense[]
+  ledgerEntries  LedgerEntry[]
+  attachments    Attachment[]
+  dayCloses      DayClose[]
+  settlements    Settlement[]
+  reviewRequests ReviewRequest[]
 
   @@map("companies")
 }
@@ -81,15 +84,16 @@ model Centre {
   name      String
   createdAt DateTime @default(now()) @map("created_at")
 
-  company       Company        @relation(fields: [companyId], references: [id])
-  purchases     Purchase[]
-  deliveryNotes DeliveryNote[]
-  sales         Sale[]
-  expenses      Expense[]
-  ledgerEntries LedgerEntry[]
-  attachments   Attachment[]
-  dayCloses     DayClose[]
-  settlements   Settlement[]
+  company        Company         @relation(fields: [companyId], references: [id])
+  purchases      Purchase[]
+  deliveryNotes  DeliveryNote[]
+  sales          Sale[]
+  expenses       Expense[]
+  ledgerEntries  LedgerEntry[]
+  attachments    Attachment[]
+  dayCloses      DayClose[]
+  settlements    Settlement[]
+  reviewRequests ReviewRequest[]
 
   @@unique([companyId, name])
   @@map("centres")
@@ -500,6 +504,74 @@ model Attachment {
 
   @@index([linkedType, linkedId])
   @@map("attachments")
+}
+
+// ---------- Review requests ----------
+
+// Which voucher a review request points at. PAYMENT and RECEIPT are both rows
+// in `settlements`; they are kept apart here because they live under different
+// URLs and read as different vouchers to the people using them.
+enum ReviewLinkedType {
+  PURCHASE
+  SALE
+  EXPENSE
+  DELIVERY_NOTE
+  PAYMENT
+  RECEIPT
+}
+
+enum ReviewStatus {
+  OPEN
+  RESOLVED
+}
+
+/**
+ * An accountant asking an admin to correct a voucher.
+ *
+ * An accountant may enter a voucher but never edit one (see Role), so a typo
+ * discovered after saving had no route back — the entry simply stayed wrong.
+ * This is that route: the accountant raises a request naming what is wrong, and
+ * it surfaces on the admin's dashboard under the company and centre the voucher
+ * was entered in.
+ *
+ * The scope is copied from the voucher row itself, not from whatever scope the
+ * requester happens to be sitting in, so a request always files against the
+ * centre that owns the entry.
+ *
+ * Requests close by themselves: the next admin edit (or delete) of that voucher
+ * marks every open request against it RESOLVED. Nothing here is deleted when a
+ * voucher is — the request is the record that a correction was asked for, and
+ * that outlives the row it was about.
+ *
+ * At most one request per voucher may be OPEN at a time; the create action
+ * enforces that inside its transaction. Resolved ones accumulate, so the same
+ * voucher can be queried about more than once over its life.
+ */
+model ReviewRequest {
+  id            String           @id @default(uuid())
+  companyId     String           @map("company_id")
+  centreId      String           @map("centre_id")
+  linkedType    ReviewLinkedType @map("linked_type")
+  linkedId      String           @map("linked_id")
+  status        ReviewStatus     @default(OPEN)
+  /// What the accountant says is wrong. Required — a request with no reason
+  /// gives the admin nothing to act on.
+  reason        String
+  requestedById String?          @map("requested_by_id")
+  requestedAt   DateTime         @default(now()) @map("requested_at")
+  resolvedById  String?          @map("resolved_by_id")
+  resolvedAt    DateTime?        @map("resolved_at")
+
+  company     Company @relation(fields: [companyId], references: [id])
+  centre      Centre  @relation(fields: [centreId], references: [id])
+  requestedBy User?   @relation("ReviewRequestedBy", fields: [requestedById], references: [id])
+  resolvedBy  User?   @relation("ReviewResolvedBy", fields: [resolvedById], references: [id])
+
+  // The dashboard read: open requests for one company and centre, newest first.
+  @@index([companyId, centreId, status, requestedAt])
+  // The voucher read: does this voucher have an open request against it?
+  @@index([linkedType, linkedId, status])
+  @@map("review_requests")
 }
 
 // ---------- Day close & corrections ----------

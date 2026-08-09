@@ -21,6 +21,7 @@ import {
   MARKET_COMMISSION_RATE,
 } from "@/lib/sale";
 import { clearErrorFlag } from "@/lib/errorflag";
+import { resolveReviews } from "@/lib/review-db";
 import {
   linkStagedAttachment,
   replaceStagedAttachment,
@@ -365,7 +366,7 @@ export async function deleteSale(
   saleId: string,
   _prev: SaleFormState
 ): Promise<SaleFormState> {
-  await requireAdmin();
+  const session = await requireAdmin();
 
   const { company, centre } = await getActiveScope();
   if (!centre) return { error: "No centre is selected." };
@@ -383,6 +384,9 @@ export async function deleteSale(
       await removeLedgerEntries(tx, { sourceId: saleId });
       await unlinkAttachments(tx, "SALE", saleId);
       await clearErrorFlag(tx, "SALE", saleId);
+      // Removing the voucher answers any request against it. The request rows
+      // themselves survive — they record that a correction was asked for.
+      await resolveReviews(tx, "SALE", saleId, session.userId);
       await tx.sale.delete({ where: { id: saleId } });
     });
   } catch (e) {
@@ -391,6 +395,7 @@ export async function deleteSale(
 
   revalidatePath("/vouchers/sales");
   revalidatePath("/ledgers", "layout");
+  revalidatePath("/dashboard");
   redirect("/vouchers/sales");
 }
 
@@ -455,6 +460,10 @@ export async function updateSale(
         linkedType: "SALE",
         linkedId: saleId,
       });
+      // The edit *is* the answer to any review request against this sale, so a
+      // successful save closes it. In the same transaction: a save that rolls
+      // back leaves the request standing.
+      await resolveReviews(tx, "SALE", saleId, session.userId);
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save sale." };
@@ -462,5 +471,6 @@ export async function updateSale(
 
   revalidatePath("/vouchers/sales");
   revalidatePath("/ledgers", "layout");
+  revalidatePath("/dashboard");
   redirect(`/vouchers/sales/${saleId}`);
 }

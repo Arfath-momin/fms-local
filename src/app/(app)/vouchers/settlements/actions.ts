@@ -9,6 +9,7 @@ import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { findOrCreateParty } from "@/lib/party-db";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
+import { resolveReviews } from "@/lib/review-db";
 import {
   SETTLEMENT_LEDGER_TYPE,
   SETTLEMENT_MODES,
@@ -148,7 +149,7 @@ export async function deleteSettlement(
   kind: SettlementKind,
   _prev: SettlementFormState
 ): Promise<SettlementFormState> {
-  await requireAdmin();
+  const session = await requireAdmin();
   if (!isSettlementKind(kind)) return { error: "Unknown voucher type." };
 
   const { company, centre } = await getActiveScope();
@@ -166,6 +167,9 @@ export async function deleteSettlement(
         throw new Error("Voucher not found.");
 
       await removeLedgerEntries(tx, { sourceId: settlementId });
+      // Removing the voucher answers any request against it. The request rows
+      // themselves survive — they record that a correction was asked for.
+      await resolveReviews(tx, kind, settlementId, session.userId);
       await tx.settlement.delete({ where: { id: settlementId } });
     });
   } catch (e) {
@@ -176,6 +180,7 @@ export async function deleteSettlement(
 
   revalidatePath(SETTLEMENT_PATH[kind]);
   revalidatePath("/ledgers", "layout");
+  revalidatePath("/dashboard");
   redirect(SETTLEMENT_PATH[kind]);
 }
 
@@ -235,6 +240,11 @@ export async function updateSettlement(
           date: d.date,
         },
       ]);
+      // The edit *is* the answer to any review request against this voucher, so
+      // a successful save closes it. `existing.kind` rather than the argument:
+      // the stored row is what the request was filed against. In the same
+      // transaction — a save that rolls back leaves the request standing.
+      await resolveReviews(tx, existing.kind, settlementId, session.userId);
     });
   } catch (e) {
     return {
@@ -244,5 +254,6 @@ export async function updateSettlement(
 
   revalidatePath(SETTLEMENT_PATH[kind]);
   revalidatePath("/ledgers", "layout");
+  revalidatePath("/dashboard");
   redirect(SETTLEMENT_PATH[kind]);
 }

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, requireSession } from "@/lib/session";
 import { SETTLEMENT_KIND_LABELS } from "@/lib/settlement";
+import { ReviewPanel } from "../../../review-panel";
 import { updateSettlement } from "../../../settlements/actions";
 import { SettlementForm } from "../../../settlements/settlement-form";
 import { settlementInitial } from "../../../settlements/views";
@@ -32,6 +33,15 @@ export default async function Page({
       <h1 className="heading text-xl font-semibold mb-4">
         Edit {SETTLEMENT_KIND_LABELS.PAYMENT}
       </h1>
+      {/* Whatever the accountant asked for, kept in view while it is fixed.
+          Collapses to nothing when no review was requested. */}
+      <div className="mb-4 empty:hidden [&>*]:mt-0">
+        <ReviewPanel
+          linkedType="PAYMENT"
+          linkedId={settlement.id}
+          noun="payment"
+        />
+      </div>
       <SettlementForm
         kind="PAYMENT"
         action={updateSettlement.bind(null, settlement.id, "PAYMENT")}

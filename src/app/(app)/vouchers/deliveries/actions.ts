@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { clearErrorFlag } from "@/lib/errorflag";
+import { resolveReviews } from "@/lib/review-db";
 import {
   linkStagedAttachment,
   replaceStagedAttachment,
@@ -201,7 +202,7 @@ export async function deleteDelivery(
   deliveryNoteId: string,
   _prev: DeliveryFormState
 ): Promise<DeliveryFormState> {
-  await requireAdmin();
+  const session = await requireAdmin();
 
   const { company, centre } = await getActiveScope();
   if (!centre) return { error: "No centre is selected." };
@@ -218,6 +219,9 @@ export async function deleteDelivery(
 
       await unlinkAttachments(tx, "DELIVERY_NOTE", deliveryNoteId);
       await clearErrorFlag(tx, "DELIVERY_NOTE", deliveryNoteId);
+      // Removing the voucher answers any request against it. The request rows
+      // themselves survive — they record that a correction was asked for.
+      await resolveReviews(tx, "DELIVERY_NOTE", deliveryNoteId, session.userId);
       await tx.deliveryNote.delete({ where: { id: deliveryNoteId } });
     });
   } catch (e) {
@@ -227,6 +231,7 @@ export async function deleteDelivery(
   }
 
   revalidatePath("/vouchers/deliveries");
+  revalidatePath("/dashboard");
   redirect("/vouchers/deliveries");
 }
 
@@ -287,11 +292,16 @@ export async function updateDelivery(
         linkedType: "DELIVERY_NOTE",
         linkedId: deliveryNoteId,
       });
+      // The edit *is* the answer to any review request against this note, so a
+      // successful save closes it. In the same transaction: a save that rolls
+      // back leaves the request standing.
+      await resolveReviews(tx, "DELIVERY_NOTE", deliveryNoteId, session.userId);
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save delivery note." };
   }
 
   revalidatePath("/vouchers/deliveries");
+  revalidatePath("/dashboard");
   redirect(`/vouchers/deliveries/${deliveryNoteId}`);
 }

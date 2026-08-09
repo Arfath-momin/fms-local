@@ -10,6 +10,7 @@ import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
 import { DeleteVoucher } from "../../delete-voucher";
+import { ReviewPanel } from "../../review-panel";
 import { VoucherMeta } from "../../voucher-meta";
 
 export default async function PurchaseDetailPage({
@@ -97,6 +98,13 @@ export default async function PurchaseDetailPage({
     />
   );
 
+  // The accountant's route to a correction, since they cannot edit. For an
+  // admin this is the notice that one was asked for — rendered above the form
+  // there, where it explains why they are on this screen.
+  const review = (
+    <ReviewPanel linkedType="PURCHASE" linkedId={purchase.id} noun="purchase" />
+  );
+
   // Only an administrator may change a voucher after it is saved. Everyone else
   // who can reach this page sees the same figures, read-only.
   if (!mayEdit) {
@@ -141,6 +149,7 @@ export default async function PurchaseDetailPage({
 
         {meta}
         {panel}
+        {review}
       </div>
     );
   }
@@ -161,6 +170,9 @@ export default async function PurchaseDetailPage({
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-4">Edit Purchase</h1>
+      {/* Above the form, not below it: it is the reason this screen is open.
+          Collapses to nothing when no review was requested. */}
+      <div className="mb-4 empty:hidden [&>*]:mt-0">{review}</div>
       <PurchaseForm
         action={updatePurchase.bind(null, purchase.id)}
         initial={initial}

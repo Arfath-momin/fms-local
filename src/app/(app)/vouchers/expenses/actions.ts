@@ -11,6 +11,7 @@ import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
 import { EXPENSE_CATEGORIES, EXPENSE_SPECS, expenseVendorName } from "@/lib/expense";
 import { clearErrorFlag } from "@/lib/errorflag";
+import { resolveReviews } from "@/lib/review-db";
 import {
   linkStagedAttachment,
   replaceStagedAttachment,
@@ -170,7 +171,7 @@ export async function deleteExpense(
   expenseId: string,
   _prev: ExpenseFormState
 ): Promise<ExpenseFormState> {
-  await requireAdmin();
+  const session = await requireAdmin();
 
   const { company, centre } = await getActiveScope();
   if (!centre) return { error: "No centre is selected." };
@@ -188,6 +189,9 @@ export async function deleteExpense(
       await removeLedgerEntries(tx, { sourceId: expenseId });
       await unlinkAttachments(tx, "EXPENSE", expenseId);
       await clearErrorFlag(tx, "EXPENSE", expenseId);
+      // Removing the voucher answers any request against it. The request rows
+      // themselves survive — they record that a correction was asked for.
+      await resolveReviews(tx, "EXPENSE", expenseId, session.userId);
       await tx.expense.delete({ where: { id: expenseId } });
     });
   } catch (e) {
@@ -198,6 +202,7 @@ export async function deleteExpense(
 
   revalidatePath("/vouchers/expenses");
   revalidatePath("/ledgers", "layout");
+  revalidatePath("/dashboard");
   redirect("/vouchers/expenses");
 }
 
@@ -251,6 +256,10 @@ export async function updateExpense(
         linkedType: "EXPENSE",
         linkedId: expenseId,
       });
+      // The edit *is* the answer to any review request against this expense,
+      // so a successful save closes it. In the same transaction: a save that
+      // rolls back leaves the request standing.
+      await resolveReviews(tx, "EXPENSE", expenseId, session.userId);
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save expense." };
@@ -258,5 +267,6 @@ export async function updateExpense(
 
   revalidatePath("/vouchers/expenses");
   revalidatePath("/ledgers", "layout");
+  revalidatePath("/dashboard");
   redirect("/vouchers/expenses");
 }

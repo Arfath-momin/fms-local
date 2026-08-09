@@ -5,6 +5,7 @@ import { canEdit, requireSession } from "@/lib/session";
 import { toInputDate } from "@/lib/format";
 import { updateDelivery } from "../../actions";
 import { DeliveryForm } from "../../delivery-form";
+import { ReviewPanel } from "../../../review-panel";
 
 export default async function EditDeliveryPage({
   params,
@@ -34,6 +35,15 @@ export default async function EditDeliveryPage({
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-4">Edit Delivery Note</h1>
+      {/* Whatever the accountant asked for, kept in view while it is fixed.
+          Collapses to nothing when no review was requested. */}
+      <div className="mb-4 empty:hidden [&>*]:mt-0">
+        <ReviewPanel
+          linkedType="DELIVERY_NOTE"
+          linkedId={note.id}
+          noun="delivery note"
+        />
+      </div>
       <DeliveryForm
         action={updateDelivery.bind(null, note.id)}
         initial={{

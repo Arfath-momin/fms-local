@@ -17,6 +17,7 @@ import {
 import { DateWindow, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 import { DeleteVoucher } from "../delete-voucher";
+import { ReviewPanel } from "../review-panel";
 import { VoucherMeta } from "../voucher-meta";
 import { deleteSettlement } from "./actions";
 
@@ -246,6 +247,14 @@ export async function SettlementDetailPage({
         createdAt={settlement.createdAt}
         updatedBy={settlement.updatedBy}
         updatedAt={settlement.updatedAt}
+      />
+
+      {/* SettlementKind and ReviewLinkedType agree on PAYMENT / RECEIPT, so the
+          kind names the review type directly. */}
+      <ReviewPanel
+        linkedType={kind}
+        linkedId={settlement.id}
+        noun={SETTLEMENT_KIND_LABELS[kind].toLowerCase()}
       />
 
       {canEdit(session.role) && (

@@ -9,6 +9,7 @@ import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
 import { DeleteVoucher } from "../../delete-voucher";
+import { ReviewPanel } from "../../review-panel";
 import { VoucherMeta } from "../../voucher-meta";
 import { deleteDelivery } from "../actions";
 
@@ -147,6 +148,12 @@ export default async function DeliveryNotePage({
         createdAt={note.createdAt}
         updatedBy={note.updatedBy}
         updatedAt={note.updatedAt}
+      />
+
+      <ReviewPanel
+        linkedType="DELIVERY_NOTE"
+        linkedId={note.id}
+        noun="delivery note"
       />
 
       {mayEdit && (

@@ -1,11 +1,18 @@
 import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { requireReports } from "@/lib/session";
+import { canEdit, requireReports } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { computeDayBook, getBalancesAsOf } from "@/lib/report";
+import { REVIEW_TYPE_LABELS, reviewVoucherPath } from "@/lib/review";
+import { getPendingReviews } from "@/lib/review-db";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
-import { businessTodayDate, fmtDate, fmtMoney } from "@/lib/format";
+import {
+  businessTodayDate,
+  fmtDate,
+  fmtDateTime,
+  fmtMoney,
+} from "@/lib/format";
 import { NoCentreNotice } from "../no-centre";
 
 const ZERO = new Prisma.Decimal(0);
@@ -40,14 +47,15 @@ function Tile({
 }
 
 export default async function DashboardPage() {
-  await requireReports();
+  const session = await requireReports();
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
   const today = businessTodayDate();
 
-  const [day, balances, recentSales] = await Promise.all([
+  const [day, balances, pendingReviews, recentSales] = await Promise.all([
     computeDayBook(company.id, centre.id, today),
     getBalancesAsOf(company.id, centre.id, today),
+    getPendingReviews(company.id, centre.id),
     prisma.sale.findMany({
       where: { companyId: company.id, centreId: centre.id },
       include: {
@@ -82,6 +90,50 @@ export default async function DashboardPage() {
         below is for this company and centre only — use Union for the
         cross-centre view.
       </p>
+
+      {/* Above the figures, because it is the only thing here that is waiting
+          on the person reading it. Scoped like everything else on this page:
+          requests file against the centre the voucher was entered in, so they
+          appear when you are in that centre. Admins only — an auditor cannot
+          act on one, and an accountant never reaches this page. */}
+      {canEdit(session.role) && pendingReviews.length > 0 && (
+        <div className="border border-amber-500 bg-surface mb-5">
+          <div className="px-4 py-2 border-b border-line">
+            <h2 className="heading text-[15px] font-semibold">
+              Review requested · {pendingReviews.length}
+            </h2>
+            <p className="text-muted text-[12px]">
+              Entries an accountant cannot fix themselves. Open one, make the
+              change and save — saving closes the request.
+            </p>
+          </div>
+          <ul className="divide-y divide-line">
+            {pendingReviews.map((r) => (
+              <li
+                key={r.id}
+                className="px-4 py-2 flex items-start justify-between gap-4"
+              >
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold">
+                    {REVIEW_TYPE_LABELS[r.linkedType]}
+                    <span className="text-muted font-normal">
+                      {r.requestedBy && <> · {r.requestedBy.name}</>} ·{" "}
+                      {fmtDateTime(r.requestedAt)}
+                    </span>
+                  </div>
+                  <p className="text-[13px] mt-0.5">{r.reason}</p>
+                </div>
+                <Link
+                  href={reviewVoucherPath(r.linkedType, r.linkedId)}
+                  className="shrink-0 border border-line-strong bg-background px-3 py-1 text-[12px] font-semibold hover:border-accent"
+                >
+                  Open
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Tile

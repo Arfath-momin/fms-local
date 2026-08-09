@@ -10,6 +10,7 @@ import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
 import { DeleteVoucher } from "../../delete-voucher";
+import { ReviewPanel } from "../../review-panel";
 import { VoucherMeta } from "../../voucher-meta";
 import { deleteSale } from "../actions";
 
@@ -196,6 +197,8 @@ export default async function SalePage({
         updatedBy={sale.updatedBy}
         updatedAt={sale.updatedAt}
       />
+
+      <ReviewPanel linkedType="SALE" linkedId={sale.id} noun="sale" />
 
       {mayEdit && (
         <DeleteVoucher

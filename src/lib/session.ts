@@ -36,6 +36,16 @@ export const canEnter = (role: Role): boolean =>
 /** May change or correct a voucher that already exists. Admin only. */
 export const canEdit = (role: Role): boolean => role === "ADMIN";
 
+/**
+ * May ask an admin to correct a voucher.
+ *
+ * Accountants only, and deliberately so. It is the counterpart to canEdit being
+ * false for them: an accountant who spots their own mistake has no way to fix
+ * it, so they get a way to have it fixed instead. An admin needs no request —
+ * they just edit — and an auditor is read-only in every direction.
+ */
+export const canRequestReview = (role: Role): boolean => role === "ACCOUNTANT";
+
 /** May manage users and centres. Admin only. */
 export const canAdminister = (role: Role): boolean => role === "ADMIN";
 
@@ -148,6 +158,17 @@ export async function requireAdmin(): Promise<Session> {
   if (!canAdminister(session.role)) {
     throw new Error(
       "Only an administrator can change or remove an existing record."
+    );
+  }
+  return session;
+}
+
+/** For the action that raises a review request. Accountants only. */
+export async function requireReviewRequester(): Promise<Session> {
+  const session = await requireSession();
+  if (!canRequestReview(session.role)) {
+    throw new Error(
+      "Only an accountant raises a review request — an administrator edits the voucher directly."
     );
   }
   return session;

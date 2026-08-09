@@ -10,6 +10,7 @@ import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
 import { DeleteVoucher } from "../../delete-voucher";
+import { ReviewPanel } from "../../review-panel";
 import { VoucherMeta } from "../../voucher-meta";
 
 export default async function ExpenseDetailPage({
@@ -96,6 +97,12 @@ export default async function ExpenseDetailPage({
     />
   );
 
+  // The accountant's route to a correction, since they cannot edit. For an
+  // admin this is the notice that one was asked for.
+  const review = (
+    <ReviewPanel linkedType="EXPENSE" linkedId={expense.id} noun="expense" />
+  );
+
   if (!mayEdit) {
     const details = (expense.details as Record<string, string> | null) ?? {};
     return (
@@ -113,6 +120,7 @@ export default async function ExpenseDetailPage({
         </dl>
         {meta}
         {panel}
+        {review}
       </div>
     );
   }
@@ -128,6 +136,9 @@ export default async function ExpenseDetailPage({
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-4">Edit Expense</h1>
+      {/* Above the form, not below it: it is the reason this screen is open.
+          Collapses to nothing when no review was requested. */}
+      <div className="mb-4 empty:hidden [&>*]:mt-0">{review}</div>
       <ExpenseForm
         action={updateExpense.bind(null, expense.id)}
         initial={initial}

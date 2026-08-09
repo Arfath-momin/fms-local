@@ -5,6 +5,7 @@ import { canEdit, requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { toInputDate } from "@/lib/format";
 import { updateSale } from "../../actions";
+import { ReviewPanel } from "../../../review-panel";
 import { SaleForm } from "../../sale-form";
 
 export default async function EditSalePage({
@@ -41,6 +42,11 @@ export default async function EditSalePage({
       <h1 className="heading text-xl font-semibold mb-4">
         Edit {SALE_TYPE_LABELS[sale.type]} Sale
       </h1>
+      {/* Whatever the accountant asked for, kept in view while it is fixed.
+          Collapses to nothing when no review was requested. */}
+      <div className="mb-4 empty:hidden [&>*]:mt-0">
+        <ReviewPanel linkedType="SALE" linkedId={sale.id} noun="sale" />
+      </div>
       <SaleForm
         type={sale.type}
         action={updateSale.bind(null, sale.id)}
