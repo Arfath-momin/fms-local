@@ -8,6 +8,7 @@ import type { SaleFormState } from "./actions";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
+import { DateField } from "../../date-field";
 import { PartyCombobox } from "../../masters/party-combobox";
 import {
   MARKET_COMMISSION_RATE,
@@ -63,6 +64,7 @@ export function SaleForm({
   initial,
   submitLabel,
   existingAttachments = 0,
+  allowBillUpload = true,
   scope,
 }: {
   type: SaleType;
@@ -70,6 +72,8 @@ export function SaleForm({
   initial?: SaleInit;
   submitLabel: string;
   existingAttachments?: number;
+  /** False once the voucher exists — the Attachments panel handles images then. */
+  allowBillUpload?: boolean;
   scope: FormScope;
 }) {
   const [state, formAction, pending] = useActionState<SaleFormState, FormData>(
@@ -129,10 +133,9 @@ export function SaleForm({
           <label htmlFor="date" className={labelCls}>
             Date
           </label>
-          <input
+          <DateField
             id="date"
             name="date"
-            type="date"
             required
             defaultValue={initial?.date ?? today}
             className={inputCls}
@@ -386,11 +389,13 @@ export function SaleForm({
         </Link>
       </div>
 
-      <BillUpload
-        label={`${SALE_TYPE_LABELS[type]} bill image`}
-        hint="Optional."
-        existingCount={existingAttachments}
-      />
+      {allowBillUpload && (
+        <BillUpload
+          label={`${SALE_TYPE_LABELS[type]} bill image`}
+          hint="Optional."
+          existingCount={existingAttachments}
+        />
+      )}
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}
 

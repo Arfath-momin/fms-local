@@ -8,10 +8,11 @@ import { businessToday, fmtMoney } from "@/lib/format";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
+import { DateField } from "../../date-field";
 import { PartyCombobox } from "../../masters/party-combobox";
 import {
   FIXED_PURCHASE_PARTY,
-  PURCHASE_BOAT_TYPE,
+  purchaseHasLineBoats,
   purchasePartyIsTyped,
 } from "@/lib/party";
 
@@ -24,10 +25,14 @@ const TYPE_OPTIONS: { value: PurchaseType; label: string }[] = [
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
+const cellCls =
+  "w-full border border-line-strong bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent";
 const labelCls =
   "block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1";
 
 export type PurchaseLineInit = {
+  /** Society / KFDC only — the vessel this row's fish came from. */
+  boatName: string;
   particular: string;
   qtyKg: string;
   pricePerKg: string;
@@ -35,23 +40,39 @@ export type PurchaseLineInit = {
 
 export type PurchaseInit = {
   type: PurchaseType;
-  /** Ledger party — only editable on Private, fixed by the type otherwise. */
+  /** "No." on a Society/KFDC bill, "Invoice No." on a Private/Local one. */
+  billNo: string;
+  /** The seller — Private and Local only; fixed by the type otherwise. */
   partyName: string;
-  /** Boat (Society/KFDC/Private) or seller name (Local). */
-  boatName: string;
-  amount: string;
   date: string;
   lines: PurchaseLineInit[];
 };
 
-const BLANK_LINE: PurchaseLineInit = { particular: "", qtyKg: "", pricePerKg: "" };
+const BLANK_LINE: PurchaseLineInit = {
+  boatName: "",
+  particular: "",
+  qtyKg: "",
+  pricePerKg: "",
+};
 
+/**
+ * Every purchase is an itemised bill. The type decides two things and nothing
+ * else: whether each row names its own boat (Society / KFDC do, because one
+ * bill covers whatever vessels landed that day), and whether the bill names its
+ * seller (Private / Local do, because they buy from a different person each
+ * time — and that person gets the ledger).
+ *
+ * The grand total is never typed. It is the sum of the rows, computed here for
+ * the person entering it and recomputed server-side from the same rows, so the
+ * figure on screen and the figure in the ledger cannot disagree.
+ */
 export function PurchaseForm({
   action,
   initial,
   submitLabel,
   reasonField,
   existingAttachments = 0,
+  allowBillUpload = true,
   scope,
 }: {
   action: (
@@ -62,6 +83,12 @@ export function PurchaseForm({
   submitLabel: string;
   reasonField?: boolean;
   existingAttachments?: number;
+  /**
+   * False on a voucher that already exists, where the Attachments panel below
+   * the form is the place images are managed. Rendering both put two file
+   * pickers on one screen for the same job.
+   */
+  allowBillUpload?: boolean;
   scope: FormScope;
 }) {
   const [state, formAction, pending] = useActionState<PurchaseFormState, FormData>(
@@ -74,13 +101,7 @@ export function PurchaseForm({
   );
 
   const today = businessToday();
-  const isLocal = type === "LOCAL";
-  // Society / KFDC / Private track the boat; Local tracks the seller. Same map
-  // the server action resolves with, so the picker can never offer a party
-  // kind the save would then reject.
-  const boatType = PURCHASE_BOAT_TYPE[type];
-  // Private is the only type without a standing counterparty, so it is the
-  // only one that asks who the money is owed to.
+  const hasLineBoats = purchaseHasLineBoats(type);
   const asksForParty = purchasePartyIsTyped(type);
   const fixedParty = FIXED_PURCHASE_PARTY[type];
 
@@ -98,9 +119,10 @@ export function PurchaseForm({
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
   return (
-    <form action={formAction} className="max-w-2xl space-y-4">
+    <form action={formAction} className="max-w-3xl space-y-4">
       <ScopeFields scope={scope} />
-      <div className="grid grid-cols-2 gap-4">
+
+      <div className="grid grid-cols-3 gap-4">
         <div>
           <label htmlFor="type" className={labelCls}>
             Purchase Type
@@ -121,13 +143,24 @@ export function PurchaseForm({
           </select>
         </div>
         <div>
+          <label htmlFor="billNo" className={labelCls}>
+            {asksForParty ? "Invoice No." : "No."}
+          </label>
+          <input
+            id="billNo"
+            name="billNo"
+            defaultValue={initial?.billNo ?? ""}
+            placeholder="Optional"
+            className={inputCls}
+          />
+        </div>
+        <div>
           <label htmlFor="date" className={labelCls}>
             Date
           </label>
-          <input
+          <DateField
             id="date"
             name="date"
-            type="date"
             required
             defaultValue={initial?.date ?? today}
             className={inputCls}
@@ -135,176 +168,176 @@ export function PurchaseForm({
         </div>
       </div>
 
-      {/* Private buys from a different owner each time, so the ledger is named
-          here. The others settle against one standing account, which the type
+      {/* Private and Local buy from a different person each time, so the ledger
+          is named here and that person is who a payment settles against.
+          Society and KFDC settle against one standing account, which the type
           already picks — asking again would only invite a typo that splits it. */}
-      {asksForParty && (
+      {asksForParty ? (
         <div>
           <PartyCombobox
             name="partyName"
-            label="Party Name"
+            label="Name"
             types={["PURCHASE_GROUP"]}
-            // Only a purchase that was already Private has a party worth
-            // restoring; switching type on an edit must not prefill "Society"
-            // into the field that names a private owner.
-            defaultValue={initial?.type === "PRIVATE" ? initial.partyName : ""}
-            placeholder="e.g. Ravi Traders"
+            // Suggestions follow the type selected above: a Private bill offers
+            // private sellers, a Local bill local ones. Switching the type
+            // re-runs the search, so the list never lags the choice.
+            purchaseKind={type}
+            // Only a purchase that already named its own seller has a name
+            // worth restoring; switching type on an edit must not prefill
+            // "Society" into the field that names an individual.
+            defaultValue={
+              initial && purchasePartyIsTyped(initial.type)
+                ? initial.partyName
+                : ""
+            }
+            placeholder="e.g. Ravi"
           />
           <p className="text-muted text-[12px] mt-1">
-            The private party this purchase is owed to. They get their own
-            ledger, and payments settle against it.
+            Who this bill is owed to. They get their own ledger, and payments
+            settle against it — two sellers are never rolled into one balance.
           </p>
         </div>
+      ) : (
+        <p className="text-muted text-[12px]">
+          Owed to <span className="font-medium">{fixedParty}</span>, which is one
+          standing account however many boats it sends. Name the boats on the
+          rows below.
+        </p>
       )}
 
-      {/* Keyed on the purchase type so switching Society ↔ Local re-runs the
-          search against the right master and clears a name from the other. */}
       <div>
-        <PartyCombobox
-          key={boatType}
-          name="boatName"
-          label={isLocal ? "Seller Name" : "Boat Name"}
-          types={[boatType]}
-          defaultValue={initial?.boatName ?? ""}
-          placeholder={isLocal ? "e.g. Ramesh" : "e.g. Boat No. 12"}
-        />
-        <p className="text-muted text-[12px] mt-1">
-          {asksForParty ? (
-            <>
-              Which boat the fish came from. Recorded on this bill and shown
-              against the line on the party&rsquo;s statement — it carries no
-              ledger of its own.
-            </>
-          ) : (
-            <>
-              Recorded on this bill and shown against every line of the{" "}
-              <span className="font-medium">{fixedParty}</span> ledger, which is
-              where the money is owed.
-            </>
-          )}
-        </p>
+        <label className={labelCls}>Items</label>
+        <div className="overflow-x-auto border border-line-strong bg-surface">
+          <table
+            className={"w-full text-sm " + (hasLineBoats ? "min-w-[720px]" : "")}
+          >
+            <thead>
+              <tr className="text-muted text-[12px] uppercase tracking-wide">
+                <th className="text-left font-semibold px-2 py-2 w-10">Sl</th>
+                {hasLineBoats && (
+                  <th className="text-left font-semibold px-2 py-2">Boat Name</th>
+                )}
+                <th className="text-left font-semibold px-2 py-2">
+                  {hasLineBoats ? "Particulars" : "Particular"}
+                </th>
+                <th className="text-right font-semibold px-2 py-2 w-28">
+                  {hasLineBoats ? "Total Kg" : "Qty"}
+                </th>
+                <th className="text-right font-semibold px-2 py-2 w-28">
+                  {hasLineBoats ? "Rate/kg" : "Rate"}
+                </th>
+                <th className="text-right font-semibold px-2 py-2 w-32">Amount</th>
+                <th className="w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((l, i) => {
+                const rowTotal =
+                  (Number(l.qtyKg) || 0) * (Number(l.pricePerKg) || 0);
+                return (
+                  <tr key={i} className="border-t border-line align-top">
+                    <td className="px-2 py-2 num text-muted">{i + 1}</td>
+                    {hasLineBoats && (
+                      <td className="px-1 py-1">
+                        <PartyCombobox
+                          name="boatName"
+                          label={`Boat name, row ${i + 1}`}
+                          types={["BOAT"]}
+                          compact
+                          required={false}
+                          value={l.boatName}
+                          onValueChange={(v) => setLine(i, { boatName: v })}
+                          placeholder="e.g. Boat No. 12"
+                        />
+                      </td>
+                    )}
+                    <td className="px-1 py-1">
+                      <input
+                        name="particular"
+                        aria-label={`Particulars, row ${i + 1}`}
+                        value={l.particular}
+                        onChange={(e) =>
+                          setLine(i, { particular: e.target.value })
+                        }
+                        className={cellCls}
+                        placeholder="e.g. Prawn"
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        name="qtyKg"
+                        aria-label={`Quantity, row ${i + 1}`}
+                        inputMode="decimal"
+                        value={l.qtyKg}
+                        onChange={(e) => setLine(i, { qtyKg: e.target.value })}
+                        className={cellCls + " num text-right"}
+                      />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input
+                        name="pricePerKg"
+                        aria-label={`Rate, row ${i + 1}`}
+                        inputMode="decimal"
+                        value={l.pricePerKg}
+                        onChange={(e) =>
+                          setLine(i, { pricePerKg: e.target.value })
+                        }
+                        className={cellCls + " num text-right"}
+                      />
+                    </td>
+                    <td className="px-2 py-2 num text-right text-muted">
+                      {fmtMoney(rowTotal)}
+                    </td>
+                    <td className="px-1 py-2 text-center">
+                      {lines.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLines((ls) => ls.filter((_, j) => j !== i))
+                          }
+                          className="text-debit text-lg leading-none"
+                          aria-label={`Remove row ${i + 1}`}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-line-strong">
+                <td
+                  colSpan={hasLineBoats ? 5 : 4}
+                  className="px-3 py-2 text-right font-semibold"
+                >
+                  Total Amount
+                </td>
+                <td className="px-2 py-2 num text-right font-semibold text-debit">
+                  {fmtMoney(grandTotal)}
+                </td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <button
+          type="button"
+          onClick={() => setLines((ls) => [...ls, { ...BLANK_LINE }])}
+          className="mt-2 border border-line-strong bg-surface px-3 py-1.5 text-[12px] font-semibold hover:border-accent"
+        >
+          + Add item
+        </button>
       </div>
 
-      {isLocal ? (
-        <div>
-          <label className={labelCls}>Items</label>
-          <div className="border border-line-strong bg-surface">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-muted text-[12px] uppercase tracking-wide">
-                  <th className="text-left font-semibold px-3 py-2">Particular</th>
-                  <th className="text-right font-semibold px-3 py-2 w-28">Qty (kg)</th>
-                  <th className="text-right font-semibold px-3 py-2 w-28">Price/kg</th>
-                  <th className="text-right font-semibold px-3 py-2 w-32">Total</th>
-                  <th className="w-8"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((l, i) => {
-                  const rowTotal =
-                    (Number(l.qtyKg) || 0) * (Number(l.pricePerKg) || 0);
-                  return (
-                    <tr key={i} className="border-t border-line">
-                      <td className="px-2 py-1">
-                        <input
-                          name="particular"
-                          value={l.particular}
-                          onChange={(e) =>
-                            setLine(i, { particular: e.target.value })
-                          }
-                          className={inputCls}
-                          placeholder="e.g. Prawn"
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          name="qtyKg"
-                          inputMode="decimal"
-                          value={l.qtyKg}
-                          onChange={(e) => setLine(i, { qtyKg: e.target.value })}
-                          className={inputCls + " num text-right"}
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          name="pricePerKg"
-                          inputMode="decimal"
-                          value={l.pricePerKg}
-                          onChange={(e) =>
-                            setLine(i, { pricePerKg: e.target.value })
-                          }
-                          className={inputCls + " num text-right"}
-                        />
-                      </td>
-                      <td className="px-3 py-1 num text-right text-muted">
-                        {fmtMoney(rowTotal)}
-                      </td>
-                      <td className="px-1 py-1 text-center">
-                        {lines.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setLines((ls) => ls.filter((_, j) => j !== i))
-                            }
-                            className="text-debit text-lg leading-none"
-                            aria-label="Remove line"
-                          >
-                            ×
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-line-strong">
-                  <td colSpan={3} className="px-3 py-2 text-right font-semibold">
-                    Grand Total
-                  </td>
-                  <td className="px-3 py-2 num text-right font-semibold text-debit">
-                    {fmtMoney(grandTotal)}
-                  </td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          <button
-            type="button"
-            onClick={() => setLines((ls) => [...ls, { ...BLANK_LINE }])}
-            className="mt-2 border border-line-strong bg-surface px-3 py-1.5 text-[12px] font-semibold hover:border-accent"
-          >
-            + Add item
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="amount" className={labelCls}>
-              Grand Total (₹)
-            </label>
-            <input
-              id="amount"
-              name="amount"
-              required
-              inputMode="decimal"
-              defaultValue={initial?.amount ?? ""}
-              className={inputCls + " num text-right"}
-            />
-          </div>
-        </div>
+      {allowBillUpload && (
+        <BillUpload
+          label="Bill / Receipt"
+          hint="Optional — the rows above are the record now."
+          existingCount={existingAttachments}
+        />
       )}
-
-      <BillUpload
-        label="Bill / Receipt"
-        hint={
-          isLocal
-            ? "Optional."
-            : "The fish breakdown stays on the bill image, so attach it here."
-        }
-        existingCount={existingAttachments}
-      />
 
       {reasonField && (
         <div>

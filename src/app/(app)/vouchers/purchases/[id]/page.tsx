@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
+import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
+import { purchaseHasLineBoats, purchasePartyIsTyped } from "@/lib/party";
 import { deletePurchase, updatePurchase } from "../actions";
 import { PurchaseForm, type PurchaseInit } from "../purchase-form";
 import { getAttachments } from "@/lib/attachments";
@@ -33,7 +35,10 @@ export default async function PurchaseDetailPage({
     include: {
       party: { select: { name: true } },
       boat: { select: { name: true } },
-      lines: { orderBy: { id: "asc" } },
+      lines: {
+        orderBy: { id: "asc" },
+        include: { boat: { select: { name: true } } },
+      },
       createdBy: { select: { name: true } },
       updatedBy: { select: { name: true } },
     },
@@ -105,6 +110,10 @@ export default async function PurchaseDetailPage({
     <ReviewPanel linkedType="PURCHASE" linkedId={purchase.id} noun="purchase" />
   );
 
+  // Society / KFDC name a boat on every row; Private and Local name their
+  // seller once, as the party, so there is no boat column to show.
+  const showLineBoats = purchaseHasLineBoats(purchase.type);
+
   // Only an administrator may change a voucher after it is saved. Everyone else
   // who can reach this page sees the same figures, read-only.
   if (!mayEdit) {
@@ -112,30 +121,36 @@ export default async function PurchaseDetailPage({
       <div>
         <h1 className="heading text-xl font-semibold mb-4">Purchase</h1>
         <dl className="border border-line-strong bg-surface divide-y divide-line max-w-lg text-[13px]">
-          <Row label="Type" value={purchase.type} />
-          <Row label="Party (ledger)" value={purchase.party.name} />
+          <Row label="Type" value={PURCHASE_TYPE_LABELS[purchase.type]} />
           <Row
-            label={purchase.type === "LOCAL" ? "Seller" : "Boat"}
-            value={purchase.boat?.name ?? "—"}
+            label={purchasePartyIsTyped(purchase.type) ? "Invoice No." : "No."}
+            value={purchase.billNo ?? "—"}
           />
+          <Row label="Owed to" value={purchase.party.name} />
           <Row label="Date" value={fmtDate(purchase.date)} />
-          <Row label="Amount" value={fmtMoney(purchase.amount)} />
+          <Row label="Total Amount" value={fmtMoney(purchase.amount)} />
         </dl>
 
         {purchase.lines.length > 0 && (
-          <div className="border border-line-strong bg-surface mt-4 max-w-lg">
+          <div className="border border-line-strong bg-surface mt-4 max-w-2xl">
             <table className="ledger-table">
               <thead>
                 <tr>
-                  <th>Particular</th>
-                  <th className="num-col">Qty</th>
-                  <th className="num-col">Rate</th>
-                  <th className="num-col">Total</th>
+                  <th className="num-col">Sl</th>
+                  {showLineBoats && <th>Boat Name</th>}
+                  <th>{showLineBoats ? "Particulars" : "Particular"}</th>
+                  <th className="num-col">{showLineBoats ? "Total Kg" : "Qty"}</th>
+                  <th className="num-col">{showLineBoats ? "Rate/kg" : "Rate"}</th>
+                  <th className="num-col">Amount</th>
                 </tr>
               </thead>
               <tbody>
-                {purchase.lines.map((l) => (
+                {purchase.lines.map((l, i) => (
                   <tr key={l.id}>
+                    <td className="num-col num text-muted">{i + 1}</td>
+                    {showLineBoats && (
+                      <td>{l.boat?.name ?? <span className="text-muted">—</span>}</td>
+                    )}
                     <td>{l.particular}</td>
                     <td className="num-col">{fmtKg(l.qtyKg)}</td>
                     <td className="num-col">{fmtMoney(l.pricePerKg)}</td>
@@ -143,6 +158,16 @@ export default async function PurchaseDetailPage({
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr className="border-t border-line-strong font-semibold">
+                  <td colSpan={showLineBoats ? 5 : 4} className="text-right">
+                    Total Amount
+                  </td>
+                  <td className="num-col num text-debit">
+                    {fmtMoney(purchase.amount)}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}
@@ -156,11 +181,14 @@ export default async function PurchaseDetailPage({
 
   const initial: PurchaseInit = {
     type: purchase.type,
+    billNo: purchase.billNo ?? "",
     partyName: purchase.party.name,
-    boatName: purchase.boat?.name ?? "",
-    amount: purchase.amount.toString(),
     date: toInputDate(purchase.date),
     lines: purchase.lines.map((l) => ({
+      // A bill entered before boats moved onto the line has its vessel in the
+      // header; carrying it onto the first row keeps the name rather than
+      // silently dropping it when this edit rewrites the bill as rows.
+      boatName: l.boat?.name ?? purchase.boat?.name ?? "",
       particular: l.particular,
       qtyKg: l.qtyKg.toString(),
       pricePerKg: l.pricePerKg.toString(),
@@ -178,6 +206,9 @@ export default async function PurchaseDetailPage({
         initial={initial}
         submitLabel="Save Changes"
         scope={scopeFieldValues({ company, centre })}
+        // The Attachments panel below is the single place images are managed
+        // once the voucher exists.
+        allowBillUpload={false}
       />
       {meta}
       {panel}

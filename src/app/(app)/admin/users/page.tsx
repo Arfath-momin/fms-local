@@ -11,6 +11,7 @@ import {
 } from "./user-forms";
 
 const ROLE_LABELS: Record<Role, string> = {
+  SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",
   ACCOUNTANT: "Accountant",
   AUDITOR: "Auditor / CA",
@@ -23,6 +24,13 @@ export default async function UsersPage() {
   const users = await prisma.user.findMany({
     orderBy: [{ isActive: "desc" }, { role: "asc" }, { name: "asc" }],
   });
+
+  // A super admin's account is off limits to an ordinary admin — no role
+  // dropdown, no password reset, no deactivate — because each of those is a
+  // route to taking over the tier above. The server refuses these too; this
+  // only stops the buttons being offered. Mirrors assertMayActOn() in actions.
+  const mayActOn = (role: Role) =>
+    session.role === "SUPER_ADMIN" || role !== "SUPER_ADMIN";
 
   return (
     <div className="max-w-4xl">
@@ -57,7 +65,7 @@ export default async function UsersPage() {
                 </td>
                 <td>{u.email}</td>
                 <td>
-                  {u.isActive ? (
+                  {u.isActive && mayActOn(u.role) ? (
                     <RoleForm userId={u.id} role={u.role} />
                   ) : (
                     ROLE_LABELS[u.role]
@@ -68,8 +76,10 @@ export default async function UsersPage() {
                 </td>
                 <td>
                   <div className="flex gap-3">
-                    {u.isActive && <ResetPasswordForm userId={u.id} />}
-                    {u.id !== session.userId && (
+                    {u.isActive && mayActOn(u.role) && (
+                      <ResetPasswordForm userId={u.id} />
+                    )}
+                    {u.id !== session.userId && mayActOn(u.role) && (
                       <ActiveForm userId={u.id} isActive={u.isActive} />
                     )}
                   </div>
@@ -85,9 +95,18 @@ export default async function UsersPage() {
       <div className="mt-6 text-[12px] text-muted max-w-lg">
         <p className="font-semibold text-foreground mb-1">What each role can do</p>
         <ul className="space-y-1">
+          {session.role === "SUPER_ADMIN" && (
+            <li>
+              <span className="font-semibold">Super Admin</span> — everything an
+              admin can do, plus restoring an archived centre or party and
+              deleting an unused one for good. Cannot be granted from this
+              screen; it is set on the server.
+            </li>
+          )}
           <li>
-            <span className="font-semibold">Admin</span> — everything, and the
-            only role that can change a voucher after it is saved.
+            <span className="font-semibold">Admin</span> — runs the books.
+            Everything else, including changing a voucher after it is saved and
+            archiving a centre or party that is no longer needed.
           </li>
           <li>
             <span className="font-semibold">Accountant</span> — enters purchases,

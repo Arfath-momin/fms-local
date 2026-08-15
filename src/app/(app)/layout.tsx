@@ -7,6 +7,7 @@ import { logout, switchCompany, switchCentre } from "./actions";
 import { NavLinks } from "./nav-links";
 
 const ROLE_LABELS: Record<Role, string> = {
+  SUPER_ADMIN: "Super Admin · system owner",
   ADMIN: "Admin",
   ACCOUNTANT: "Accountant · entry only",
   AUDITOR: "Auditor · read-only",

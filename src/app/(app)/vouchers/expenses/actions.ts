@@ -9,7 +9,12 @@ import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
-import { EXPENSE_CATEGORIES, EXPENSE_SPECS, expenseVendorName } from "@/lib/expense";
+import {
+  EXPENSE_CATEGORIES,
+  EXPENSE_SPECS,
+  expensePrepaid,
+  expenseVendorName,
+} from "@/lib/expense";
 import { clearErrorFlag } from "@/lib/errorflag";
 import { resolveReviews } from "@/lib/review-db";
 import {
@@ -25,6 +30,8 @@ export type ExpenseFormState = { error: string } | null;
 type Parsed = {
   category: ExpenseCategory;
   amount: Prisma.Decimal;
+  /** Of that total, how much was already paid at the time of entry. */
+  prepaid: Prisma.Decimal;
   date: Date;
   notes: string | null;
   details: Record<string, string>;
@@ -73,10 +80,22 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     return { error: "This category has no total configured." };
   }
 
+  // Money already handed over cannot exceed the bill it is paying. Without this
+  // the vendor's balance would go positive, reading as "the landlord owes us"
+  // on the outstanding screen.
+  const prepaid = new Prisma.Decimal(expensePrepaid(category, details));
+  if (prepaid.greaterThan(amount))
+    return {
+      error:
+        `Advance and collected come to ${prepaid.toFixed(2)}, more than the ` +
+        `total of ${amount.toFixed(2)}. Check the figures.`,
+    };
+
   return {
     data: {
       category,
       amount,
+      prepaid,
       date: new Date(dateRaw),
       notes: notes || null,
       details,
@@ -89,6 +108,13 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
 /**
  * Expense ledger effect: CREDIT the vendor, because we now owe them. Settling
  * it is a Payment voucher, not a flag on this record — see postPurchaseLedger.
+ *
+ * Where the category records money already handed over (vehicle rent: an
+ * advance to the driver, and whatever he settles out of his collections), that
+ * amount posts back as a DEBIT from the same expense. The vendor's running
+ * balance is then the rent still to pay, with no separate "balance" column that
+ * could drift from it — and because both sides carry this expense's sourceId,
+ * editing or deleting the voucher removes them together.
  */
 async function postExpenseLedger(
   tx: Prisma.TransactionClient,
@@ -98,20 +124,24 @@ async function postExpenseLedger(
     partyId: string;
     id: string;
     amount: Prisma.Decimal;
+    prepaid: Prisma.Decimal;
     date: Date;
   }
 ) {
+  const common = {
+    companyId: e.companyId,
+    centreId: e.centreId,
+    partyId: e.partyId,
+    sourceType: "EXPENSE" as const,
+    sourceId: e.id,
+    date: e.date,
+  };
+
   await postLedgerEntries(tx, [
-    {
-      companyId: e.companyId,
-      centreId: e.centreId,
-      partyId: e.partyId,
-      type: "CREDIT",
-      sourceType: "EXPENSE",
-      sourceId: e.id,
-      amount: e.amount,
-      date: e.date,
-    },
+    { ...common, type: "CREDIT", amount: e.amount },
+    ...(e.prepaid.greaterThan(0)
+      ? [{ ...common, type: "DEBIT" as const, amount: e.prepaid }]
+      : []),
   ]);
 }
 

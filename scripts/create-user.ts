@@ -4,6 +4,7 @@
 //
 //   npx tsx scripts/create-user.ts --email a@b.com --name "Asif" --role ADMIN
 //   npx tsx scripts/create-user.ts --email a@b.com --role AUDITOR --update
+//   npx tsx scripts/create-user.ts --email me@b.com --name "Me" --role SUPER_ADMIN
 //
 // Omit --password and a strong one is generated and printed once. Supply your
 // own with --password or the FMS_USER_PASSWORD environment variable (the env
@@ -14,7 +15,10 @@ import bcrypt from "bcryptjs";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-const ROLES = ["ADMIN", "ACCOUNTANT", "AUDITOR"] as const;
+// SUPER_ADMIN is listed here and nowhere else. The Users screen deliberately
+// cannot grant it, so this script — which needs shell access to the server — is
+// the only way one comes into existence.
+const ROLES = ["SUPER_ADMIN", "ADMIN", "ACCOUNTANT", "AUDITOR"] as const;
 type RoleName = (typeof ROLES)[number];
 
 const MIN_PASSWORD_LENGTH = 12;

@@ -159,61 +159,107 @@ async function main() {
   }
 
   // --- Purchases (BFM · Centre 1) ---
-  async function purchase(
-    type: "SOCIETY" | "KFDC" | "PRIVATE" | "LOCAL",
-    boatName: string,
-    amount: Prisma.Decimal,
-    paid: boolean,
-    on: Date,
-    lines: { particular: string; qtyKg: number; pricePerKg: number }[] = [],
-    /** Private only — the owner the money is owed to. */
-    privateParty?: string
-  ) {
-    // The boat/seller is recorded on the purchase for display; the ledger
-    // belongs to the party (Society / KFDC / Local Individuals, or the named
-    // private owner), which is what actually gets paid.
-    const boatType: PartyType = type === "LOCAL" ? "LOCAL_SELLER" : "BOAT";
-    const boatId = await party(boatName, boatType);
-    const partyName = FIXED_PURCHASE_PARTY[type] ?? privateParty!;
+  //
+  // Mirrors the create action: every bill is itemised, the total is the sum of
+  // its rows, and the ledger belongs to whoever the bill is owed to — Society
+  // or KFDC for those types, the named individual for Private and Local. Boats
+  // are named per row on Society/KFDC bills and carry no ledger.
+  type SeedLine = {
+    boat?: string;
+    particular: string;
+    qtyKg: number;
+    pricePerKg: number;
+  };
+
+  async function purchase(opts: {
+    type: "SOCIETY" | "KFDC" | "PRIVATE" | "LOCAL";
+    /** Private / Local only — who the money is owed to. */
+    seller?: string;
+    billNo?: string;
+    paid: boolean;
+    on: Date;
+    lines: SeedLine[];
+  }) {
+    const { type, seller, billNo, paid, on, lines } = opts;
+    const partyName = FIXED_PURCHASE_PARTY[type] ?? seller!;
     const partyId = await party(partyName, "PURCHASE_GROUP");
+
+    const rows = [];
+    for (const l of lines) {
+      rows.push({
+        boatId: l.boat ? await party(l.boat, "BOAT") : null,
+        particular: l.particular,
+        qtyKg: D(l.qtyKg),
+        pricePerKg: D(l.pricePerKg),
+        total: D(l.qtyKg).mul(D(l.pricePerKg)),
+      });
+    }
+    const amount = rows.reduce((a, r) => a.add(r.total), D(0));
+
     const p = await prisma.purchase.create({
       data: {
         companyId: bfm,
         centreId: c1,
         partyId,
-        boatId,
+        billNo: billNo ?? null,
         type,
         amount,
         date: on,
-        lines: {
-          create: lines.map((l) => ({
-            particular: l.particular,
-            qtyKg: D(l.qtyKg),
-            pricePerKg: D(l.pricePerKg),
-            total: D(l.qtyKg).mul(D(l.pricePerKg)),
-          })),
-        },
+        lines: { create: rows },
       },
     });
     await ledger(bfm, c1, partyId, "CREDIT", "PURCHASE", p.id, amount, on);
     if (paid) await settle("PAYMENT", partyId, amount, on);
   }
 
-  await purchase("SOCIETY", "Boat No. 12", D(45000), true, date("2026-07-20"));
-  await purchase("KFDC", "Boat No. 7", D(32000), true, date("2026-07-21"));
-  await purchase(
-    "PRIVATE",
-    "Boat No. 12",
-    D(18500),
-    false,
-    date("2026-07-21"),
-    [],
-    "Ravi Traders"
-  );
-  await purchase("LOCAL", "Ramesh", D(15000), true, date("2026-07-21"), [
-    { particular: "Prawn", qtyKg: 20, pricePerKg: 450 },
-    { particular: "Mackerel", qtyKg: 50, pricePerKg: 120 },
-  ]);
+  await purchase({
+    type: "SOCIETY",
+    billNo: "S-114",
+    paid: true,
+    on: date("2026-07-20"),
+    lines: [
+      { boat: "Boat No. 12", particular: "Prawn", qtyKg: 60, pricePerKg: 500 },
+      { boat: "Boat No. 7", particular: "Seer Fish", qtyKg: 30, pricePerKg: 500 },
+    ],
+  });
+  await purchase({
+    type: "KFDC",
+    billNo: "K-207",
+    paid: true,
+    on: date("2026-07-21"),
+    lines: [
+      { boat: "Boat No. 7", particular: "Sardine", qtyKg: 400, pricePerKg: 80 },
+    ],
+  });
+  await purchase({
+    type: "PRIVATE",
+    seller: "Ravi Traders",
+    billNo: "INV-31",
+    paid: false,
+    on: date("2026-07-21"),
+    lines: [
+      { particular: "Pomfret", qtyKg: 25, pricePerKg: 740 },
+    ],
+  });
+  // Two Local sellers on the same day: each keeps their own balance, which is
+  // the whole point of them no longer sharing one "Local Individuals" account.
+  await purchase({
+    type: "LOCAL",
+    seller: "Ramesh",
+    paid: true,
+    on: date("2026-07-21"),
+    lines: [
+      { particular: "Prawn", qtyKg: 20, pricePerKg: 450 },
+      { particular: "Mackerel", qtyKg: 50, pricePerKg: 120 },
+    ],
+  });
+  await purchase({
+    type: "LOCAL",
+    seller: "Raju",
+    paid: false,
+    on: date("2026-07-22"),
+    lines: [{ particular: "Anchovy", qtyKg: 120, pricePerKg: 90 }],
+  });
 
   // --- Expenses (BFM · Centre 1) ---
   async function expense(

@@ -17,13 +17,16 @@ export type Session = {
 };
 
 // ---------------------------------------------------------------------------
-// Permission model — the single source of truth. Three roles:
+// Permission model — the single source of truth. Four roles:
 //
-//   ADMIN      everything, and the only role that may change an existing voucher
-//   ACCOUNTANT enters vouchers and manages parties; cannot edit a voucher once
-//              it is saved
-//   AUDITOR    read-only; no voucher menu, reaches vouchers only by drilling
-//              down from a ledger
+//   SUPER_ADMIN everything an admin can do, plus the operations that undo or
+//               destroy: un-archiving a master, and deleting one outright
+//   ADMIN       runs the books — everything else, and the lowest role that may
+//               change an existing voucher
+//   ACCOUNTANT  enters vouchers and manages parties; cannot edit a voucher once
+//               it is saved
+//   AUDITOR     read-only; no voucher menu, reaches vouchers only by drilling
+//               down from a ledger
 //
 // UI gating and server-side enforcement both read these, so a hidden button and
 // a rejected action can never disagree.
@@ -31,10 +34,11 @@ export type Session = {
 
 /** May create vouchers, and add/edit parties. */
 export const canEnter = (role: Role): boolean =>
-  role === "ADMIN" || role === "ACCOUNTANT";
+  role === "SUPER_ADMIN" || role === "ADMIN" || role === "ACCOUNTANT";
 
-/** May change or correct a voucher that already exists. Admin only. */
-export const canEdit = (role: Role): boolean => role === "ADMIN";
+/** May change or correct a voucher that already exists. Admin and above. */
+export const canEdit = (role: Role): boolean =>
+  role === "SUPER_ADMIN" || role === "ADMIN";
 
 /**
  * May ask an admin to correct a voucher.
@@ -46,8 +50,22 @@ export const canEdit = (role: Role): boolean => role === "ADMIN";
  */
 export const canRequestReview = (role: Role): boolean => role === "ACCOUNTANT";
 
-/** May manage users and centres. Admin only. */
-export const canAdminister = (role: Role): boolean => role === "ADMIN";
+/** May manage users and centres, and retire a master. Admin and above. */
+export const canAdminister = (role: Role): boolean =>
+  role === "SUPER_ADMIN" || role === "ADMIN";
+
+/**
+ * May un-archive a master, and delete one for real.
+ *
+ * The split from canAdminister is the whole point of the role. An admin running
+ * the books can retire a centre or a party they have finished with — that is
+ * ordinary housekeeping and it destroys nothing. Bringing one back is not
+ * ordinary: it puts a name the merchant chose to remove back into every picker,
+ * and where a party is concerned it revives a ledger. Deleting is narrower
+ * still and cannot be undone at all. Both belong to whoever owns the system.
+ */
+export const canSuperAdminister = (role: Role): boolean =>
+  role === "SUPER_ADMIN";
 
 /**
  * May read analytics — the dashboard, the reports section and the union view.
@@ -58,7 +76,7 @@ export const canAdminister = (role: Role): boolean => role === "ADMIN";
  * to record a payment or a receipt correctly.
  */
 export const canViewReports = (role: Role): boolean =>
-  role === "ADMIN" || role === "AUDITOR";
+  role === "SUPER_ADMIN" || role === "ADMIN" || role === "AUDITOR";
 
 /**
  * The first screen a role is allowed to see. Used for sign-in and for the
@@ -158,6 +176,22 @@ export async function requireAdmin(): Promise<Session> {
   if (!canAdminister(session.role)) {
     throw new Error(
       "Only an administrator can change or remove an existing record."
+    );
+  }
+  return session;
+}
+
+/**
+ * For the operations that undo or destroy — un-archiving a master, deleting
+ * one. Super admin only, and enforced here rather than only in the UI: the
+ * merchant's screens never render these buttons, so anything reaching this
+ * point is a hand-made request.
+ */
+export async function requireSuperAdmin(): Promise<Session> {
+  const session = await requireSession();
+  if (!canSuperAdminister(session.role)) {
+    throw new Error(
+      "Only the system owner can restore or permanently delete a master record."
     );
   }
   return session;

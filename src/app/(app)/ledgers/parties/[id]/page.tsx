@@ -3,13 +3,14 @@ import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { LedgerSourceType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { ledgerSectionFor, PARTY_TYPE_LABELS } from "@/lib/party";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import { DateWindow, Pager } from "../../../list-controls";
 import { NoCentreNotice } from "../../../no-centre";
+import { SettleLink } from "../../settle-link";
 
 const SOURCE_LABELS: Record<LedgerSourceType, string> = {
   PURCHASE: "Purchase",
@@ -27,7 +28,9 @@ export default async function PartyStatementPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<SearchParams>;
 }) {
-  await requireSession();
+  const session = await requireSession();
+  // Auditors read statements but never post a voucher from one.
+  const mayEnter = canEnter(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
   const { id } = await params;
@@ -74,11 +77,17 @@ export default async function PartyStatementPage({
       where: { id: { in: sourceIds } },
       select: { id: true },
     }),
-    // The boat comes back with the purchase so the statement can name the
-    // vessel on each line — the whole point of moving the ledger to the group.
+    // The boats come back with the purchase so the statement can name the
+    // vessels on each line — the whole point of moving the ledger to the group.
+    // Bounded by the page size, so this stays one indexed IN(…) read however
+    // long the statement is.
     prisma.purchase.findMany({
       where: { id: { in: sourceIds } },
-      select: { id: true, boat: { select: { name: true } } },
+      select: {
+        id: true,
+        boat: { select: { name: true } },
+        lines: { select: { boat: { select: { name: true } } } },
+      },
     }),
     prisma.expense.findMany({
       where: { id: { in: sourceIds } },
@@ -90,10 +99,21 @@ export default async function PartyStatementPage({
     }),
   ]);
 
+  // One Society bill covers several vessels, so the column lists whichever
+  // ones this bill names, de-duplicated. `p.boat` is the header field older
+  // purchases used before boats moved onto the line.
   const boatBySource = new Map(
     purchases
-      .filter((p) => p.boat)
-      .map((p) => [p.id, p.boat!.name] as const)
+      .map((p) => {
+        const fromLines = [
+          ...new Set(
+            p.lines.map((l) => l.boat?.name).filter((n): n is string => !!n)
+          ),
+        ];
+        const label = fromLines.length > 0 ? fromLines.join(", ") : p.boat?.name;
+        return [p.id, label] as const;
+      })
+      .filter((e): e is readonly [string, string] => !!e[1])
   );
   // A purchase party's ledger is the only place a Boat column earns its keep;
   // a vendor or buyer statement would just show an empty column on every row.
@@ -164,6 +184,16 @@ export default async function PartyStatementPage({
           )}
           {balance.lessThan(0) && (
             <div className="text-credit text-[12px]">we owe them</div>
+          )}
+          {/* Settle straight from the statement — the balance above is exactly
+              the figure being acted on, so this is where the decision is made. */}
+          {mayEnter && (
+            <SettleLink
+              partyId={party.id}
+              partyType={party.type}
+              balance={balance}
+              className="inline-block mt-1 text-[12px]"
+            />
           )}
         </div>
       </div>

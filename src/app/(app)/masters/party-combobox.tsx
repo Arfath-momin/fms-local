@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { PartyType } from "@/generated/prisma/enums";
+import type { PartyType, PurchaseType } from "@/generated/prisma/enums";
 import { PARTY_TYPE_LABELS } from "@/lib/party";
 
 export type PartyOption = {
@@ -29,18 +29,28 @@ export function PartyCombobox({
   name,
   label,
   types,
+  purchaseKind,
   defaultValue = "",
   defaultType,
   typeFieldName,
   required = true,
   placeholder,
   onSelect,
+  value,
+  onValueChange,
+  compact = false,
 }: {
   /** Form field name carrying the chosen party name. */
   name: string;
   label: string;
   /** Party kinds to search within. */
   types: PartyType[];
+  /**
+   * Narrows PURCHASE_GROUP suggestions to the sellers of one purchase type, so
+   * a Private bill does not offer KFDC and every local seller. Parties with no
+   * kind on record still appear under all of them.
+   */
+  purchaseKind?: PurchaseType;
   defaultValue?: string;
   /** Pre-selected party kind for a newly created party. */
   defaultType?: PartyType;
@@ -49,9 +59,28 @@ export function PartyCombobox({
   required?: boolean;
   placeholder?: string;
   onSelect?: (party: PartyOption | null) => void;
+  /**
+   * Controlled mode. Leave unset and the picker keeps its own text, which is
+   * what a standalone field wants. Set it when the caller owns the value —
+   * a repeating row, where deleting row 2 has to move row 3's name up with it
+   * rather than leaving the text behind in a recycled component.
+   */
+  value?: string;
+  onValueChange?: (value: string) => void;
+  /**
+   * Strip the label and the hint paragraph, for use inside a table cell where
+   * the column header already says what the field is.
+   */
+  compact?: boolean;
 }) {
   const listId = useId();
-  const [query, setQuery] = useState(defaultValue);
+  const [uncontrolled, setUncontrolled] = useState(defaultValue);
+  const controlled = value !== undefined;
+  const query = controlled ? value : uncontrolled;
+  const setQuery = (next: string) => {
+    if (!controlled) setUncontrolled(next);
+    onValueChange?.(next);
+  };
   const [options, setOptions] = useState<PartyOption[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -76,6 +105,7 @@ export function PartyCombobox({
       if (!cancelled) setLoading(true);
       try {
         const params = new URLSearchParams({ q: query, types: typesKey });
+        if (purchaseKind) params.set("purchaseKind", purchaseKind);
         const res = await fetch(`/api/parties/search?${params}`);
         if (!res.ok) throw new Error("search failed");
         const data = (await res.json()) as { parties: PartyOption[] };
@@ -91,7 +121,7 @@ export function PartyCombobox({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, typesKey]);
+  }, [query, typesKey, purchaseKind]);
 
   // Close when focus leaves the whole control, not just the input, or clicking
   // an option would dismiss the list before the click registers.
@@ -118,15 +148,18 @@ export function PartyCombobox({
 
   return (
     <div ref={boxRef} className="relative">
-      <label
-        htmlFor={listId}
-        className="block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1"
-      >
-        {label}
-      </label>
+      {!compact && (
+        <label
+          htmlFor={listId}
+          className="block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1"
+        >
+          {label}
+        </label>
+      )}
       <input
         id={listId}
         name={name}
+        aria-label={compact ? label : undefined}
         value={query}
         required={required}
         autoComplete="off"
@@ -137,7 +170,10 @@ export function PartyCombobox({
           onSelect?.(null);
         }}
         onFocus={() => setOpen(true)}
-        className="w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+        className={
+          "w-full border border-line-strong bg-surface text-sm outline-none focus:border-accent " +
+          (compact ? "px-2 py-1.5" : "px-3 py-2")
+        }
       />
       {typeFieldName && (
         <input type="hidden" name={typeFieldName} value={chosenType} />
@@ -218,10 +254,12 @@ export function PartyCombobox({
         </div>
       )}
 
-      <p className="text-muted text-[12px] mt-1">
-        A name that isn’t in the master yet is added automatically when the
-        voucher is saved.
-      </p>
+      {!compact && (
+        <p className="text-muted text-[12px] mt-1">
+          A name that isn’t in the master yet is added automatically when the
+          voucher is saved.
+        </p>
+      )}
     </div>
   );
 }

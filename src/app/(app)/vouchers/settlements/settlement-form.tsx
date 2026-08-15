@@ -14,6 +14,7 @@ import {
 import type { FormScope } from "@/lib/scope";
 import { PartyCombobox, type PartyOption } from "../../masters/party-combobox";
 import { ScopeFields } from "../scope-fields";
+import { DateField } from "../../date-field";
 import type { SettlementFormState } from "./actions";
 
 const inputCls =
@@ -35,6 +36,7 @@ export function SettlementForm({
   kind,
   action,
   initial,
+  initialParty,
   submitLabel,
   scope,
 }: {
@@ -43,7 +45,20 @@ export function SettlementForm({
     prev: SettlementFormState,
     formData: FormData
   ) => Promise<SettlementFormState>;
-  initial?: SettlementInit;
+  /**
+   * Partial because a settlement reached from a ledger arrives knowing only
+   * who it is for — every other field below already falls back to its own
+   * default, so there is nothing for the caller to invent.
+   */
+  initial?: Partial<SettlementInit>;
+  /**
+   * The party this voucher was opened against, balance included, when it was
+   * reached from a ledger. Seeds the position panel so it is on screen from the
+   * first paint — filling only the *name* would show a picked party with no
+   * balance beside it, and the merchant would have to re-pick them to see the
+   * figure they had just clicked.
+   */
+  initialParty?: PartyOption;
   submitLabel: string;
   scope: FormScope;
 }) {
@@ -51,7 +66,7 @@ export function SettlementForm({
     SettlementFormState,
     FormData
   >(action, null);
-  const [party, setParty] = useState<PartyOption | null>(null);
+  const [party, setParty] = useState<PartyOption | null>(initialParty ?? null);
   const [amount, setAmount] = useState(initial?.amount ?? "");
   const today = businessToday();
 
@@ -135,10 +150,9 @@ export function SettlementForm({
           <label htmlFor="date" className={labelCls}>
             Date
           </label>
-          <input
+          <DateField
             id="date"
             name="date"
-            type="date"
             required
             defaultValue={initial?.date ?? today}
             className={inputCls}

@@ -144,6 +144,9 @@ export default async function ExpenseDetailPage({
         initial={initial}
         submitLabel="Save Changes"
         scope={scopeFieldValues({ company, centre })}
+        // The Attachments panel below is the single place images are managed
+        // once the voucher exists.
+        allowBillUpload={false}
       />
       {meta}
       {panel}

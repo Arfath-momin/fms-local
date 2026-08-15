@@ -22,9 +22,20 @@ const LINKS: { href: string; label: string; roles?: Role[] }[] = [
   { href: "/admin/users", label: "Users", roles: ["ADMIN"] },
 ];
 
+/**
+ * SUPER_ADMIN is a strict superset of ADMIN, so it matches anywhere ADMIN does
+ * rather than being listed on every row above. Spelling it out per link would
+ * mean one forgotten entry hides a whole section from the system owner — and a
+ * role that sees no links at all has no way back except a typed URL.
+ */
+const canSee = (roles: Role[] | undefined, role: Role): boolean =>
+  !roles ||
+  roles.includes(role) ||
+  (role === "SUPER_ADMIN" && roles.includes("ADMIN"));
+
 export function NavLinks({ role }: { role: Role }) {
   const pathname = usePathname();
-  const visible = LINKS.filter((l) => !l.roles || l.roles.includes(role));
+  const visible = LINKS.filter((l) => canSee(l.roles, role));
 
   return (
     <nav className="py-2">

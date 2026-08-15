@@ -3,12 +3,23 @@ import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { SETTLEMENT_KIND_BLURBS, SETTLEMENT_KIND_LABELS } from "@/lib/settlement";
 import { createSettlement } from "../../settlements/actions";
 import { SettlementForm } from "../../settlements/settlement-form";
+import { prefilledParty } from "../../settlements/prefill";
 import { NoCentreNotice } from "../../../no-centre";
 
-export default async function Page() {
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<{ partyId?: string }>;
+}) {
   await requireEntry();
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
+
+  // Arrives set when this was reached from a ledger's "Record receipt".
+  const party = await prefilledParty("RECEIPT", (await searchParams).partyId, {
+    companyId: company.id,
+    centreId: centre.id,
+  });
 
   return (
     <div>
@@ -24,6 +35,8 @@ export default async function Page() {
       <SettlementForm
         kind="RECEIPT"
         action={createSettlement.bind(null, "RECEIPT")}
+        initial={party && { partyName: party.name, partyType: party.type }}
+        initialParty={party}
         submitLabel="Save RECEIPT"
         scope={scopeFieldValues({ company, centre })}
       />

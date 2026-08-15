@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
 import { requireReports } from "@/lib/session";
+import { getActiveCompany, getCompanies } from "@/lib/company";
 import { computeUnion } from "@/lib/report";
 import { businessTodayDate, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { DateField } from "../date-field";
 
-type SearchParams = { from?: string; to?: string };
+type SearchParams = { from?: string; to?: string; company?: string };
 
 function parseRange(sp: SearchParams) {
   const today = businessTodayDate();
@@ -29,12 +31,28 @@ export default async function UnionPage({
   await requireReports();
   const sp = await searchParams;
   const { from, to } = parseRange(sp);
-  const u = await computeUnion(from, to);
+
+  // One company at a time. BFM and B2B are separate businesses — a figure
+  // spanning both is nobody's number — so the screen shows whichever one is
+  // selected, defaulting to the company being worked in. The toggle below
+  // switches it without disturbing the app-wide company cookie, so looking at
+  // B2B's month here does not move the user's entry scope.
+  const companies = await getCompanies();
+  const active = await getActiveCompany();
+  const selected =
+    companies.find((c) => c.id === sp.company) ?? active ?? companies[0];
+
+  const u = await computeUnion(from, to, selected?.id ?? null);
 
   const now = businessTodayDate();
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   const iso = (d: Date) => toInputDate(d);
+  const link = (p: { from: string; to: string; company?: string }) => {
+    const params = new URLSearchParams({ from: p.from, to: p.to });
+    if (p.company) params.set("company", p.company);
+    return `/union?${params}`;
+  };
   const presets = [
     { label: "Today", from: iso(now), to: iso(now) },
     { label: "This month", from: iso(new Date(Date.UTC(y, m, 1))), to: iso(new Date(Date.UTC(y, m + 1, 0))) },
@@ -47,31 +65,56 @@ export default async function UnionPage({
         <div>
           <h1 className="heading text-xl font-semibold">Union Dashboard</h1>
           <p className="text-muted text-[13px]">
-            All companies and centres together · {fmtDate(from)} → {fmtDate(to)}
+            {selected?.name ?? "No company"} · every centre together ·{" "}
+            {fmtDate(from)} → {fmtDate(to)}
           </p>
         </div>
         <form method="GET" className="flex items-end gap-2">
+          <input type="hidden" name="company" value={selected?.id ?? ""} />
           <div>
             <label htmlFor="from" className="block text-[11px] uppercase tracking-wide text-muted font-semibold mb-1">From</label>
-            <input id="from" name="from" type="date" defaultValue={toInputDate(from)} className="border border-line-strong bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent" />
+            <DateField id="from" name="from" defaultValue={toInputDate(from)} className="border border-line-strong bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent" />
           </div>
           <div>
             <label htmlFor="to" className="block text-[11px] uppercase tracking-wide text-muted font-semibold mb-1">To</label>
-            <input id="to" name="to" type="date" defaultValue={toInputDate(to)} className="border border-line-strong bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent" />
+            <DateField id="to" name="to" defaultValue={toInputDate(to)} className="border border-line-strong bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent" />
           </div>
           <button type="submit" className="bg-accent text-white px-3 py-1.5 text-[13px] font-semibold">Show</button>
         </form>
       </div>
 
-      <div className="flex gap-2 mb-5">
+      <div className="flex gap-2 mb-5 flex-wrap items-center">
         {presets.map((p) => (
-          <Link key={p.label} href={`/union?from=${p.from}&to=${p.to}`} className="border border-line-strong bg-surface px-3 py-1 text-[12px] font-semibold hover:border-accent">
+          <Link
+            key={p.label}
+            href={link({ from: p.from, to: p.to, company: selected?.id })}
+            className="border border-line-strong bg-surface px-3 py-1 text-[12px] font-semibold hover:border-accent"
+          >
             {p.label}
           </Link>
         ))}
+        {companies.length > 1 && (
+          <span className="flex gap-2 ml-auto">
+            {companies.map((c) => (
+              <Link
+                key={c.id}
+                href={link({ from: iso(from), to: iso(to), company: c.id })}
+                aria-current={c.id === selected?.id ? "page" : undefined}
+                className={
+                  "border px-3 py-1 text-[12px] font-semibold " +
+                  (c.id === selected?.id
+                    ? "bg-accent text-white border-accent"
+                    : "border-line-strong bg-surface hover:border-accent")
+                }
+              >
+                {c.name}
+              </Link>
+            ))}
+          </span>
+        )}
       </div>
 
-      {/* Grand total */}
+      {/* Company total */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <Stat label="Total Sale" value={u.total.sale} cls="text-credit" />
         <Stat label="Total Purchase" value={u.total.purchase} cls="text-debit" />
@@ -130,8 +173,8 @@ export default async function UnionPage({
       ))}
       <p className="text-muted text-[12px]">
         Profit = Sale − (Purchase + Expense). Per-centre profit is not shown —
-        purchase and sale are split across centres, so only company and union
-        profit are meaningful.
+        purchase and sale are split across centres, so only the company figure
+        is meaningful. Use the toggle above to read the other company.
       </p>
     </div>
   );

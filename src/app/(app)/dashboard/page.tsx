@@ -162,7 +162,7 @@ export default async function DashboardPage() {
           valueCls={pfCls}
         />
         <Tile
-          href="/ledgers/parties"
+          href="/ledgers/outstanding"
           label="Outstanding"
           value={fmtMoney(outstanding)}
           sub={

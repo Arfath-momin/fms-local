@@ -32,12 +32,16 @@ export const PARTY_TYPES = Object.keys(PARTY_TYPE_LABELS) as PartyType[];
  * Name registries, not ledgers.
  *
  * A boat is *where the fish came from*, not *who the money is owed to* — the
- * business settles with Society, KFDC or the private owner, and which vessel
- * landed the catch is a detail on the line. Same for the "Name" on a Local
- * purchase. These are kept as Party rows purely so the name can be picked from
- * a list instead of retyped, and so a statement row can name the vessel.
- * Nothing ever posts a LedgerEntry against them, so listing them among the
- * ledgers only produced a screenful of permanently-zero balances.
+ * business settles with Society or KFDC, and which vessel landed the catch is a
+ * detail on the line. Boats are kept as Party rows purely so the name can be
+ * picked from a list instead of retyped, and so a statement row can name the
+ * vessel. Nothing ever posts a LedgerEntry against them, so listing them among
+ * the ledgers only produced a screenful of permanently-zero balances.
+ *
+ * LOCAL_SELLER is here for the same reason it always was, but it is now a dead
+ * type: a Local seller is a real counterparty and gets a PURCHASE_GROUP ledger
+ * of their own (see FIXED_PURCHASE_PARTY). Only rows written before that change
+ * still carry the type, and they never had entries either.
  */
 export const RECORD_ONLY_PARTY_TYPES: PartyType[] = ["BOAT", "LOCAL_SELLER"];
 
@@ -80,34 +84,39 @@ export function ledgerSectionFor(type: PartyType): {
 }
 
 /**
- * The party type of the *boat or seller* named on a purchase. Society / KFDC /
- * Private name the individual BOAT; Local names the seller ("Name").
- *
- * Recorded on the purchase for display only — see RECORD_ONLY_PARTY_TYPES.
- */
-export const PURCHASE_BOAT_TYPE: Record<PurchaseType, PartyType> = {
-  SOCIETY: "BOAT",
-  KFDC: "BOAT",
-  PRIVATE: "BOAT",
-  LOCAL: "LOCAL_SELLER",
-};
-
-/**
  * The ledger a purchase posts to, for the types where the type itself fixes it.
  *
  * Society is one counterparty and KFDC is another, however many boats each
- * sends; Local purchases are settled on the spot and roll up into one account.
- * PRIVATE is deliberately absent — there is no single private counterparty, so
- * the party is typed on the voucher and gets its own ledger (see
- * purchasePartyIsTyped). Money is owed to the party, never to the vessel.
+ * sends. PRIVATE and LOCAL are deliberately absent: there is no single private
+ * or local counterparty, so the seller is named on the voucher and gets a
+ * ledger of their own (see purchasePartyIsTyped).
+ *
+ * LOCAL used to map to one shared "Local Individuals" account. That was wrong —
+ * if Ravi sells us ₹40,000 of fish and Raju sells us ₹50,000, we owe Ravi
+ * ₹40,000 and Raju ₹50,000, not ₹90,000 to a group that cannot be paid. The
+ * seller's name was already being captured; it just had nowhere to post.
  */
 export const FIXED_PURCHASE_PARTY: Partial<Record<PurchaseType, string>> = {
   SOCIETY: "Society",
   KFDC: "KFDC",
-  LOCAL: "Local Individuals",
 };
 
-/** True when the purchase form must ask for the party name (Private only). */
+/**
+ * True when the purchase form must ask who the money is owed to — Private and
+ * Local, the two types that buy from a different individual each time.
+ */
 export function purchasePartyIsTyped(type: PurchaseType): boolean {
   return !FIXED_PURCHASE_PARTY[type];
+}
+
+/**
+ * True when each line of the bill names its own boat.
+ *
+ * A Society or KFDC bill covers whatever vessels landed that day, so the boat
+ * belongs on the line, not in the header. Private and Local bills are one
+ * seller's own catch — the seller is the purchase's party, and there is no
+ * separate vessel to record.
+ */
+export function purchaseHasLineBoats(type: PurchaseType): boolean {
+  return !purchasePartyIsTyped(type);
 }

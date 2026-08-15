@@ -17,6 +17,11 @@ const ITEMS = [
     analytics: true,
   },
   {
+    href: "/ledgers/outstanding",
+    label: "Outstanding",
+    desc: "Every open balance, split into who owes us and who we owe, with a net position.",
+  },
+  {
     href: "/ledgers/purchase-parties",
     label: "Purchase Parties",
     desc: "Who we buy from and what is still owed — Society, KFDC, private parties, Local Individuals. Boats show inside, on the line.",

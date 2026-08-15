@@ -4,11 +4,12 @@ import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { ExpenseFormState } from "./actions";
 import type { ExpenseCategory } from "@/generated/prisma/enums";
-import { EXPENSE_CATEGORIES, EXPENSE_SPECS } from "@/lib/expense";
+import { EXPENSE_CATEGORIES, EXPENSE_SPECS, expensePrepaid } from "@/lib/expense";
 import { businessToday, fmtMoney } from "@/lib/format";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
+import { DateField } from "../../date-field";
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -29,6 +30,7 @@ export function ExpenseForm({
   submitLabel,
   reasonField,
   existingAttachments = 0,
+  allowBillUpload = true,
   scope,
 }: {
   action: (
@@ -39,6 +41,8 @@ export function ExpenseForm({
   submitLabel: string;
   reasonField?: boolean;
   existingAttachments?: number;
+  /** False once the voucher exists — the Attachments panel handles images then. */
+  allowBillUpload?: boolean;
   scope: FormScope;
 }) {
   const [state, formAction, pending] = useActionState<ExpenseFormState, FormData>(
@@ -64,6 +68,10 @@ export function ExpenseForm({
     if (spec.totalField) return Number(details[spec.totalField]) || 0;
     return 0;
   }, [spec, details]);
+
+  // What has already been handed over against this total, and what is left.
+  const prepaid = expensePrepaid(category, details);
+  const balance = (computedTotal ?? 0) - prepaid;
 
   const setField = (name: string, value: string) =>
     setDetails((d) => ({ ...d, [name]: value }));
@@ -95,10 +103,9 @@ export function ExpenseForm({
           <label htmlFor="date" className={labelCls}>
             Date
           </label>
-          <input
+          <DateField
             id="date"
             name="date"
-            type="date"
             required
             defaultValue={initial?.date ?? today}
             className={inputCls}
@@ -145,11 +152,41 @@ export function ExpenseForm({
           />
         </div>
       ) : (
-        <div className="flex items-center justify-between border border-line-strong bg-surface px-3 py-2 max-w-xs">
-          <span className={labelCls + " mb-0"}>Total</span>
-          <span className="num text-debit font-semibold">
-            {fmtMoney(computedTotal ?? 0)}
-          </span>
+        <div className="border border-line-strong bg-surface px-3 py-2 max-w-xs">
+          <div className="flex items-center justify-between">
+            <span className={labelCls + " mb-0"}>Total</span>
+            <span className="num text-debit font-semibold">
+              {fmtMoney(computedTotal ?? 0)}
+            </span>
+          </div>
+
+          {/* Vehicle rent is agreed as one figure and paid in pieces. Showing
+              what is left as it is typed is the number the merchant actually
+              acts on — it becomes the vendor's outstanding balance on save,
+              settled later from Payments. */}
+          {spec.prepaidFrom && prepaid > 0 && (
+            <>
+              <div className="flex items-center justify-between border-t border-line mt-1 pt-1 text-[13px]">
+                <span className="text-muted">Already paid</span>
+                <span className="num text-credit">{fmtMoney(prepaid)}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-line mt-1 pt-1 text-[13px]">
+                <span className="font-semibold">Balance to pay</span>
+                <span
+                  className={`num font-semibold ${
+                    balance < 0 ? "text-debit" : ""
+                  }`}
+                >
+                  {fmtMoney(balance)}
+                </span>
+              </div>
+              {balance < 0 && (
+                <p className="text-debit text-[12px] mt-1">
+                  Already paid is more than the total — check the figures.
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -167,11 +204,13 @@ export function ExpenseForm({
         />
       </div>
 
-      <BillUpload
-        label="Bill / Receipt"
-        hint="Optional."
-        existingCount={existingAttachments}
-      />
+      {allowBillUpload && (
+        <BillUpload
+          label="Bill / Receipt"
+          hint="Optional."
+          existingCount={existingAttachments}
+        />
+      )}
 
       {reasonField && (
         <div>

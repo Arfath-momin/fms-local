@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PAGE_SIZE, listHref, type ListWindow } from "@/lib/paging";
+import { DateField } from "./date-field";
 
 // Shared controls for the voucher and ledger lists. Both are plain server
 // components: the filter is a GET form and the pager is a pair of links, so the
@@ -21,8 +22,8 @@ export function DateWindow({
     >
       <label className="flex flex-col gap-1">
         <span className="text-muted text-[12px]">From</span>
-        <input
-          type="date"
+        <DateField
+          
           name="from"
           defaultValue={w.from}
           className="border border-line-strong bg-surface px-2 py-1"
@@ -30,8 +31,8 @@ export function DateWindow({
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-muted text-[12px]">To</span>
-        <input
-          type="date"
+        <DateField
+          
           name="to"
           defaultValue={w.to}
           className="border border-line-strong bg-surface px-2 py-1"

@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import type { Role } from "@/generated/prisma/enums";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import {
   createUser,
   resetPassword,
@@ -103,7 +104,7 @@ export function CreateUserForm() {
             name="password"
             type="text"
             autoComplete="new-password"
-            minLength={12}
+            minLength={MIN_PASSWORD_LENGTH}
             className="w-full border border-line-strong bg-background px-2 py-1.5 text-sm outline-none focus:border-accent"
           />
         </label>
@@ -156,22 +157,69 @@ export function RoleForm({ userId, role }: { userId: string; role: Role }) {
   );
 }
 
+/**
+ * Reset in two steps: a link, then a field.
+ *
+ * The field stays hidden until the link is clicked so the common case — "just
+ * give them a new one" — is still a single click, while an admin who wants to
+ * set a password they can read down the phone has somewhere to type it. Blank
+ * generates, exactly as it does when creating an account.
+ */
 export function ResetPasswordForm({ userId }: { userId: string }) {
   const [state, action, pending] = useActionState<UserFormState, FormData>(
     resetPassword,
     null
   );
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return (
+      <div>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-accent underline underline-offset-2 text-[12px]"
+        >
+          Reset password
+        </button>
+        <Result state={state} />
+      </div>
+    );
+  }
 
   return (
-    <form action={action}>
+    <form action={action} className="min-w-52">
       <input type="hidden" name="userId" value={userId} />
-      <button
-        type="submit"
-        disabled={pending}
-        className="text-accent underline underline-offset-2 text-[12px] disabled:opacity-60"
-      >
-        {pending ? "Resetting…" : "Reset password"}
-      </button>
+      <label className="block">
+        <span className="block text-[11px] font-semibold text-muted mb-1">
+          New password{" "}
+          <span className="font-normal">— blank generates one</span>
+        </span>
+        <input
+          name="password"
+          type="text"
+          autoComplete="new-password"
+          minLength={MIN_PASSWORD_LENGTH}
+          placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
+          className="w-full border border-line-strong bg-background px-2 py-1 text-[12px] outline-none focus:border-accent"
+        />
+      </label>
+      <div className="flex gap-2 mt-1.5">
+        <button
+          type="submit"
+          disabled={pending}
+          className="text-accent font-semibold underline underline-offset-2 text-[12px] disabled:opacity-60"
+        >
+          {pending ? "Resetting…" : "Set password"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="text-muted underline underline-offset-2 text-[12px]"
+        >
+          Cancel
+        </button>
+      </div>
       <Result state={state} />
     </form>
   );

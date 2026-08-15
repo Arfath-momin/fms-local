@@ -8,6 +8,7 @@ import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { businessTodayDate, fmtMoney, toInputDate } from "@/lib/format";
+import { DateField } from "../../date-field";
 
 const ZERO = new Prisma.Decimal(0);
 
@@ -49,10 +50,10 @@ export default async function DayBookPage({
           >
             Date
           </label>
-          <input
+          <DateField
             id="date"
             name="date"
-            type="date"
+            
             defaultValue={toInputDate(date)}
             className="border border-line-strong bg-surface px-3 py-1.5 text-sm outline-none focus:border-accent"
           />

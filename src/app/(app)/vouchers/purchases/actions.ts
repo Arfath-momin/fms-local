@@ -7,7 +7,7 @@ import type { PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
-import { FIXED_PURCHASE_PARTY, PURCHASE_BOAT_TYPE } from "@/lib/party";
+import { FIXED_PURCHASE_PARTY, purchaseHasLineBoats } from "@/lib/party";
 import { findOrCreateParty } from "@/lib/party-db";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { clearErrorFlag } from "@/lib/errorflag";
@@ -25,6 +25,8 @@ export type PurchaseFormState = { error: string } | null;
 const PURCHASE_TYPES: PurchaseType[] = ["SOCIETY", "KFDC", "PRIVATE", "LOCAL"];
 
 type ParsedLine = {
+  /** Society / KFDC only; null on a Private or Local row. */
+  boatName: string | null;
   particular: string;
   qtyKg: Prisma.Decimal;
   pricePerKg: Prisma.Decimal;
@@ -35,8 +37,7 @@ type Parsed = {
   type: PurchaseType;
   /** The ledger this purchase settles against. */
   partyName: string;
-  /** The boat (Society/KFDC/Private) or seller (Local) — recorded, not a ledger. */
-  boatName: string;
+  billNo: string | null;
   amount: Prisma.Decimal;
   date: Date;
   lines: ParsedLine[];
@@ -51,78 +52,116 @@ const clean = (v: FormDataEntryValue | null) =>
 const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
 const DECIMAL3 = /^\d+(\.\d{1,3})?$/;
 
+/**
+ * Every purchase type is itemised, and the grand total is always the sum of the
+ * rows — never read from the form. A typed total could disagree with the lines
+ * beneath it, and the ledger would then carry a figure the bill does not
+ * support.
+ */
 function parse(formData: FormData): { error: string } | { data: Parsed } {
   const type = String(formData.get("type") ?? "") as PurchaseType;
-  const boatName = clean(formData.get("boatName"));
   const dateRaw = String(formData.get("date") ?? "");
   const file = formData.get("bill");
 
   if (!PURCHASE_TYPES.includes(type))
     return { error: "Choose a purchase type." };
-  if (!boatName)
-    return {
-      error: type === "LOCAL" ? "Enter the seller name." : "Enter the boat name.",
-    };
 
-  // Society / KFDC / Local settle against one standing account each, so the
-  // type names the ledger. Private has no single counterparty — the party is
-  // typed and carries its own ledger, with the boat alongside it as detail.
+  // Society and KFDC settle against one standing account each, so the type
+  // names the ledger. Private and Local buy from a different individual every
+  // time, so the name is typed and that person carries their own ledger.
   const fixed = FIXED_PURCHASE_PARTY[type];
   const partyName = fixed ?? clean(formData.get("partyName"));
-  if (!partyName) return { error: "Enter the party name." };
+  if (!partyName) return { error: "Enter the name this bill is owed to." };
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
 
   const badFile = validateImageFile(file);
   if (badFile) return { error: badFile };
 
+  const billNo = clean(formData.get("billNo")) || null;
   const date = new Date(dateRaw);
+  // Only Society / KFDC rows carry a boat, so on the other two the field is not
+  // rendered at all and getAll() returns an empty list that indexes to "".
+  const wantsBoats = purchaseHasLineBoats(type);
+  const boatNames = formData.getAll("boatName").map(String);
+  const particulars = formData.getAll("particular").map(String);
+  const qtys = formData.getAll("qtyKg").map(String);
+  const prices = formData.getAll("pricePerKg").map(String);
 
-  if (type === "LOCAL") {
-    const particulars = formData.getAll("particular").map(String);
-    const qtys = formData.getAll("qtyKg").map(String);
-    const prices = formData.getAll("pricePerKg").map(String);
-    const lines: ParsedLine[] = [];
-    for (let i = 0; i < particulars.length; i++) {
-      const particular = particulars[i].trim().replace(/\s+/g, " ");
-      const qtyRaw = (qtys[i] ?? "").trim();
-      const priceRaw = (prices[i] ?? "").trim();
-      // Skip fully-blank rows the form may submit.
-      if (!particular && !qtyRaw && !priceRaw) continue;
-      if (!particular) return { error: "Every line needs a particular." };
-      if (!DECIMAL3.test(qtyRaw) || Number(qtyRaw) <= 0)
-        return { error: `Quantity for “${particular}” must be a positive number.` };
-      if (!DECIMAL2.test(priceRaw))
-        return { error: `Price for “${particular}” must be a number.` };
-      const qtyKg = new Prisma.Decimal(qtyRaw);
-      const pricePerKg = new Prisma.Decimal(priceRaw);
-      lines.push({
-        particular,
-        qtyKg,
-        pricePerKg,
-        total: qtyKg.mul(pricePerKg),
-      });
-    }
-    if (lines.length === 0)
-      return { error: "Add at least one line item." };
-    const amount = lines.reduce((a, l) => a.add(l.total), new Prisma.Decimal(0));
-    return { data: { type, partyName, boatName, amount, date, lines, file } };
+  const lines: ParsedLine[] = [];
+  for (let i = 0; i < particulars.length; i++) {
+    const particular = particulars[i].trim().replace(/\s+/g, " ");
+    const boatName = wantsBoats
+      ? (boatNames[i] ?? "").trim().replace(/\s+/g, " ")
+      : "";
+    const qtyRaw = (qtys[i] ?? "").trim();
+    const priceRaw = (prices[i] ?? "").trim();
+
+    // Skip fully-blank rows the form may submit.
+    if (!particular && !boatName && !qtyRaw && !priceRaw) continue;
+    if (!particular) return { error: `Row ${i + 1} needs a particular.` };
+    if (!DECIMAL3.test(qtyRaw) || Number(qtyRaw) <= 0)
+      return {
+        error: `Quantity for “${particular}” must be a positive number.`,
+      };
+    if (!DECIMAL2.test(priceRaw))
+      return { error: `Rate for “${particular}” must be a number.` };
+
+    const qtyKg = new Prisma.Decimal(qtyRaw);
+    const pricePerKg = new Prisma.Decimal(priceRaw);
+    lines.push({
+      boatName: boatName || null,
+      particular,
+      qtyKg,
+      pricePerKg,
+      total: qtyKg.mul(pricePerKg),
+    });
   }
 
-  const amountRaw = String(formData.get("amount") ?? "").trim();
-  if (!DECIMAL2.test(amountRaw) || Number(amountRaw) <= 0)
-    return { error: "Total must be a positive number (up to 2 decimals)." };
-  return {
-    data: {
-      type,
-      partyName,
-      boatName,
-      amount: new Prisma.Decimal(amountRaw),
-      date,
-      lines: [],
-      file,
-    },
-  };
+  if (lines.length === 0) return { error: "Add at least one line item." };
+
+  const amount = lines.reduce((a, l) => a.add(l.total), new Prisma.Decimal(0));
+  if (amount.lessThanOrEqualTo(0))
+    return { error: "The bill total must be more than zero." };
+
+  return { data: { type, partyName, billNo, amount, date, lines, file } };
+}
+
+/**
+ * Resolve each row's boat to a Party, reusing one lookup per distinct name — a
+ * six-row bill from one vessel does one round trip, not six.
+ */
+async function resolveLineBoats(
+  tx: Prisma.TransactionClient,
+  lines: ParsedLine[]
+): Promise<(string | null)[]> {
+  const ids = new Map<string, string>();
+  const out: (string | null)[] = [];
+  for (const l of lines) {
+    if (!l.boatName) {
+      out.push(null);
+      continue;
+    }
+    let id = ids.get(l.boatName);
+    if (!id) {
+      id = await findOrCreateParty(tx, l.boatName, "BOAT");
+      ids.set(l.boatName, id);
+    }
+    out.push(id);
+  }
+  return out;
+}
+
+/** The line rows to write, with each boat already resolved to an id. */
+async function lineData(tx: Prisma.TransactionClient, lines: ParsedLine[]) {
+  const boatIds = await resolveLineBoats(tx, lines);
+  return lines.map((l, i) => ({
+    boatId: boatIds[i],
+    particular: l.particular,
+    qtyKg: l.qtyKg,
+    pricePerKg: l.pricePerKg,
+    total: l.total,
+  }));
 }
 
 /**
@@ -176,29 +215,28 @@ export async function createPurchase(
     // instead of leaving a purchase with no bill against it.
     const staged = await stageAttachmentFile(d.file);
     await prisma.$transaction(async (tx) => {
-      // Two parties: the one that carries the ledger, and the boat/seller that
-      // is only named on the line.
+      // One party carries the ledger; the boats named on the rows are a name
+      // registry and never get an entry of their own.
+      // The purchase type is passed through so the seller is filed under the
+      // kind of bill they appear on, which is what narrows the suggestions on
+      // the next Private or Local entry.
       const partyId = await findOrCreateParty(
         tx,
         d.partyName,
-        "PURCHASE_GROUP"
-      );
-      const boatId = await findOrCreateParty(
-        tx,
-        d.boatName,
-        PURCHASE_BOAT_TYPE[d.type]
+        "PURCHASE_GROUP",
+        d.type
       );
       const purchase = await tx.purchase.create({
         data: {
           companyId: company.id,
           centreId: centre.id,
           partyId,
-          boatId,
+          billNo: d.billNo,
           type: d.type,
           amount: d.amount,
           date: d.date,
           createdById: session.userId,
-          lines: { create: d.lines },
+          lines: { create: await lineData(tx, d.lines) },
         },
       });
       await postPurchaseLedger(tx, { ...purchase, ...d });
@@ -300,27 +338,30 @@ export async function updatePurchase(
       });
       await tx.purchaseLine.deleteMany({ where: { purchaseId } });
 
+      // The purchase type is passed through so the seller is filed under the
+      // kind of bill they appear on, which is what narrows the suggestions on
+      // the next Private or Local entry.
       const partyId = await findOrCreateParty(
         tx,
         d.partyName,
-        "PURCHASE_GROUP"
-      );
-      const boatId = await findOrCreateParty(
-        tx,
-        d.boatName,
-        PURCHASE_BOAT_TYPE[d.type]
+        "PURCHASE_GROUP",
+        d.type
       );
       const purchase = await tx.purchase.update({
         where: { id: purchaseId },
         data: {
           partyId,
-          boatId,
+          // Cleared, not carried over: this save rewrites the bill as rows, and
+          // the boat now lives on them. A leftover header boat would keep
+          // printing a vessel name the lines no longer agree with.
+          boatId: null,
+          billNo: d.billNo,
           type: d.type,
           amount: d.amount,
           date: d.date,
           updatedById: session.userId,
           updatedAt: new Date(),
-          lines: { create: d.lines },
+          lines: { create: await lineData(tx, d.lines) },
         },
       });
       await postPurchaseLedger(tx, { ...purchase, ...d });

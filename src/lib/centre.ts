@@ -14,15 +14,20 @@ const COOKIE_NAME = "fms_centre";
 export type CentreInfo = { id: string; name: string; companyId: string };
 
 /**
- * All centres of a company, alphabetical. Memoised per request for the same
- * reason as getCompanies(): getActiveCentre() calls it and so does the layout.
- * cache() keys on companyId, so switching company still reads fresh.
+ * The live centres of a company, alphabetical. Memoised per request for the
+ * same reason as getCompanies(): getActiveCentre() calls it and so does the
+ * layout. cache() keys on companyId, so switching company still reads fresh.
+ *
+ * Archived centres are excluded, which is what takes them out of the switcher
+ * and out of every entry screen. Their transactions and ledgers are untouched
+ * and still read normally — the Centres master page and the reports read the
+ * table directly rather than going through here.
  */
 export const getCentres = cache(async function getCentres(
   companyId: string
 ): Promise<CentreInfo[]> {
   return prisma.centre.findMany({
-    where: { companyId },
+    where: { companyId, archivedAt: null },
     orderBy: { name: "asc" },
     select: { id: true, name: true, companyId: true },
   });

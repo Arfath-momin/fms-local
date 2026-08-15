@@ -7,6 +7,7 @@ import { businessToday } from "@/lib/format";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
+import { DateField } from "../../date-field";
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -49,6 +50,7 @@ export function DeliveryForm({
   initial,
   submitLabel,
   existingAttachments = 0,
+  allowBillUpload = true,
   scope,
 }: {
   action: (
@@ -58,6 +60,8 @@ export function DeliveryForm({
   initial?: DeliveryInit;
   submitLabel: string;
   existingAttachments?: number;
+  /** False once the voucher exists — the Attachments panel handles images then. */
+  allowBillUpload?: boolean;
   scope: FormScope;
 }) {
   const [state, formAction, pending] = useActionState<DeliveryFormState, FormData>(
@@ -69,17 +73,25 @@ export function DeliveryForm({
   );
   const today = businessToday();
 
+  // Same rule as lineTotalKg() on the server: kg is the weight of one box, so
+  // the row is kg × boxes — and a row shipped loose, with no boxes, counts its
+  // kg once rather than being multiplied away to nothing.
+  const rowKg = (l: DeliveryLineInit) => {
+    const boxes = num(l.box);
+    return boxes > 0 ? num(l.kg) * boxes : num(l.kg);
+  };
+
   const totals = useMemo(
     () =>
       lines.reduce(
         (acc, l) => ({
-          kg: acc.kg + num(l.kg),
+          totalKg: acc.totalKg + rowKg(l),
           box: acc.box + num(l.box),
           bigBox: acc.bigBox + num(l.bigBox),
           loose: acc.loose + num(l.loose),
           pcs: acc.pcs + num(l.pcs),
         }),
-        { kg: 0, box: 0, bigBox: 0, loose: 0, pcs: 0 }
+        { totalKg: 0, box: 0, bigBox: 0, loose: 0, pcs: 0 }
       ),
     [lines]
   );
@@ -110,10 +122,9 @@ export function DeliveryForm({
           <label htmlFor="date" className={labelCls}>
             Date
           </label>
-          <input
+          <DateField
             id="date"
             name="date"
-            type="date"
             required
             defaultValue={initial?.date ?? today}
             className={inputCls}
@@ -190,12 +201,13 @@ export function DeliveryForm({
       <div>
         <label className={labelCls}>Items</label>
         <div className="overflow-x-auto border border-line-strong bg-surface">
-          <table className="w-full text-sm min-w-[640px]">
+          <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr className="text-muted text-[12px] uppercase tracking-wide">
                 <th className="text-left font-semibold px-3 py-2">Particulars</th>
-                <th className="text-right font-semibold px-2 py-2 w-24">Kg</th>
+                <th className="text-right font-semibold px-2 py-2 w-24">Kg / Box</th>
                 <th className="text-right font-semibold px-2 py-2 w-20">Box</th>
+                <th className="text-right font-semibold px-2 py-2 w-24">Total Kg</th>
                 <th className="text-right font-semibold px-2 py-2 w-24">Big Box</th>
                 <th className="text-right font-semibold px-2 py-2 w-20">Loose</th>
                 <th className="text-right font-semibold px-2 py-2 w-20">Pcs</th>
@@ -231,6 +243,11 @@ export function DeliveryForm({
                       onChange={(e) => setLine(i, { box: e.target.value })}
                       className={cell}
                     />
+                  </td>
+                  {/* Derived, so it cannot be typed out of agreement with the
+                      two cells beside it. */}
+                  <td className="px-2 py-1 num text-right text-muted">
+                    {rowKg(l) || ""}
                   </td>
                   <td className="px-1 py-1">
                     <input
@@ -278,9 +295,11 @@ export function DeliveryForm({
             </tbody>
             <tfoot>
               <tr className="border-t border-line-strong font-semibold">
-                <td className="px-3 py-2 text-right">Total</td>
-                <td className="px-2 py-2 num text-right">{totals.kg || ""}</td>
+                <td className="px-3 py-2 text-right" colSpan={2}>
+                  Total
+                </td>
                 <td className="px-2 py-2 num text-right">{totals.box || ""}</td>
+                <td className="px-2 py-2 num text-right">{totals.totalKg || ""}</td>
                 <td className="px-2 py-2 num text-right">{totals.bigBox || ""}</td>
                 <td className="px-2 py-2 num text-right">{totals.loose || ""}</td>
                 <td className="px-2 py-2 num text-right">{totals.pcs || ""}</td>
@@ -289,20 +308,28 @@ export function DeliveryForm({
             </tfoot>
           </table>
         </div>
-        <button
-          type="button"
-          onClick={() => setLines((ls) => [...ls, { ...BLANK_LINE }])}
-          className="mt-2 border border-line-strong bg-surface px-3 py-1.5 text-[12px] font-semibold hover:border-accent"
-        >
-          + Add item
-        </button>
+        <div className="flex items-center justify-between gap-4 flex-wrap mt-2">
+          <button
+            type="button"
+            onClick={() => setLines((ls) => [...ls, { ...BLANK_LINE }])}
+            className="border border-line-strong bg-surface px-3 py-1.5 text-[12px] font-semibold hover:border-accent"
+          >
+            + Add item
+          </button>
+          <p className="text-muted text-[12px]">
+            Kg is the weight of <span className="font-medium">one box</span> — 25
+            kg × 10 boxes shows 250 kg.
+          </p>
+        </div>
       </div>
 
-      <BillUpload
-        label="Delivery note / bill image"
-        hint="Optional."
-        existingCount={existingAttachments}
-      />
+      {allowBillUpload && (
+        <BillUpload
+          label="Delivery note / bill image"
+          hint="Optional."
+          existingCount={existingAttachments}
+        />
+      )}
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}
 

@@ -31,6 +31,17 @@ export type ExpenseCategorySpec = {
   amountEntered: boolean;
   /** detail key whose value names the vendor ledger; falls back to label. */
   vendorFrom?: string;
+  /**
+   * Detail keys holding money already handed over against this total.
+   *
+   * Vehicle rent is agreed as one figure but rarely paid as one: an advance
+   * goes to the driver before he leaves, more may be settled from what he
+   * collects on the way, and only the remainder is still owed. Each of these
+   * posts a DEBIT alongside the total's CREDIT, so the vendor's outstanding
+   * balance *is* the balance still to pay — no second field storing a figure
+   * that could disagree with the ledger.
+   */
+  prepaidFrom?: string[];
   /** shown under the Batha form until its fields are defined. */
   note?: string;
 };
@@ -89,12 +100,32 @@ export const EXPENSE_SPECS: Record<ExpenseCategory, ExpenseCategorySpec> = {
   },
   RENT: {
     label: "Rent",
-    fields: [t("slNo", "SL No", false), t("vehicleNo", "Vehicle No"), n("rent", "Rent")],
+    fields: [
+      t("slNo", "SL No", false),
+      t("vehicleNo", "Vehicle No"),
+      n("rent", "Total Rent"),
+      n("advance", "Advance Paid", false),
+      n("collected", "Collected / Adjusted", false),
+    ],
     totalField: "rent",
+    prepaidFrom: ["advance", "collected"],
     amountEntered: false,
     vendorFrom: "vehicleNo",
   },
 };
+
+/**
+ * How much of an expense total has already been handed over, from the detail
+ * fields named by `prepaidFrom`. Zero for every category that has none.
+ */
+export function expensePrepaid(
+  category: ExpenseCategory,
+  details: Record<string, string>
+): number {
+  const keys = EXPENSE_SPECS[category].prepaidFrom;
+  if (!keys) return 0;
+  return keys.reduce((sum, k) => sum + (Number(details[k]) || 0), 0);
+}
 
 /** Ledger/party name for an expense — the vendor field where given, else the category. */
 export function expenseVendorName(

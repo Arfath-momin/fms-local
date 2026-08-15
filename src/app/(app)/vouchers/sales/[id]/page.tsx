@@ -90,14 +90,24 @@ export default async function SalePage({
             )}
           </p>
         </div>
-        {mayEdit && (
+        <div className="flex gap-2">
+          {/* Opens the bill as a document — the browser's print dialog is also
+              where "Save as PDF" lives, so this covers printing and sending. */}
           <Link
-            href={`/vouchers/sales/${sale.id}/edit`}
+            href={`/vouchers/sales/${sale.id}/print`}
             className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
           >
-            Edit
+            Bill
           </Link>
-        )}
+          {mayEdit && (
+            <Link
+              href={`/vouchers/sales/${sale.id}/edit`}
+              className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
+            >
+              Edit
+            </Link>
+          )}
+        </div>
       </div>
 
       <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">

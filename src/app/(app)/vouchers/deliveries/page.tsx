@@ -75,6 +75,7 @@ export default async function DeliveriesPage({
                 <th>To</th>
                 <th>Vehicle</th>
                 <th className="num-col">Box</th>
+                <th className="num-col">Total Kg</th>
                 <th className="num-col">Big Box</th>
                 <th className="num-col">Loose</th>
                 <th className="num-col">Pcs</th>
@@ -91,6 +92,9 @@ export default async function DeliveriesPage({
                     <td className="font-medium">{n.recipient}</td>
                     <td className="num">{n.vehicleNo}</td>
                     <td className="num-col num">{t.box || "—"}</td>
+                    <td className="num-col num">
+                      {t.totalKg.isZero() ? "—" : t.totalKg.toString()}
+                    </td>
                     <td className="num-col num">{t.bigBox || "—"}</td>
                     <td className="num-col num">{t.loose || "—"}</td>
                     <td className="num-col num">{t.pcs || "—"}</td>

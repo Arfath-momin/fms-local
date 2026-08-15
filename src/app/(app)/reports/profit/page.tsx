@@ -7,6 +7,7 @@ import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { businessTodayDate, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { DateField } from "../../date-field";
 
 function monthStart(d: Date) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
@@ -54,10 +55,10 @@ export default async function ProfitReportPage({
             >
               From
             </label>
-            <input
+            <DateField
               id="from"
               name="from"
-              type="date"
+              
               defaultValue={toInputDate(from)}
               className="border border-line-strong bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
             />
@@ -69,10 +70,10 @@ export default async function ProfitReportPage({
             >
               To
             </label>
-            <input
+            <DateField
               id="to"
               name="to"
-              type="date"
+              
               defaultValue={toInputDate(to)}
               className="border border-line-strong bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
             />

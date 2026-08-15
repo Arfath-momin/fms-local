@@ -4,8 +4,8 @@ import { requireSession } from "@/lib/session";
 import { PARTY_TYPES, PARTY_TYPE_PLURALS } from "@/lib/party";
 
 const TYPE_DESCRIPTIONS: Record<string, string> = {
-  BOAT: "Boat names for Society / KFDC / Private purchases. A name list only — no ledger.",
-  LOCAL_SELLER: "Seller names on Local purchases. A name list only — no ledger.",
+  BOAT: "Boat names for the rows of a Society / KFDC bill. A name list only — no ledger.",
+  LOCAL_SELLER: "Retired. Local sellers now carry their own ledger under Purchase Parties; these are the names from before that change.",
   MARKET_BUYER: "Market buyers.",
   FACTORY: "Factories buying by delivery note.",
   FISH_MILL: "Fish mills buying by delivery note.",
@@ -13,15 +13,17 @@ const TYPE_DESCRIPTIONS: Record<string, string> = {
   EXPENSE_VENDOR: "Ice plants, landlords and other expense vendors.",
   CARE_OF: "Commission agents who pay immediately; Fish Mill/Factory sales can post to a CareOf ledger.",
   PURCHASE_GROUP:
-    "Who purchases are owed to — Society, KFDC, each private party, Local Individuals.",
+    "Who purchases are owed to — Society, KFDC, and every private and local seller individually.",
   COMMISSION: "The house's own 2% account, credited by every Market sale.",
 };
 
 export default async function MastersPage() {
   await requireSession();
 
+  // Live parties only, matching what the list behind each link actually shows.
   const counts = await prisma.party.groupBy({
     by: ["type"],
+    where: { archivedAt: null },
     _count: true,
   });
   const countByType = new Map(counts.map((c) => [c.type, c._count]));

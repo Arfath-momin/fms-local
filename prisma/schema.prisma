@@ -20,6 +20,10 @@ datasource db {
 // ---------- Auth ----------
 
 enum Role {
+  SUPER_ADMIN // everything ADMIN can do, plus the irreversible operations the
+  // merchant is deliberately kept away from: unarchiving a master, and really
+  // deleting one. Never grantable from inside the app — see
+  // scripts/create-user.ts — so a merchant admin cannot promote themselves.
   ADMIN // full access; the only role that may edit an existing voucher
   ACCOUNTANT // may enter vouchers and manage parties, but never edit a voucher
   AUDITOR // read-only; no voucher menu, drill-down from ledgers only
@@ -83,6 +87,12 @@ model Centre {
   companyId String   @map("company_id")
   name      String
   createdAt DateTime @default(now()) @map("created_at")
+  /// Set when the centre is retired. Every transaction below still points here
+  /// and every ledger, register and report reads exactly as before — an
+  /// archived centre simply stops being offered in the switcher and the entry
+  /// screens, so nothing new can land in it. Deletion is reserved for centres
+  /// that were never used at all.
+  archivedAt DateTime? @map("archived_at")
 
   company        Company         @relation(fields: [companyId], references: [id])
   purchases      Purchase[]
@@ -105,10 +115,14 @@ model Centre {
 // across BFM and B2B. Balances are never stored here; they are derived from
 // LedgerEntry per company.
 enum PartyType {
-  BOAT // the vessel named on a Society / KFDC / Private purchase. A name
+  BOAT // the vessel named on each line of a Society / KFDC purchase. A name
   // registry only — nothing ever posts a LedgerEntry against it, because the
   // money is owed to the party that sent the boat, not to the boat.
-  LOCAL_SELLER // "Name" on a Local purchase. Also registry-only.
+  LOCAL_SELLER // RETIRED. Local sellers used to be registry-only names hung off
+  // a single shared "Local Individuals" ledger, which meant two sellers owed
+  // ₹40k and ₹50k read as one ₹90k debt to nobody in particular. A Local
+  // purchase now names its seller as a PURCHASE_GROUP with a ledger of their
+  // own, exactly like a Private one. Kept so historic rows still resolve.
   MARKET_BUYER
   FACTORY
   FISH_MILL
@@ -117,11 +131,12 @@ enum PartyType {
   CARE_OF // commission agent who pays immediately; a Fish Mill/Factory sale
   // "via CareOf" keeps the real buyer on the sale record but posts the ledger
   // to this CareOf party instead.
-  PURCHASE_GROUP // whoever a purchase is owed to. Society, KFDC and Local
-  // Individuals are one standing account each, fixed by the purchase type;
-  // a Private purchase names its own owner, who gets a ledger of their own.
-  // The individual boat is recorded on the purchase as a column, never as a
-  // ledger. See src/lib/party.ts (FIXED_PURCHASE_PARTY).
+  PURCHASE_GROUP // whoever a purchase is owed to. Society and KFDC are one
+  // standing account each, fixed by the purchase type, however many boats they
+  // send; a Private or Local purchase names its own seller, who gets a ledger
+  // of their own so payments settle against the right person. The individual
+  // boat is recorded on the line, never as a ledger. See src/lib/party.ts
+  // (FIXED_PURCHASE_PARTY).
   COMMISSION // the house's own 2% commission account — one per company/centre,
   // credited by every Market sale. Modelled as a party so the commission
   // ledger is an ordinary statement rather than a parallel reporting table.
@@ -133,14 +148,32 @@ model Party {
   type        PartyType
   contactInfo String?   @map("contact_info")
   createdAt   DateTime  @default(now()) @map("created_at")
+  /// Set when the party is retired. It vanishes from the pickers and the master
+  /// list but keeps every voucher and ledger entry it ever had, which is why
+  /// this is a timestamp and not a delete. Note the (name, type) unique below
+  /// still applies to archived rows: typing the name again resolves to this
+  /// party and revives it, rather than starting a second ledger from zero.
+  archivedAt  DateTime? @map("archived_at")
+  /// Which kind of purchase this party sells through — PURCHASE_GROUP only.
+  ///
+  /// Society, KFDC and every private and local seller share one party type,
+  /// because they share one thing that matters to the ledger: the money is owed
+  /// to them. But that made the purchase form suggest all of them at once, so
+  /// entering a Private bill offered KFDC and every local seller too. This
+  /// narrows the suggestions without splitting the type the ledger is keyed on.
+  ///
+  /// Null on every other party type, and on a purchase party that predates the
+  /// backfill or was created by hand from Masters.
+  purchaseKind PurchaseType? @map("purchase_kind")
 
-  purchases       Purchase[]
-  purchasesAsBoat Purchase[]    @relation("PurchaseBoat")
-  expenses        Expense[]
-  ledgerEntries   LedgerEntry[]
-  salesAsBuyer    Sale[]        @relation("SaleBuyer")
-  salesAsCareOf   Sale[]        @relation("SaleCareOf")
-  settlements     Settlement[]
+  purchases           Purchase[]
+  purchasesAsBoat     Purchase[]     @relation("PurchaseBoat")
+  purchaseLinesAsBoat PurchaseLine[] @relation("PurchaseLineBoat")
+  expenses            Expense[]
+  ledgerEntries       LedgerEntry[]
+  salesAsBuyer        Sale[]         @relation("SaleBuyer")
+  salesAsCareOf       Sale[]         @relation("SaleCareOf")
+  settlements         Settlement[]
 
   @@unique([name, type])
   @@map("parties")
@@ -155,20 +188,25 @@ enum PurchaseType {
   LOCAL
 }
 
-// Society / KFDC / Private: party is the boat, amount is the grand total, and
-// the fish breakdown lives in the attached bill image. Local: party is the
-// seller ("Name"), amount is the sum of its line items.
+// Every purchase is itemised, and `amount` is always the sum of its lines —
+// never typed in. Society / KFDC name the boat on each line (one bill can cover
+// several vessels); Private / Local name the seller once, in `partyId`, because
+// that is who the money is owed to.
 model Purchase {
   id          String       @id @default(uuid())
   companyId   String       @map("company_id")
   centreId    String       @map("centre_id")
-  /// The ledger this purchase settles against: Society, KFDC, Local
-  /// Individuals, or — for a Private purchase — the named owner. NOT the boat,
-  /// see `boatId`.
+  /// The ledger this purchase settles against: Society, KFDC, or — for a
+  /// Private or Local purchase — the named individual seller. NOT the boat.
   partyId     String       @map("party_id")
-  /// The individual boat (Society/KFDC/Private) or seller (Local). Recorded so
-  /// every statement row can name it, but it carries no ledger of its own:
-  /// money is owed to the group, not to the vessel.
+  /// The "No." on a Society/KFDC bill, the "Invoice No." on a Private/Local
+  /// one — the same field under two names on paper. Deliberately not unique:
+  /// real bill books repeat numbers across centres and across years.
+  billNo      String?      @map("bill_no")
+  /// RETIRED for new entries — the boat now lives on the line (see
+  /// PurchaseLine.boatId), because one Society bill covers several vessels.
+  /// Still written by nothing and read by the party statement, which falls back
+  /// to it for purchases entered before the line-level boat existed.
   boatId      String?      @map("boat_id")
   type        PurchaseType
   amount      Decimal      @db.Decimal(14, 2)
@@ -193,19 +231,30 @@ model Purchase {
   @@map("purchases")
 }
 
-// Itemised rows for a LOCAL purchase only (spec: Name · Particular · Quantity
-// · Price/kg · Total). Society/KFDC/Private purchases have no lines.
+// One row of a purchase bill.
+//
+//   Society / KFDC   Boat · Particulars · Total Kg · Rate/kg · Amount
+//   Private / Local  Particular · Qty · Rate · Amount
+//
+// `boatId` is therefore set on Society/KFDC lines and null on Private/Local
+// ones, where the seller is the purchase's party rather than a per-line detail.
+// Like the old header boat it is a name registry only: nothing posts a
+// LedgerEntry against a vessel, because the money is owed to the party that
+// sent it.
 model PurchaseLine {
   id         String  @id @default(uuid())
   purchaseId String  @map("purchase_id")
+  boatId     String? @map("boat_id")
   particular String
   qtyKg      Decimal @map("qty_kg") @db.Decimal(12, 3)
   pricePerKg Decimal @map("price_per_kg") @db.Decimal(12, 2)
   total      Decimal @db.Decimal(14, 2)
 
   purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  boat     Party?   @relation("PurchaseLineBoat", fields: [boatId], references: [id])
 
   @@index([purchaseId])
+  @@index([boatId])
   @@map("purchase_lines")
 }
 

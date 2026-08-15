@@ -8,9 +8,8 @@ import {
   computeProfit,
   getTransactionRegister,
 } from "@/lib/report";
-import { businessToday, toInputDate } from "@/lib/format";
-
-type SearchParams = { view?: string; period?: string; scope?: string };
+import { fmtDate, toInputDate } from "@/lib/format";
+import { parseRegisterPeriod } from "@/lib/register-period";
 
 function csvCell(v: string): string {
   if (/[",\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
@@ -23,57 +22,6 @@ function formatValue(v: Prisma.Decimal | string | number): string {
   return String(v);
 }
 
-async function parsePeriod(sp: SearchParams): Promise<{
-  view: "day" | "month" | "year";
-  from: Date;
-  to: Date;
-  period: string;
-}> {
-  // Mirrors the screen's default so an export taken straight after opening
-  // the report covers the same period the user was looking at.
-  const view = (sp.view === "month" || sp.view === "year" ? sp.view : "day") as
-    | "day"
-    | "month"
-    | "year";
-
-  // India time, like every other "today" in the app. UTC is a day behind
-  // between midnight and 05:30 IST, so using it here would export a different
-  // day from the one the report on screen is showing.
-  const today = businessToday();
-
-  if (view === "day") {
-    const period = /^\d{4}-\d{2}-\d{2}$/.test(sp.period ?? "")
-      ? sp.period!
-      : today;
-    const d = new Date(`${period}T00:00:00.000Z`);
-    return { view, period, from: d, to: d };
-  }
-
-  if (view === "year") {
-    const period = /^\d{4}$/.test(sp.period ?? "")
-      ? sp.period!
-      : today.slice(0, 4);
-    const y = Number(period);
-    return {
-      view,
-      period,
-      from: new Date(Date.UTC(y, 0, 1)),
-      to: new Date(Date.UTC(y, 11, 31)),
-    };
-  }
-
-  const period = /^\d{4}-\d{2}$/.test(sp.period ?? "")
-    ? sp.period!
-    : today.slice(0, 7);
-  const [y, m] = period.split("-").map(Number);
-  return {
-    view,
-    period,
-    from: new Date(Date.UTC(y, m - 1, 1)),
-    to: new Date(Date.UTC(y, m, 0)),
-  };
-}
-
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
@@ -83,25 +31,30 @@ export async function GET(req: Request) {
     return new NextResponse("Forbidden", { status: 403 });
 
   const url = new URL(req.url);
-  const sp: SearchParams = {
-    view: url.searchParams.get("view") ?? undefined,
-    period: url.searchParams.get("period") ?? undefined,
-    scope: url.searchParams.get("scope") ?? undefined,
-  };
+  const get = (k: string) => url.searchParams.get(k) ?? undefined;
+  const scope = get("scope");
 
   const company = await getActiveCompany();
   const centre = await getActiveCentre(company.id);
 
   if (!centre) return new NextResponse("No centre selected", { status: 400 });
 
-  const { view, from, to, period } = await parsePeriod(sp);
-  const companyWide = sp.scope === "company";
+  // Parsed by the same module the screen uses, so an export taken straight
+  // after opening the report always covers the window that was on screen.
+  const { view, from, to, period } = parseRegisterPeriod({
+    view: get("view"),
+    period: get("period"),
+    from: get("from"),
+    to: get("to"),
+    scope,
+  });
+  const companyWide = scope === "company";
   const centreId = companyWide ? null : centre.id;
 
   let csv: string;
   let filename: string;
 
-  if (view === "day") {
+  if (view === "day" || view === "range") {
     // Both queries share one scope, so the totals row always matches the rows
     // above it — no re-summing in JS.
     const [rows, pl] = await Promise.all([
@@ -121,8 +74,11 @@ export async function GET(req: Request) {
       .filter((r) => r.kind === "RECEIPT")
       .reduce((a, r) => a.add(r.amount), ZERO);
 
+    // The export is never trimmed the way the screen is — a CSV exists to hold
+    // every row, which is what the on-screen notice points people here for.
     const lines = [
       [
+        "Date",
         "Centre",
         "Type",
         "Party",
@@ -134,6 +90,7 @@ export async function GET(req: Request) {
       ].join(","),
       ...rows.map((r) =>
         [
+          csvCell(fmtDate(r.date)),
           csvCell(r.centreName),
           csvCell(r.kind),
           csvCell(r.partyName),
@@ -149,16 +106,20 @@ export async function GET(req: Request) {
         "Totals",
         "",
         "",
+        "",
         formatValue(purchase),
         formatValue(expense),
         formatValue(sale),
         formatValue(settledOut),
         formatValue(settledIn),
       ].join(","),
-      ["Profit/Loss", "", "", "", "", formatValue(profit)].join(","),
+      ["Profit/Loss", "", "", "", "", "", formatValue(profit)].join(","),
     ];
     csv = lines.join("\r\n");
-    filename = `${company.name}-transactions-${toInputDate(from)}.csv`;
+    filename =
+      view === "range"
+        ? `${company.name}-transactions-${toInputDate(from)}-to-${toInputDate(to)}.csv`
+        : `${company.name}-transactions-${toInputDate(from)}.csv`;
   } else {
     const { buckets, total } = await computePeriodBreakdown({
       companyId: company.id,

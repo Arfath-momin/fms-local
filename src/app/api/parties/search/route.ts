@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import type { PartyType } from "@/generated/prisma/enums";
+import type { PartyType, PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { PARTY_TYPES } from "@/lib/party";
+import { PURCHASE_TYPES } from "@/lib/purchase";
 
 /**
  * Type-ahead search over the party master.
@@ -34,12 +35,30 @@ export async function GET(req: Request) {
     .map((t) => t.trim())
     .filter((t): t is PartyType => PARTY_TYPES.includes(t as PartyType));
 
+  // Narrows purchase parties to the kind of bill being entered, so a Private
+  // purchase stops suggesting KFDC and every local seller. Parties with no kind
+  // recorded are deliberately kept: null means "no purchase has classified them
+  // yet", and hiding them would make a party invisible on the very form that
+  // would have filed them.
+  const rawKind = url.searchParams.get("purchaseKind");
+  const purchaseKind = PURCHASE_TYPES.includes(rawKind as PurchaseType)
+    ? (rawKind as PurchaseType)
+    : null;
+
   const { company, centre } = await getActiveScope();
   if (!centre) return NextResponse.json({ parties: [] });
 
   const parties = await prisma.party.findMany({
     where: {
+      // Archived parties are never offered. Typing an archived name in full
+      // still resolves and revives it on save (see findOrCreateParty) — this
+      // stops a retired name being picked off a list by accident, which is the
+      // whole reason it was retired.
+      archivedAt: null,
       ...(requested.length ? { type: { in: requested } } : {}),
+      ...(purchaseKind
+        ? { OR: [{ purchaseKind }, { purchaseKind: null }] }
+        : {}),
       ...(q ? { name: { contains: q, mode: "insensitive" } } : {}),
     },
     select: { id: true, name: true, type: true },

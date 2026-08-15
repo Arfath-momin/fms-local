@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getActiveScope } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
-import { sumDeliveryLines } from "@/lib/delivery";
+import { lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
@@ -94,13 +94,14 @@ export default async function DeliveryNotePage({
         <Field label="Mobile No." value={note.mobileNo ?? "—"} />
       </div>
 
-      <div className="border border-line-strong bg-surface">
+      <div className="border border-line-strong bg-surface overflow-x-auto">
         <table className="ledger-table">
           <thead>
             <tr>
               <th>Particulars</th>
-              <th className="num-col">Kg</th>
+              <th className="num-col">Kg / Box</th>
               <th className="num-col">Box</th>
+              <th className="num-col">Total Kg</th>
               <th className="num-col">Big Box</th>
               <th className="num-col">Loose</th>
               <th className="num-col">Pcs</th>
@@ -112,6 +113,9 @@ export default async function DeliveryNotePage({
                 <td className="font-medium">{l.particulars}</td>
                 <td className="num-col num">{l.kg.toString()}</td>
                 <td className="num-col num">{l.box}</td>
+                <td className="num-col num font-semibold">
+                  {lineTotalKg(l).toString()}
+                </td>
                 <td className="num-col num">{l.bigBox}</td>
                 <td className="num-col num">{l.loose}</td>
                 <td className="num-col num">{l.pcs}</td>
@@ -119,8 +123,9 @@ export default async function DeliveryNotePage({
             ))}
             <tr className="border-t border-line-strong font-semibold">
               <td className="text-right">Total</td>
-              <td className="num-col num">{totals.kg.toString()}</td>
+              <td className="num-col num"></td>
               <td className="num-col num">{totals.box}</td>
+              <td className="num-col num">{totals.totalKg.toString()}</td>
               <td className="num-col num">{totals.bigBox}</td>
               <td className="num-col num">{totals.loose}</td>
               <td className="num-col num">{totals.pcs}</td>
@@ -128,6 +133,10 @@ export default async function DeliveryNotePage({
           </tbody>
         </table>
       </div>
+      <p className="text-muted text-[12px] mt-2">
+        Kg is the weight of one box; Total Kg is that multiplied by the number of
+        boxes. A row shipped loose, with no boxes, counts its kg once.
+      </p>
 
       <AttachmentPanel
         attachments={attachments.map((a) => ({

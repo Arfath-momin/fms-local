@@ -43,7 +43,6 @@ export default async function PurchasesPage({
       where,
       include: {
         party: { select: { name: true } },
-        boat: { select: { name: true } },
         _count: { select: { lines: true } },
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
@@ -63,8 +62,8 @@ export default async function PurchasesPage({
         <div>
           <h1 className="heading text-xl font-semibold">Purchases</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · each purchase posts to the party&rsquo;s ledger;
-            the boat is recorded alongside it.
+            {company.name} · each bill posts to the ledger of whoever it is owed
+            to; the boats are named on its rows.
           </p>
         </div>
         {mayEnter && (
@@ -91,9 +90,10 @@ export default async function PurchasesPage({
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Party</th>
-                <th>Boat / Seller</th>
+                <th>No.</th>
+                <th>Owed to</th>
                 <th>Type</th>
+                <th className="num-col">Items</th>
                 <th className="num-col">Total</th>
                 <th className="w-16"></th>
               </tr>
@@ -107,6 +107,9 @@ export default async function PurchasesPage({
                     <td className="whitespace-nowrap">
                       {fmtDate(p.date)}
                     </td>
+                    <td className={struck}>
+                      {p.billNo ?? <span className="text-muted">—</span>}
+                    </td>
                     <td className="font-medium">
                       <span className={struck}>{p.party.name}</span>
                       {flag && (
@@ -119,16 +122,10 @@ export default async function PurchasesPage({
                         />
                       )}
                     </td>
-                    <td className={struck}>
-                      {p.boat?.name ?? <span className="text-muted">—</span>}
-                      {p.type === "LOCAL" && p._count.lines > 0 && (
-                        <span className="text-muted text-[12px]">
-                          {" "}
-                          · {p._count.lines} item{p._count.lines > 1 ? "s" : ""}
-                        </span>
-                      )}
-                    </td>
                     <td className={struck}>{TYPE_LABELS[p.type]}</td>
+                    <td className={`num-col num text-muted ${struck}`}>
+                      {p._count.lines || "—"}
+                    </td>
                     <td className={`num-col num text-debit ${struck}`}>
                       {fmtMoney(p.amount)}
                     </td>

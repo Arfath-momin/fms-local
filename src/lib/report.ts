@@ -164,18 +164,37 @@ export type UnionReport = {
 };
 
 /**
- * Union view: P/L for every company (summed over its centres) plus per-centre
- * Sale/Purchase/Expense figures, and a grand total across everything, for the
- * range [from, to]. Flagged rows are excluded. Centre-level profit is
- * deliberately not reported — only the raw three figures — because purchase and
- * sale are split across centres, so per-centre profit is not meaningful.
+ * Union view: P/L for a company (summed over its centres) plus per-centre
+ * Sale/Purchase/Expense figures, and a total, for the range [from, to]. Flagged
+ * rows are excluded. Centre-level profit is deliberately not reported — only the
+ * raw three figures — because purchase and sale are split across centres, so
+ * per-centre profit is not meaningful.
+ *
+ * `companyId` narrows the whole report to one company; null keeps every
+ * company. The screen always passes one, because BFM's figures and B2B's are
+ * separate businesses and a total across both answers nobody's question. The
+ * filter goes into the queries rather than being applied afterwards, so the
+ * other company's rows never leave Postgres.
  */
-export async function computeUnion(from: Date, to: Date): Promise<UnionReport> {
+export async function computeUnion(
+  from: Date,
+  to: Date,
+  companyId: string | null = null
+): Promise<UnionReport> {
   const dateRange = { gte: from, lte: to };
+  const companyWhere = companyId ? { companyId } : {};
   const [companies, centres, flaggedPurchases, flaggedExpenses, flaggedSales] =
     await Promise.all([
-      prisma.company.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-      prisma.centre.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, companyId: true } }),
+      prisma.company.findMany({
+        where: companyId ? { id: companyId } : {},
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+      prisma.centre.findMany({
+        where: companyWhere,
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, companyId: true },
+      }),
       getFlaggedIds("PURCHASE"),
       getFlaggedIds("EXPENSE"),
       getFlaggedIds("SALE"),
@@ -184,17 +203,17 @@ export async function computeUnion(from: Date, to: Date): Promise<UnionReport> {
   const [purchaseGroups, saleGroups, expenseGroups] = await Promise.all([
     prisma.purchase.groupBy({
       by: ["centreId"],
-      where: { date: dateRange, id: { notIn: flaggedPurchases } },
+      where: { ...companyWhere, date: dateRange, id: { notIn: flaggedPurchases } },
       _sum: { amount: true },
     }),
     prisma.sale.groupBy({
       by: ["centreId"],
-      where: { date: dateRange, id: { notIn: flaggedSales } },
+      where: { ...companyWhere, date: dateRange, id: { notIn: flaggedSales } },
       _sum: { amount: true },
     }),
     prisma.expense.groupBy({
       by: ["centreId"],
-      where: { date: dateRange, id: { notIn: flaggedExpenses } },
+      where: { ...companyWhere, date: dateRange, id: { notIn: flaggedExpenses } },
       _sum: { amount: true },
     }),
   ]);
