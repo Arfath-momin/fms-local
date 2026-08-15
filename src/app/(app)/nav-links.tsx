@@ -15,6 +15,7 @@ import type { Role } from "@/generated/prisma/enums";
 const LINKS: { href: string; label: string; roles?: Role[] }[] = [
   { href: "/dashboard", label: "Dashboard", roles: ["ADMIN", "AUDITOR"] },
   { href: "/vouchers", label: "Vouchers", roles: ["ADMIN", "ACCOUNTANT"] },
+  { href: "/lots", label: "Lots", roles: ["ADMIN", "ACCOUNTANT", "AUDITOR"] },
   { href: "/masters", label: "Masters", roles: ["ADMIN", "ACCOUNTANT"] },
   { href: "/ledgers", label: "Ledgers" },
   { href: "/reports", label: "Reports", roles: ["ADMIN", "AUDITOR"] },

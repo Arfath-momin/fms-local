@@ -12,6 +12,7 @@ import { AttachmentPanel } from "../../../attachments/attachment-panel";
 import { DeleteVoucher } from "../../delete-voucher";
 import { ReviewPanel } from "../../review-panel";
 import { VoucherMeta } from "../../voucher-meta";
+import { lotFieldData } from "@/lib/lot-db";
 
 export default async function ExpenseDetailPage({
   params,
@@ -125,8 +126,16 @@ export default async function ExpenseDetailPage({
     );
   }
 
+  // The lot already on this expense stays offered even if it has since been
+  // closed, so a correction cannot silently move the cost to another lot.
+  const { lots, defaultLotId } = await lotFieldData(
+    { companyId: company.id, centreId: centre.id },
+    expense.lotId
+  );
+
   const initial = {
     category: expense.category,
+    lotId: expense.lotId ?? "",
     amount: expense.amount.toString(),
     date: toInputDate(expense.date),
     notes: expense.notes,
@@ -142,6 +151,8 @@ export default async function ExpenseDetailPage({
       <ExpenseForm
         action={updateExpense.bind(null, expense.id)}
         initial={initial}
+        lots={lots}
+        defaultLotId={defaultLotId}
         submitLabel="Save Changes"
         scope={scopeFieldValues({ company, centre })}
         // The Attachments panel below is the single place images are managed

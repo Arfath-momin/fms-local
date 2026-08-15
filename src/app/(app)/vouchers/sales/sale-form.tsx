@@ -8,6 +8,7 @@ import type { SaleFormState } from "./actions";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
+import { LotField, type LotOption } from "../lot-field";
 import { DateField } from "../../date-field";
 import { PartyCombobox } from "../../masters/party-combobox";
 import {
@@ -33,6 +34,8 @@ export type SaleLineInit = {
 
 export type SaleInit = {
   billNo: string;
+  /** The lot this sale is already filed under, when editing. */
+  lotId: string;
   date: string;
   buyerName: string;
   careOfName: string;
@@ -62,6 +65,8 @@ export function SaleForm({
   type,
   action,
   initial,
+  lots,
+  defaultLotId,
   submitLabel,
   existingAttachments = 0,
   allowBillUpload = true,
@@ -70,6 +75,10 @@ export function SaleForm({
   type: SaleType;
   action: (prev: SaleFormState, formData: FormData) => Promise<SaleFormState>;
   initial?: SaleInit;
+  /** Open lots of this centre, plus the one this sale is already on. */
+  lots: LotOption[];
+  /** Newest open consignment — what a sale entered today usually belongs to. */
+  defaultLotId?: string;
   submitLabel: string;
   existingAttachments?: number;
   /** False once the voucher exists — the Attachments panel handles images then. */
@@ -142,6 +151,15 @@ export function SaleForm({
           />
         </div>
       </div>
+
+      {/* Directly under the date, because "which day's fish" is the question
+          right after "what day is it" — and the two are usually different. */}
+      <LotField
+        lots={lots}
+        defaultValue={initial?.lotId || defaultLotId}
+        className={inputCls + " max-w-xs"}
+        labelClassName={labelCls}
+      />
 
       <div className="grid grid-cols-2 gap-4">
         <PartyCombobox

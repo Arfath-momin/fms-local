@@ -9,6 +9,7 @@ import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
+import { assertUsableLot } from "@/lib/lot-db";
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_SPECS,
@@ -29,6 +30,8 @@ export type ExpenseFormState = { error: string } | null;
 
 type Parsed = {
   category: ExpenseCategory;
+  /** The consignment this cost belongs to, or the centre's General lot. */
+  lotId: string;
   amount: Prisma.Decimal;
   /** Of that total, how much was already paid at the time of entry. */
   prepaid: Prisma.Decimal;
@@ -44,12 +47,16 @@ const NUMBER = /^\d+(\.\d{1,3})?$/;
 
 function parse(formData: FormData): { error: string } | { data: Parsed } {
   const category = String(formData.get("category") ?? "") as ExpenseCategory;
+  const lotId = String(formData.get("lotId") ?? "").trim();
   const dateRaw = String(formData.get("date") ?? "");
   const notes = String(formData.get("notes") ?? "").trim();
   const file = formData.get("bill");
 
   if (!EXPENSE_CATEGORIES.includes(category))
     return { error: "Choose a category." };
+  // Required like the sale's. Rent and other standing costs belong on the
+  // centre's General lot rather than on whichever consignment is open.
+  if (!lotId) return { error: "Choose the lot this cost belongs to." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
 
   const badFile = validateImageFile(file);
@@ -94,6 +101,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   return {
     data: {
       category,
+      lotId,
       amount,
       prepaid,
       date: new Date(dateRaw),
@@ -162,11 +170,19 @@ export async function createExpense(
     // instead of leaving an expense with no receipt against it.
     const staged = await stageAttachmentFile(d.file);
     await prisma.$transaction(async (tx) => {
+      // The dropdown limits the choice, but a form field is only a suggestion.
+      const badLot = await assertUsableLot(
+        tx,
+        { companyId: company.id, centreId: centre.id },
+        d.lotId
+      );
+      if (badLot) throw new Error(badLot.error);
       const partyId = await findOrCreateParty(tx, d.vendorName, "EXPENSE_VENDOR");
       const expense = await tx.expense.create({
         data: {
           companyId: company.id,
           centreId: centre.id,
+          lotId: d.lotId,
           partyId,
           category: d.category,
           amount: d.amount,
@@ -263,10 +279,20 @@ export async function updateExpense(
         sourceId: expenseId,
         sourceType: ["EXPENSE", "PAYMENT"],
       });
+      // `existing.lotId` is re-admitted so a cost on a since-closed lot can
+      // still be corrected without reopening that lot first.
+      const badLot = await assertUsableLot(
+        tx,
+        { companyId: existing.companyId, centreId: existing.centreId },
+        d.lotId,
+        existing.lotId
+      );
+      if (badLot) throw new Error(badLot.error);
       const partyId = await findOrCreateParty(tx, d.vendorName, "EXPENSE_VENDOR");
       const expense = await tx.expense.update({
         where: { id: expenseId },
         data: {
+          lotId: d.lotId,
           partyId,
           category: d.category,
           amount: d.amount,

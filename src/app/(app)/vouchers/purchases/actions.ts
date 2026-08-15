@@ -9,6 +9,7 @@ import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { FIXED_PURCHASE_PARTY, purchaseHasLineBoats } from "@/lib/party";
 import { findOrCreateParty } from "@/lib/party-db";
+import { findOrCreateLotForDate } from "@/lib/lot-db";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { clearErrorFlag } from "@/lib/errorflag";
 import { resolveReviews } from "@/lib/review-db";
@@ -226,10 +227,19 @@ export async function createPurchase(
         "PURCHASE_GROUP",
         d.type
       );
+      // The day's first purchase opens that day's lot; every later bill on the
+      // same date joins it. Nothing to pick, so a purchase can never end up
+      // belonging to no consignment.
+      const lotId = await findOrCreateLotForDate(
+        tx,
+        { companyId: company.id, centreId: centre.id },
+        d.date
+      );
       const purchase = await tx.purchase.create({
         data: {
           companyId: company.id,
           centreId: centre.id,
+          lotId,
           partyId,
           billNo: d.billNo,
           type: d.type,
@@ -347,9 +357,18 @@ export async function updatePurchase(
         "PURCHASE_GROUP",
         d.type
       );
+      // The lot follows the date. Correcting a bill from the 15th to the 16th
+      // moves it onto the 16th's consignment, because that is now the buying
+      // day it belongs to — and both lots' profit changes to match.
+      const lotId = await findOrCreateLotForDate(
+        tx,
+        { companyId: existing.companyId, centreId: existing.centreId },
+        d.date
+      );
       const purchase = await tx.purchase.update({
         where: { id: purchaseId },
         data: {
+          lotId,
           partyId,
           // Cleared, not carried over: this save rewrites the bill as rows, and
           // the boat now lives on them. A leftover header boat would keep

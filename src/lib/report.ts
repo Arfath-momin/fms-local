@@ -126,6 +126,88 @@ export async function computeProfit(
   };
 }
 
+export type LotProfit = {
+  lotId: string;
+  sale: Prisma.Decimal;
+  purchase: Prisma.Decimal;
+  expense: Prisma.Decimal;
+  profit: Prisma.Decimal;
+};
+
+/**
+ * Profit per lot: what that consignment cost, what it earned, and the
+ * difference.
+ *
+ * This is the figure a date range cannot produce. Fish bought Monday is sold
+ * across Tuesday and Wednesday while Tuesday's own buying lands in between, so
+ * any window wide enough to catch Monday's sales also catches Tuesday's
+ * purchases and the answer is meaningless. Grouping by lot instead follows the
+ * fish rather than the calendar.
+ *
+ * Three grouped queries for every lot at once — never one query per lot, which
+ * would turn the Lots screen into a round trip per row. Flagged-error vouchers
+ * are excluded exactly as computeProfit excludes them, so the two reports agree
+ * about what counts.
+ *
+ * Lots with no movement at all are omitted; callers join against the lot list
+ * they already have and treat a missing entry as zero.
+ */
+export async function computeLotProfits(
+  companyId: string,
+  centreId: string,
+  lotIds: string[]
+): Promise<Map<string, LotProfit>> {
+  if (lotIds.length === 0) return new Map();
+
+  const [flaggedPurchases, flaggedExpenses, flaggedSales] = await Promise.all([
+    getFlaggedIds("PURCHASE"),
+    getFlaggedIds("EXPENSE"),
+    getFlaggedIds("SALE"),
+  ]);
+
+  const scope = { companyId, centreId, lotId: { in: lotIds } };
+  const [purchases, expenses, sales] = await Promise.all([
+    prisma.purchase.groupBy({
+      by: ["lotId"],
+      where: { ...scope, id: { notIn: flaggedPurchases } },
+      _sum: { amount: true },
+    }),
+    prisma.expense.groupBy({
+      by: ["lotId"],
+      where: { ...scope, id: { notIn: flaggedExpenses } },
+      _sum: { amount: true },
+    }),
+    prisma.sale.groupBy({
+      by: ["lotId"],
+      where: { ...scope, id: { notIn: flaggedSales } },
+      _sum: { amount: true },
+    }),
+  ]);
+
+  const out = new Map<string, LotProfit>();
+  const row = (lotId: string) => {
+    let r = out.get(lotId);
+    if (!r) {
+      r = { lotId, sale: ZERO, purchase: ZERO, expense: ZERO, profit: ZERO };
+      out.set(lotId, r);
+    }
+    return r;
+  };
+
+  // groupBy types lotId as nullable because the column is; the `in` filter
+  // above means every row here has one.
+  for (const g of purchases)
+    if (g.lotId) row(g.lotId).purchase = g._sum.amount ?? ZERO;
+  for (const g of expenses)
+    if (g.lotId) row(g.lotId).expense = g._sum.amount ?? ZERO;
+  for (const g of sales) if (g.lotId) row(g.lotId).sale = g._sum.amount ?? ZERO;
+
+  for (const r of out.values())
+    r.profit = r.sale.sub(r.purchase).sub(r.expense);
+
+  return out;
+}
+
 /** One day's figures — powers the Day Book screen and dashboard tiles. */
 export function computeDayBook(
   companyId: string,

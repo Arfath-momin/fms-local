@@ -16,6 +16,7 @@
     "db:verify": "tsx scripts/verify-ledger.ts",
     "db:split-local": "tsx scripts/split-local-individuals.ts",
     "db:backfill-kind": "tsx scripts/backfill-party-kind.ts",
+    "db:backfill-lots": "tsx scripts/backfill-lots.ts",
     "user:create": "tsx scripts/create-user.ts"
   },
   "dependencies": {

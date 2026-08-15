@@ -6,6 +6,7 @@ import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { SALE_TYPES, SALE_TYPE_LABELS } from "@/lib/sale";
 import { createSale } from "../actions";
 import { SaleForm } from "../sale-form";
+import { lotFieldData } from "@/lib/lot-db";
 import { NoCentreNotice } from "../../../no-centre";
 
 const TYPE_HINTS: Record<SaleType, string> = {
@@ -24,6 +25,11 @@ export default async function NewSalePage({
   if (!canEnter(session.role)) redirect("/vouchers/sales");
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
+
+  const { lots, defaultLotId } = await lotFieldData({
+    companyId: company.id,
+    centreId: centre.id,
+  });
 
   const raw = (await searchParams).type as SaleType | undefined;
   const type = raw && SALE_TYPES.includes(raw) ? raw : null;
@@ -68,6 +74,8 @@ export default async function NewSalePage({
         </Link>
       </p>
       <SaleForm
+        lots={lots}
+        defaultLotId={defaultLotId}
         type={type}
         action={createSale}
         submitLabel="Save Sale"

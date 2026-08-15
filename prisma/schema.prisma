@@ -64,6 +64,7 @@ model Company {
   createdAt DateTime @default(now()) @map("created_at")
 
   centres        Centre[]
+  lots           Lot[]
   purchases      Purchase[]
   deliveryNotes  DeliveryNote[]
   sales          Sale[]
@@ -95,6 +96,7 @@ model Centre {
   archivedAt DateTime? @map("archived_at")
 
   company        Company         @relation(fields: [companyId], references: [id])
+  lots           Lot[]
   purchases      Purchase[]
   deliveryNotes  DeliveryNote[]
   sales          Sale[]
@@ -179,6 +181,59 @@ model Party {
   @@map("parties")
 }
 
+// ---------- Lots ----------
+
+enum LotKind {
+  CONSIGNMENT // one day's buying and everything that came of it
+  OVERHEAD // the standing account for costs that belong to no consignment
+}
+
+/// A day's fish, from the quay to the last rupee it earned.
+///
+/// The business does not run on calendar months, or even on calendar days: fish
+/// bought on Monday is sold on Tuesday and Wednesday, while Tuesday's own
+/// buying lands in between. A date range therefore never isolates one lot's
+/// profit — Monday's sales get netted against Tuesday's purchases and the
+/// figure means nothing. So purchases, sales and expenses are tied to the
+/// consignment they belong to, and profit is asked of the lot instead.
+///
+/// A CONSIGNMENT lot opens by itself on the day's first purchase, and the
+/// merchant closes it once that fish is sold out. Each centre also has one
+/// permanent OVERHEAD lot ("General"): monthly rent and shop costs belong to no
+/// single catch, and forcing them onto whichever consignment happened to be
+/// open would make that lot look unprofitable for reasons that have nothing to
+/// do with it.
+model Lot {
+  id        String    @id @default(uuid())
+  companyId String    @map("company_id")
+  centreId  String    @map("centre_id")
+  /// What the merchant sees and picks: "15AUG26", or "GENERAL" for overheads.
+  code      String
+  /// The buying day this lot represents. Equal to the first purchase's date for
+  /// a consignment; the centre's creation day for the overhead lot, which never
+  /// means anything and is never shown.
+  openedOn  DateTime  @map("opened_on") @db.Date
+  kind      LotKind   @default(CONSIGNMENT)
+  /// Set when the merchant declares the fish sold out. A closed lot drops out
+  /// of the entry dropdowns but never stops an existing voucher being edited,
+  /// so a correction to last week's sale is still possible.
+  closedAt  DateTime? @map("closed_at")
+  notes     String?
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  company   Company    @relation(fields: [companyId], references: [id])
+  centre    Centre     @relation(fields: [centreId], references: [id])
+  purchases Purchase[]
+  sales     Sale[]
+  expenses  Expense[]
+
+  @@unique([companyId, centreId, code])
+  /// Covers "the open lots of this centre, newest first" — the dropdown query
+  /// that runs on every sale and expense form.
+  @@index([companyId, centreId, closedAt, openedOn])
+  @@map("lots")
+}
+
 // ---------- Purchases ----------
 
 enum PurchaseType {
@@ -196,6 +251,11 @@ model Purchase {
   id          String       @id @default(uuid())
   companyId   String       @map("company_id")
   centreId    String       @map("centre_id")
+  /// The consignment this buying belongs to. Resolved from the purchase's own
+  /// date — the merchant never picks it, and the day's first purchase opens the
+  /// lot. Nullable only so rows written before lots existed stay valid; every
+  /// purchase saved since carries one.
+  lotId       String?      @map("lot_id")
   /// The ledger this purchase settles against: Society, KFDC, or — for a
   /// Private or Local purchase — the named individual seller. NOT the boat.
   partyId     String       @map("party_id")
@@ -220,6 +280,7 @@ model Purchase {
 
   company   Company        @relation(fields: [companyId], references: [id])
   centre    Centre         @relation(fields: [centreId], references: [id])
+  lot       Lot?           @relation(fields: [lotId], references: [id])
   party     Party          @relation(fields: [partyId], references: [id])
   boat      Party?         @relation("PurchaseBoat", fields: [boatId], references: [id])
   createdBy User?          @relation("PurchaseCreatedBy", fields: [createdById], references: [id])
@@ -276,6 +337,10 @@ model Expense {
   id          String          @id @default(uuid())
   companyId   String          @map("company_id")
   centreId    String          @map("centre_id")
+  /// The consignment this cost belongs to, or the centre's General lot for an
+  /// overhead like monthly rent. Chosen on the form and required there;
+  /// nullable only for rows that predate lots.
+  lotId       String?         @map("lot_id")
   partyId     String          @map("party_id") // expense vendor / category ledger
   category    ExpenseCategory
   amount      Decimal         @db.Decimal(14, 2)
@@ -289,6 +354,7 @@ model Expense {
 
   company   Company @relation(fields: [companyId], references: [id])
   centre    Centre  @relation(fields: [centreId], references: [id])
+  lot       Lot?    @relation(fields: [lotId], references: [id])
   party     Party   @relation(fields: [partyId], references: [id])
   createdBy User?   @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
   updatedBy User?   @relation("ExpenseUpdatedBy", fields: [updatedById], references: [id])
@@ -368,6 +434,11 @@ model Sale {
   id            String   @id @default(uuid())
   companyId     String   @map("company_id")
   centreId      String   @map("centre_id")
+  /// Which consignment this fish came out of — the point of the whole lot
+  /// mechanism, since a sale is routinely one or two days after the buying it
+  /// pays for. Chosen on the form and required there; nullable only for rows
+  /// that predate lots.
+  lotId         String?  @map("lot_id")
   type          SaleType
   partyId       String   @map("party_id") // the buyer
   careOfPartyId String?  @map("care_of_party_id") // ledger posts here when set
@@ -397,6 +468,7 @@ model Sale {
 
   company     Company    @relation(fields: [companyId], references: [id])
   centre      Centre     @relation(fields: [centreId], references: [id])
+  lot         Lot?       @relation(fields: [lotId], references: [id])
   party       Party      @relation("SaleBuyer", fields: [partyId], references: [id])
   careOfParty Party?     @relation("SaleCareOf", fields: [careOfPartyId], references: [id])
   createdBy   User?      @relation("SaleCreatedBy", fields: [createdById], references: [id])

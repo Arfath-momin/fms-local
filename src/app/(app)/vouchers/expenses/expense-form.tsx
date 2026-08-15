@@ -9,6 +9,7 @@ import { businessToday, fmtMoney } from "@/lib/format";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
+import { LotField, type LotOption } from "../lot-field";
 import { DateField } from "../../date-field";
 
 const inputCls =
@@ -18,6 +19,8 @@ const labelCls =
 
 export type ExpenseInit = {
   category: ExpenseCategory;
+  /** The lot this cost is already filed under, when editing. */
+  lotId: string;
   amount: string;
   date: string;
   notes: string | null;
@@ -27,6 +30,8 @@ export type ExpenseInit = {
 export function ExpenseForm({
   action,
   initial,
+  lots,
+  defaultLotId,
   submitLabel,
   reasonField,
   existingAttachments = 0,
@@ -38,6 +43,10 @@ export function ExpenseForm({
     formData: FormData
   ) => Promise<ExpenseFormState>;
   initial?: ExpenseInit;
+  /** Open lots of this centre, plus the one this cost is already on. */
+  lots: LotOption[];
+  /** Newest open consignment; General is always available as an alternative. */
+  defaultLotId?: string;
   submitLabel: string;
   reasonField?: boolean;
   existingAttachments?: number;
@@ -112,6 +121,15 @@ export function ExpenseForm({
           />
         </div>
       </div>
+
+      {/* Right after category and date: which consignment carries this cost,
+          or General for rent and other standing overheads. */}
+      <LotField
+        lots={lots}
+        defaultValue={initial?.lotId || defaultLotId}
+        className={inputCls + " max-w-xs"}
+        labelClassName={labelCls}
+      />
 
       {spec.fields.length > 0 && (
         <div className="grid grid-cols-2 gap-4">
