@@ -118,7 +118,18 @@ function parseLines(
 
     const qtyKg = new Prisma.Decimal(qtyRaw);
     const ratePerKg = new Prisma.Decimal(rateRaw);
-    lines.push({ particular: p, box, qtyKg, ratePerKg, count, total: qtyKg.mul(ratePerKg) });
+    // Rate is per kilo, so it applies to the weight actually sold — box × kgs
+    // on a Fish Mill row, where kgs is the weight of one box. Charging the
+    // per-box weight would bill ten boxes at the price of one.
+    const totalKg = box && box > 0 ? qtyKg.mul(box) : qtyKg;
+    lines.push({
+      particular: p,
+      box,
+      qtyKg,
+      ratePerKg,
+      count,
+      total: totalKg.mul(ratePerKg),
+    });
   }
   return { lines };
 }
@@ -189,6 +200,16 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
       return { error: "Total Bill must be a positive number." };
     if (!netBill || netBill.lte(0))
       return { error: "Net Bill must be a positive number." };
+    // Net is Total less the seller's profit and expenses, so it is a part of
+    // the gross and can never exceed it. Net is also what posts to the ledger,
+    // so an inverted pair silently overstates what the seller owes us.
+    if (netBill.greaterThan(totalBill))
+      return {
+        error:
+          `Net Bill (${netBill.toFixed(2)}) cannot be more than Total Bill ` +
+          `(${totalBill.toFixed(2)}) — net is the gross less the seller's ` +
+          `profit and expenses.`,
+      };
     base.place = clean(formData.get("place")) || null;
     base.vehicleNo = clean(formData.get("vehicleNo")) || null;
     base.totalBill = totalBill;

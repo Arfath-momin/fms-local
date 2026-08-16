@@ -3,7 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { getActiveScope } from "@/lib/centre";
 import { requireSession } from "@/lib/session";
-import { SALE_TYPE_LABELS } from "@/lib/sale";
+import { SALE_TYPE_LABELS, saleLineTotalKg } from "@/lib/sale";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { rupeesInWords } from "@/lib/amount-words";
 import { PrintToolbar } from "../../../../print-toolbar";
@@ -142,7 +142,8 @@ export default async function SaleBillPage({
                 </th>
                 {isFishMill && <th className="r">Box</th>}
                 <th>{isFishMill ? "Variety" : "Particular"}</th>
-                <th className="r">Kgs</th>
+                <th className="r">{isFishMill ? "Kgs / box" : "Kgs"}</th>
+                {isFishMill && <th className="r">Total Kg</th>}
                 <th className="r">Rate/kg</th>
                 {isFishMill && <th className="r">Count</th>}
                 <th className="r">Amount</th>
@@ -155,6 +156,18 @@ export default async function SaleBillPage({
                   {isFishMill && <td className="r num">{l.box ?? "—"}</td>}
                   <td className="font-medium">{l.particular}</td>
                   <td className="r num">{fmtKg(l.qtyKg)}</td>
+                  {/* Kgs is the weight of ONE box, so what was actually sold —
+                      and what the rate is charged on — is box × kgs. */}
+                  {isFishMill && (
+                    <td className="r num">
+                      {fmtKg(
+                        saleLineTotalKg({
+                          qtyKg: Number(l.qtyKg),
+                          box: l.box,
+                        })
+                      )}
+                    </td>
+                  )}
                   <td className="r num">{fmtMoney(l.ratePerKg)}</td>
                   {isFishMill && <td className="r num">{l.count ?? "—"}</td>}
                   <td className="r num">{fmtMoney(l.total)}</td>
@@ -163,7 +176,7 @@ export default async function SaleBillPage({
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={isFishMill ? 6 : 4} className="r">
+                <td colSpan={isFishMill ? 7 : 4} className="r">
                   Total
                 </td>
                 <td className="r num">{fmtMoney(sale.amount)}</td>

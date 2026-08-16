@@ -3,7 +3,7 @@
 import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { SaleType } from "@/generated/prisma/enums";
-import { businessToday, fmtMoney } from "@/lib/format";
+import { businessToday, fmtKg, fmtMoney } from "@/lib/format";
 import type { SaleFormState } from "./actions";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
@@ -14,6 +14,7 @@ import {
   MARKET_COMMISSION_RATE,
   SALE_BUYER_TYPE,
   SALE_TYPE_LABELS,
+  saleLineTotalKg,
 } from "@/lib/sale";
 
 const inputCls =
@@ -95,14 +96,21 @@ export function SaleForm({
   const setLine = (i: number, patch: Partial<SaleLineInit>) =>
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
+  // Kgs is the weight of ONE box, so the row's real weight is box × kgs and
+  // the rate applies to that. saleLineTotalKg is the same helper the server
+  // action uses, so the figure on screen and the figure saved cannot disagree.
+  const rowKg = (l: SaleLineInit) =>
+    saleLineTotalKg({ qtyKg: n(l.qtyKg), box: n(l.box) });
+
   const lineTotal = useMemo(
-    () => lines.reduce((s, l) => s + n(l.qtyKg) * n(l.ratePerKg), 0),
+    () => lines.reduce((s, l) => s + rowKg(l) * n(l.ratePerKg), 0),
     [lines]
   );
   const boxTotal = useMemo(
     () => lines.reduce((s, l) => s + n(l.box), 0),
     [lines]
   );
+  const kgTotal = useMemo(() => lines.reduce((s, l) => s + rowKg(l), 0), [lines]);
 
   // The sale amount (what posts to the ledger) depends on the type.
   const amount =
@@ -113,6 +121,7 @@ export function SaleForm({
         : lineTotal;
   const commission =
     type === "MARKET" ? n(totalBill) * MARKET_COMMISSION_RATE : 0;
+  const netOverTotal = n(netBill) > 0 && n(netBill) > n(totalBill);
 
   return (
     <form action={formAction} className="max-w-3xl space-y-4">
@@ -245,11 +254,25 @@ export function SaleForm({
                 required
                 value={netBill}
                 onChange={(e) => setNetBill(e.target.value)}
-                className={inputCls + " num text-right"}
+                aria-invalid={netOverTotal || undefined}
+                className={
+                  inputCls +
+                  " num text-right" +
+                  (netOverTotal ? " border-debit" : "")
+                }
               />
-              <p className="text-muted text-[12px] mt-1">
-                What the seller pays us — posts to the ledger.
-              </p>
+              {/* Caught here as well as on the server: net is what posts to
+                  the ledger, so an inverted pair overstates the debt, and
+                  finding that out only on submit wastes the whole form. */}
+              {netOverTotal ? (
+                <p className="text-debit text-[12px] mt-1">
+                  Net Bill cannot be more than Total Bill ({fmtMoney(n(totalBill))}).
+                </p>
+              ) : (
+                <p className="text-muted text-[12px] mt-1">
+                  What the seller pays us — posts to the ledger.
+                </p>
+              )}
             </div>
           </div>
           <div className="border border-line bg-surface px-4 py-2 text-[13px] flex justify-between">
@@ -335,7 +358,14 @@ export function SaleForm({
                   <th className="text-left font-semibold px-3 py-2">
                     {type === "FISH_MILL" ? "Fish (variety)" : "Particular"}
                   </th>
-                  <th className="text-right font-semibold px-2 py-2 w-24">Kgs</th>
+                  <th className="text-right font-semibold px-2 py-2 w-24">
+                    {type === "FISH_MILL" ? "Kgs / box" : "Kgs"}
+                  </th>
+                  {type === "FISH_MILL" && (
+                    <th className="text-right font-semibold px-2 py-2 w-24">
+                      Total Kg
+                    </th>
+                  )}
                   <th className="text-right font-semibold px-2 py-2 w-24">Rate/kg</th>
                   {type === "FISH_MILL" && (
                     <th className="text-right font-semibold px-2 py-2 w-16">Count</th>
@@ -346,7 +376,8 @@ export function SaleForm({
               </thead>
               <tbody>
                 {lines.map((l, i) => {
-                  const rowTotal = n(l.qtyKg) * n(l.ratePerKg);
+                  const totalKg = rowKg(l);
+                  const rowTotal = totalKg * n(l.ratePerKg);
                   return (
                     <tr key={i} className="border-t border-line">
                       {type === "FISH_MILL" && (
@@ -360,6 +391,13 @@ export function SaleForm({
                       <td className="px-1 py-1">
                         <input name="qtyKg" inputMode="decimal" value={l.qtyKg} onChange={(e) => setLine(i, { qtyKg: e.target.value })} className={cell} />
                       </td>
+                      {/* Derived, not typed: box × kgs. Read-only so it can
+                          never disagree with the two figures above it. */}
+                      {type === "FISH_MILL" && (
+                        <td className="px-2 py-1 num text-right text-muted">
+                          {totalKg ? fmtKg(totalKg) : ""}
+                        </td>
+                      )}
                       <td className="px-1 py-1">
                         <input name="ratePerKg" inputMode="decimal" value={l.ratePerKg} onChange={(e) => setLine(i, { ratePerKg: e.target.value })} className={cell} />
                       </td>
@@ -385,9 +423,15 @@ export function SaleForm({
                   {type === "FISH_MILL" && (
                     <td className="px-2 py-2 num text-right">{boxTotal || ""}</td>
                   )}
-                  <td className="px-3 py-2 text-right" colSpan={type === "FISH_MILL" ? 3 : 2}>
+                  <td className="px-3 py-2 text-right" colSpan={2}>
                     Total
                   </td>
+                  {type === "FISH_MILL" && (
+                    <td className="px-2 py-2 num text-right">
+                      {kgTotal ? fmtKg(kgTotal) : ""}
+                    </td>
+                  )}
+                  {type === "FISH_MILL" && <td />}
                   <td className="px-3 py-2 num text-right text-credit">{fmtMoney(lineTotal)}</td>
                   <td></td>
                 </tr>
