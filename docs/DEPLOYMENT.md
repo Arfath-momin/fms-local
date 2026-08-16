@@ -25,12 +25,26 @@ a development tool only.
 
 | Role | Can do |
 |---|---|
-| **Admin** | Everything. The only role that can change a voucher after it is saved, and the only one who can manage users. |
+| **Super Admin** | Everything an admin can, plus restoring an archived centre or party and permanently deleting an unused one. **Cannot be granted from inside the app** — only `scripts/create-user.ts` creates one, which needs shell access to this server. An ordinary admin cannot change, deactivate or reset the password of a super admin's account. |
+| **Admin** | Runs the books. Everything else, including changing a voucher after it is saved, managing users, and archiving a centre or party that is no longer needed. |
 | **Accountant** | Enters purchases, sales, expenses and delivery notes, and manages parties. Cannot edit an entry once saved. |
 | **Auditor / CA** | Read-only. Ledgers and reports, plus read-only drill-down into any voucher to check its bill image. No voucher menu. |
 
 Every voucher records who entered it and who last changed it, shown at the
 bottom of its detail page.
+
+### Company access
+
+BFM and B2B are separate businesses sharing one installation, so each account is
+granted the companies it may work in, from the **Users** screen. Someone granted
+only B2B cannot reach BFM data at all — the company switcher shows only what
+they hold, and the server refuses any attempt to work outside it. A super admin
+sees every company.
+
+`scripts/create-user.ts` grants every company to a new account by default; you
+narrow it afterwards in the app. An account with **no** company sees a "no
+company access" screen instead of the app, so the Users screen refuses to leave
+anyone in that state.
 
 ### Time
 
@@ -441,12 +455,36 @@ time, and it is the only one worth knowing.
 
 ```bash
 cd /srv/fms
+./scripts/backup.sh          # always, before anything else
 git pull
 docker compose up -d --build
+docker compose logs -f app   # watch it come up, Ctrl-C when healthy
 ```
 
-Migrations run automatically. Take a backup first if the update includes schema
-changes.
+Migrations run automatically in a one-shot `migrate` service that must succeed
+before the app starts, so a failed migration blocks the rollout instead of
+booting new code against a half-migrated schema.
+
+**Take a backup first, every time.** Code rolls back with `git checkout`;
+migrations do not, so the backup is the only way back from a bad schema change.
+
+**One-off data backfills**
+
+Some releases add a column that needs filling in from existing rows. These are
+separate from migrations because they are re-runnable and can take a while on a
+large database. They are safe to run twice — each one only touches rows that
+have not been done yet.
+
+```bash
+# Files existing purchase parties under Private / Local / Society / KFDC,
+# so the purchase form suggests only the right ones. Run once, after the
+# release that introduced it.
+docker compose run --rm migrate npx tsx scripts/backfill-party-kind.ts --dry
+docker compose run --rm migrate npx tsx scripts/backfill-party-kind.ts
+```
+
+Run the `--dry` version first: it prints exactly what it would change and
+writes nothing.
 
 **Watch the logs**
 

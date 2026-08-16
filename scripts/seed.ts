@@ -69,7 +69,7 @@ async function main() {
     { email: "auditor@fms.local", name: "Auditor", role: "AUDITOR" as const, password: "auditor123" },
   ];
   for (const u of users) {
-    await prisma.user.upsert({
+    const user = await prisma.user.upsert({
       where: { email: u.email },
       update: {},
       create: {
@@ -78,6 +78,20 @@ async function main() {
         role: u.role,
         passwordHash: await bcrypt.hash(u.password, 10),
       },
+      select: { id: true },
+    });
+
+    // Every seeded login gets every company. A user with no grant is refused by
+    // getActiveCompany() and lands on the "no company access" screen, so
+    // skipping this leaves a freshly seeded database that nobody can sign in
+    // and use — the migration's own backfill cannot help here, because it ran
+    // before these users existed.
+    await prisma.userCompany.createMany({
+      data: Object.values(companies).map((companyId) => ({
+        userId: user.id,
+        companyId,
+      })),
+      skipDuplicates: true,
     });
   }
 

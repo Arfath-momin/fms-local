@@ -75,17 +75,51 @@ async function main() {
 
     const passwordHash = await bcrypt.hash(password!, BCRYPT_COST);
 
+    let userId: string;
     if (existing) {
-      await prisma.user.update({
+      const u = await prisma.user.update({
         where: { email },
         data: { passwordHash, role, ...(name ? { name } : {}) },
+        select: { id: true },
       });
+      userId = u.id;
       console.log(`updated ${email} (${role})`);
     } else {
-      await prisma.user.create({
+      const u = await prisma.user.create({
         data: { email, name: name!, role, passwordHash },
+        select: { id: true },
       });
+      userId = u.id;
       console.log(`created ${email} (${role})`);
+    }
+
+    // Grant every company, unless this account already holds some.
+    //
+    // Without a grant, getActiveCompany() refuses the user and they land on the
+    // "no company access" screen — an account created here would look broken
+    // rather than new. Granting everything and letting an admin narrow it from
+    // the Users screen is the safe default; narrowing an existing account's
+    // access from this script would silently undo that admin's decision, which
+    // is why held grants are left alone.
+    const held = await prisma.userCompany.count({ where: { userId } });
+    if (held === 0) {
+      const companies = await prisma.company.findMany({ select: { id: true } });
+      if (companies.length > 0) {
+        await prisma.userCompany.createMany({
+          data: companies.map((c) => ({ userId, companyId: c.id })),
+          skipDuplicates: true,
+        });
+        console.log(`granted ${companies.length} company/companies`);
+      } else {
+        // A super admin is never filtered by grants, so this is only a problem
+        // for the roles that are.
+        console.log(
+          role === "SUPER_ADMIN"
+            ? "no companies exist yet — a super admin sees every company anyway"
+            : "WARNING: no companies exist yet. Create one, then re-run with " +
+                "--update, or this account will have no access."
+        );
+      }
     }
 
     if (generated) {
