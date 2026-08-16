@@ -9,7 +9,6 @@ import { businessToday, fmtMoney } from "@/lib/format";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
-import { LotField, type LotOption } from "../lot-field";
 import { DateField } from "../../date-field";
 
 const inputCls =
@@ -19,10 +18,11 @@ const labelCls =
 
 export type ExpenseInit = {
   category: ExpenseCategory;
-  /** The lot this cost is already filed under, when editing. */
-  lotId: string;
   amount: string;
+  /** The purchase day this cost counts against. */
   date: string;
+  /** When the money went out. Record only. */
+  spentOn: string;
   notes: string | null;
   details: Record<string, string>;
 };
@@ -30,8 +30,6 @@ export type ExpenseInit = {
 export function ExpenseForm({
   action,
   initial,
-  lots,
-  defaultLotId,
   submitLabel,
   reasonField,
   existingAttachments = 0,
@@ -43,10 +41,6 @@ export function ExpenseForm({
     formData: FormData
   ) => Promise<ExpenseFormState>;
   initial?: ExpenseInit;
-  /** Open lots of this centre, plus the one this cost is already on. */
-  lots: LotOption[];
-  /** Newest open consignment; General is always available as an alternative. */
-  defaultLotId?: string;
   submitLabel: string;
   reasonField?: boolean;
   existingAttachments?: number;
@@ -109,27 +103,41 @@ export function ExpenseForm({
           </select>
         </div>
         <div>
-          <label htmlFor="date" className={labelCls}>
-            Date
+          <label htmlFor="spentOn" className={labelCls}>
+            Expense Date
           </label>
           <DateField
-            id="date"
-            name="date"
+            id="spentOn"
+            name="spentOn"
             required
-            defaultValue={initial?.date ?? today}
+            defaultValue={initial?.spentOn ?? today}
             className={inputCls}
           />
+          <p className="text-muted text-[12px] mt-1">
+            When the money went out. For the record only.
+          </p>
         </div>
       </div>
 
-      {/* Right after category and date: which consignment carries this cost,
-          or General for rent and other standing overheads. */}
-      <LotField
-        lots={lots}
-        defaultValue={initial?.lotId || defaultLotId}
-        className={inputCls + " max-w-xs"}
-        labelClassName={labelCls}
-      />
+      {/* Ice bought on the 17th for the 16th's catch belongs to the 16th —
+          that is the day whose profit it has to come out of. */}
+      <div className="max-w-xs">
+        <label htmlFor="date" className={labelCls}>
+          Purchase Date
+        </label>
+        <DateField
+          id="date"
+          name="date"
+          required
+          defaultValue={initial?.date ?? today}
+          className={inputCls}
+        />
+        <p className="text-muted text-[12px] mt-1">
+          Which day&apos;s fish this cost was for. The ledger, the Day Book and
+          every report use this date.
+        </p>
+      </div>
+
 
       {spec.fields.length > 0 && (
         <div className="grid grid-cols-2 gap-4">

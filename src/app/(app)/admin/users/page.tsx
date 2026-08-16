@@ -5,6 +5,7 @@ import { canAdminister, requireSession } from "@/lib/session";
 import { fmtDateTime } from "@/lib/format";
 import {
   ActiveForm,
+  CompaniesForm,
   CreateUserForm,
   ResetPasswordForm,
   RoleForm,
@@ -21,9 +22,19 @@ export default async function UsersPage() {
   const session = await requireSession();
   if (!canAdminister(session.role)) redirect("/dashboard");
 
-  const users = await prisma.user.findMany({
-    orderBy: [{ isActive: "desc" }, { role: "asc" }, { name: "asc" }],
-  });
+  const [users, companies] = await Promise.all([
+    prisma.user.findMany({
+      orderBy: [{ isActive: "desc" }, { role: "asc" }, { name: "asc" }],
+      include: { companies: { select: { companyId: true } } },
+    }),
+    // Every company in the table, not the viewer's own — an admin granting
+    // access needs to see the options they are choosing between. Which of them
+    // the *viewer* may enter is a separate question, answered by getCompanies().
+    prisma.company.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
 
   // A super admin's account is off limits to an ordinary admin — no role
   // dropdown, no password reset, no deactivate — because each of those is a
@@ -47,6 +58,7 @@ export default async function UsersPage() {
               <th>Name</th>
               <th>Email</th>
               <th>Role</th>
+              <th>Companies</th>
               <th>Added</th>
               <th className="w-56"></th>
             </tr>
@@ -71,6 +83,26 @@ export default async function UsersPage() {
                     ROLE_LABELS[u.role]
                   )}
                 </td>
+                <td>
+                  {u.isActive && mayActOn(u.role) ? (
+                    <CompaniesForm
+                      userId={u.id}
+                      companies={companies}
+                      selected={u.companies.map((g) => g.companyId)}
+                    />
+                  ) : (
+                    <span className="text-muted text-[12px]">
+                      {u.role === "SUPER_ADMIN"
+                        ? "All"
+                        : companies
+                            .filter((c) =>
+                              u.companies.some((g) => g.companyId === c.id)
+                            )
+                            .map((c) => c.name)
+                            .join(", ") || "None"}
+                    </span>
+                  )}
+                </td>
                 <td className="text-muted text-[12px]">
                   {fmtDateTime(u.createdAt)}
                 </td>
@@ -90,7 +122,7 @@ export default async function UsersPage() {
         </table>
       </div>
 
-      <CreateUserForm />
+      <CreateUserForm companies={companies} />
 
       <div className="mt-6 text-[12px] text-muted max-w-lg">
         <p className="font-semibold text-foreground mb-1">What each role can do</p>

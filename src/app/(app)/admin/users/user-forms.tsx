@@ -7,6 +7,7 @@ import {
   createUser,
   resetPassword,
   setUserActive,
+  setUserCompanies,
   setUserRole,
   type UserFormState,
 } from "./actions";
@@ -39,7 +40,44 @@ function Result({ state }: { state: UserFormState }) {
   );
 }
 
-export function CreateUserForm() {
+export type CompanyChoice = { id: string; name: string };
+
+/**
+ * Which companies an account may work in.
+ *
+ * BFM and B2B are separate businesses, so this is a real boundary and not a
+ * convenience — the server refuses a company the user does not hold, whatever
+ * the cookie says. Rendered as checkboxes rather than a multi-select because
+ * there are two of them and both states have to be readable at a glance.
+ */
+function CompanyChecks({
+  companies,
+  selected,
+}: {
+  companies: CompanyChoice[];
+  selected: string[];
+}) {
+  return (
+    <fieldset>
+      <legend className="text-[12px] font-semibold mb-1">Companies</legend>
+      <div className="flex flex-wrap gap-3">
+        {companies.map((c) => (
+          <label key={c.id} className="flex items-center gap-1.5 text-[13px]">
+            <input
+              type="checkbox"
+              name="companyIds"
+              value={c.id}
+              defaultChecked={selected.includes(c.id)}
+            />
+            {c.name}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+export function CreateUserForm({ companies }: { companies: CompanyChoice[] }) {
   const [state, action, pending] = useActionState<UserFormState, FormData>(
     createUser,
     null
@@ -92,6 +130,14 @@ export function CreateUserForm() {
             ))}
           </div>
         </fieldset>
+
+        {/* Defaulted to every company: the common case is one business with
+            one set of staff, and an admin narrowing someone to B2B only is
+            making a deliberate choice they can see they are making. */}
+        <CompanyChecks
+          companies={companies}
+          selected={companies.map((c) => c.id)}
+        />
 
         <label className="block">
           <span className="block text-[12px] font-semibold mb-1">
@@ -165,6 +211,51 @@ export function RoleForm({ userId, role }: { userId: string; role: Role }) {
  * set a password they can read down the phone has somewhere to type it. Blank
  * generates, exactly as it does when creating an account.
  */
+/** Per-row editor for one account's company grants. */
+export function CompaniesForm({
+  userId,
+  companies,
+  selected,
+}: {
+  userId: string;
+  companies: CompanyChoice[];
+  selected: string[];
+}) {
+  const [state, action, pending] = useActionState<UserFormState, FormData>(
+    setUserCompanies,
+    null
+  );
+
+  return (
+    <form action={action} className="flex items-center gap-2">
+      <input type="hidden" name="userId" value={userId} />
+      <div className="flex flex-wrap gap-2">
+        {companies.map((c) => (
+          <label key={c.id} className="flex items-center gap-1 text-[12px]">
+            <input
+              type="checkbox"
+              name="companyIds"
+              value={c.id}
+              defaultChecked={selected.includes(c.id)}
+            />
+            {c.name}
+          </label>
+        ))}
+      </div>
+      <button
+        type="submit"
+        disabled={pending}
+        className="border border-line-strong px-2 py-1 text-[12px] hover:border-accent disabled:opacity-60"
+      >
+        Save
+      </button>
+      {state && "error" in state && (
+        <span className="text-debit text-[12px]">{state.error}</span>
+      )}
+    </form>
+  );
+}
+
 export function ResetPasswordForm({ userId }: { userId: string }) {
   const [state, action, pending] = useActionState<UserFormState, FormData>(
     resetPassword,

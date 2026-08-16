@@ -112,7 +112,11 @@ export default async function SalePage({
 
       <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
         <Field label="Bill No." value={sale.billNo} />
-        <Field label="Date" value={fmtDate(sale.date)} />
+        <Field label="Purchase Date" value={fmtDate(sale.date)} />
+        <Field
+          label="Sale Date"
+          value={fmtDate(sale.saleDate ?? sale.date)}
+        />
         <Field
           label={sale.type === "MARKET" ? "Seller" : "Party"}
           value={sale.party.name}

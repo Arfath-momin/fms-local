@@ -6,7 +6,6 @@ import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { toInputDate } from "@/lib/format";
 import { updateSale } from "../../actions";
 import { ReviewPanel } from "../../../review-panel";
-import { lotFieldData } from "@/lib/lot-db";
 import { SaleForm } from "../../sale-form";
 
 export default async function EditSalePage({
@@ -33,12 +32,6 @@ export default async function EditSalePage({
   });
   if (!sale) notFound();
 
-  // The lot already on this sale stays offered even if it has since been
-  // closed, so a correction cannot silently move the sale to another lot.
-  const { lots, defaultLotId } = await lotFieldData(
-    { companyId: company.id, centreId: centre.id },
-    sale.lotId
-  );
 
   // Drives the "choosing a new one replaces it" hint on the upload field.
   const existingAttachments = await prisma.attachment.count({
@@ -56,14 +49,12 @@ export default async function EditSalePage({
         <ReviewPanel linkedType="SALE" linkedId={sale.id} noun="sale" />
       </div>
       <SaleForm
-        lots={lots}
-        defaultLotId={defaultLotId}
         type={sale.type}
         action={updateSale.bind(null, sale.id)}
         initial={{
           billNo: sale.billNo,
-          lotId: sale.lotId ?? "",
           date: toInputDate(sale.date),
+          saleDate: toInputDate(sale.saleDate ?? sale.date),
           buyerName: sale.party.name,
           careOfName: sale.careOfParty?.name ?? "",
           place: sale.place ?? "",

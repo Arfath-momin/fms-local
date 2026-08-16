@@ -98,6 +98,9 @@ export async function createUser(
   if ("error" in pw) return pw;
   const { password, generated } = pw;
 
+  const companies = await readCompanies(formData);
+  if ("error" in companies) return companies;
+
   try {
     await prisma.user.create({
       data: {
@@ -105,6 +108,11 @@ export async function createUser(
         name,
         role,
         passwordHash: await bcrypt.hash(password, BCRYPT_COST),
+        // Created with the account rather than granted afterwards, so a new
+        // user is never briefly able to sign in and see nothing.
+        companies: {
+          create: companies.companyIds.map((companyId) => ({ companyId })),
+        },
       },
     });
   } catch (e) {
@@ -176,6 +184,79 @@ export async function resetPassword(
   return generated
     ? { ok: `New password for ${user.email}:`, password }
     : { ok: `Password updated for ${user.email}.` };
+}
+
+/**
+ * Read the company checkboxes, refusing an empty set.
+ *
+ * An account with no company can sign in and then see nothing, which looks like
+ * a broken app rather than a permissions decision. Deactivating someone is the
+ * way to take their access away; leaving them with an empty company list is
+ * not, so it is rejected at both ends of the flow.
+ */
+async function readCompanies(
+  formData: FormData
+): Promise<{ error: string } | { companyIds: string[] }> {
+  const requested = formData.getAll("companyIds").map(String).filter(Boolean);
+  if (requested.length === 0)
+    return { error: "Choose at least one company for this account." };
+
+  // Validated against the table so a tampered form cannot create a grant that
+  // points nowhere and would silently never match.
+  const known = await prisma.company.findMany({
+    where: { id: { in: requested } },
+    select: { id: true },
+  });
+  if (known.length !== requested.length)
+    return { error: "One of those companies no longer exists." };
+
+  return { companyIds: known.map((c) => c.id) };
+}
+
+/** Replace an account's company grants with exactly this set. */
+export async function setUserCompanies(
+  _prev: UserFormState,
+  formData: FormData
+): Promise<UserFormState> {
+  const admin = await requireAdmin();
+
+  const userId = String(formData.get("userId") ?? "");
+  const blocked = await assertMayActOn(admin.role, userId);
+  if (blocked) return blocked;
+
+  const parsed = await readCompanies(formData);
+  if ("error" in parsed) return parsed;
+
+  // An admin removing their own access to the company they are standing in
+  // would be bounced to the "no company" screen mid-session with no way back.
+  if (userId === admin.userId && admin.role !== "SUPER_ADMIN") {
+    const own = await prisma.userCompany.findMany({
+      where: { userId },
+      select: { companyId: true },
+    });
+    const losing = own.filter(
+      (g) => !parsed.companyIds.includes(g.companyId)
+    );
+    if (losing.length > 0)
+      return { error: "You cannot remove your own company access." };
+  }
+
+  // Delete-then-insert inside one transaction: the set is small and replacing
+  // it wholesale is simpler to reason about than diffing, while the
+  // transaction means a failure never leaves an account with no company.
+  await prisma.$transaction([
+    prisma.userCompany.deleteMany({
+      where: { userId, companyId: { notIn: parsed.companyIds } },
+    }),
+    prisma.userCompany.createMany({
+      data: parsed.companyIds.map((companyId) => ({ userId, companyId })),
+      skipDuplicates: true,
+    }),
+  ]);
+
+  revalidatePath("/admin/users");
+  revalidatePath("/", "layout");
+  return { ok: "Company access updated." };
 }
 
 export async function setUserActive(

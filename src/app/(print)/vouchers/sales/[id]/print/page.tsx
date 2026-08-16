@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
@@ -7,8 +6,8 @@ import { requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { rupeesInWords } from "@/lib/amount-words";
-import { PrintButton } from "./print-button";
-import "./print.css";
+import { PrintToolbar } from "../../../../print-toolbar";
+import "../../../../voucher-print.css";
 
 /**
  * The customer-facing bill for one sale, as a document.
@@ -62,37 +61,35 @@ export default async function SaleBillPage({
   const hasLines = sale.lines.length > 0;
 
   return (
-    <div className="bill-sheet">
-      <div className="no-print flex items-center justify-between gap-4 mb-4 flex-wrap">
-        <Link
-          href={`/vouchers/sales/${sale.id}`}
-          className="text-muted text-[13px] underline underline-offset-2"
-        >
-          ← Back to the sale
-        </Link>
-        <PrintButton />
-      </div>
+    // data-company resolves --company for the band; the print layout has no
+    // company of its own to set it from.
+    <div className="bill-sheet" data-company={sale.company.name}>
+      <PrintToolbar
+        backHref={`/vouchers/sales/${sale.id}`}
+        backLabel="Back to the sale"
+      />
 
       <div className="bill-paper">
-        {/* Letterhead */}
-        <div className="flex items-start justify-between gap-6 border-b-2 border-line-strong pb-3 mb-4 flex-wrap">
+        <div className="bill-band">
           <div>
             <div className="heading text-2xl font-bold leading-tight">
               {sale.company.name}
             </div>
-            <div className="text-muted text-[12px]">{sale.centre.name}</div>
+            <div className="text-[12px] opacity-80">{sale.centre.name}</div>
           </div>
           <div className="text-right">
-            <div className="text-[11px] uppercase tracking-widest text-muted font-semibold">
+            <div className="doc-kind">
               {SALE_TYPE_LABELS[sale.type]} Sale Bill
             </div>
             <div className="num text-[13px] mt-1">
-              <span className="text-muted">No. </span>
+              <span className="opacity-75">No. </span>
               <span className="font-semibold">{sale.billNo}</span>
             </div>
             <div className="num text-[13px]">
-              <span className="text-muted">Date </span>
-              <span className="font-semibold">{fmtDate(sale.date)}</span>
+              <span className="opacity-75">Date </span>
+              <span className="font-semibold">
+                {fmtDate(sale.saleDate ?? sale.date)}
+              </span>
             </div>
           </div>
         </div>

@@ -13,7 +13,6 @@ import {
   type PostLedgerArgs,
 } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
-import { assertUsableLot } from "@/lib/lot-db";
 import { COMMISSION_PARTY_NAME } from "@/lib/settlement";
 import {
   SALE_TYPES,
@@ -53,9 +52,10 @@ type ParsedLine = {
 type Parsed = {
   type: SaleType;
   billNo: string;
-  /** Which consignment this fish came out of. Required on every sale. */
-  lotId: string;
+  /** The buying day this fish came from — drives the ledger and every report. */
   date: Date;
+  /** When the sale actually happened. Record only; posts to nothing. */
+  saleDate: Date;
   buyerName: string;
   careOfName: string | null;
   amount: Prisma.Decimal; // recognised sale + posted to ledger
@@ -129,19 +129,22 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
 
   const billNo = clean(formData.get("billNo"));
   const dateRaw = String(formData.get("date") ?? "");
+  const saleDateRaw = String(formData.get("saleDate") ?? "");
   const buyerName = clean(formData.get("buyerName"));
-  const lotId = clean(formData.get("lotId"));
   const file = formData.get("bill");
 
   if (!billNo) return { error: "Enter the bill number." };
-  // Required, because a sale with no lot is exactly the hole this feature
-  // exists to close — it would sit outside every consignment's profit.
-  if (!lotId)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw))
+    return { error: "Pick the purchase date this sale came from." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDateRaw))
+    return { error: "Pick the date the sale was made." };
+  // Fish cannot be sold before it was bought. Catches the commonest slip —
+  // typing the sale's own date into the purchase field and vice versa.
+  if (saleDateRaw < dateRaw)
     return {
       error:
-        "Choose the lot this sale came from. If none is open, enter the day's purchase first.",
+        "The sale date is before the purchase date. Check which way round they go.",
     };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
   if (!buyerName)
     return {
       error:
@@ -161,8 +164,8 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const base = {
     type,
     billNo,
-    lotId,
     date: new Date(dateRaw),
+    saleDate: new Date(saleDateRaw),
     buyerName,
     careOfName,
     place: null as string | null,
@@ -283,11 +286,11 @@ async function postSaleLedger(
 function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
   return {
     type: d.type,
-    lotId: d.lotId,
     partyId: buyerId,
     careOfPartyId: careOfId,
     billNo: d.billNo,
     date: d.date,
+    saleDate: d.saleDate,
     amount: d.amount,
     place: d.place,
     totalBill: d.totalBill,
@@ -332,15 +335,6 @@ export async function createSale(
       const careOfId = d.careOfName
         ? await findOrCreateParty(tx, d.careOfName, "CARE_OF")
         : null;
-      // The dropdown already limits the choice, but a form field is only a
-      // suggestion. Without this, a hand-made request could file a sale against
-      // another centre's lot and quietly corrupt that centre's profit.
-      const badLot = await assertUsableLot(
-        tx,
-        { companyId: company.id, centreId: centre.id },
-        d.lotId
-      );
-      if (badLot) throw new Error(badLot.error);
       const sale = await tx.sale.create({
         data: {
           companyId: company.id,
@@ -441,9 +435,7 @@ export async function updateSale(
         // Scoped: an admin may only change or remove a voucher that belongs to
         // the company and centre they are currently working in.
         where: { id: saleId, companyId: company.id, centreId: centre.id },
-        // lotId comes back so a sale sitting on a since-closed lot can be
-        // corrected without anyone having to reopen that lot first.
-        select: { companyId: true, centreId: true, date: true, lotId: true },
+        select: { companyId: true, centreId: true, date: true },
       });
       if (!existing) throw new Error("Sale not found.");
 
@@ -459,15 +451,6 @@ export async function updateSale(
       const careOfId = d.careOfName
         ? await findOrCreateParty(tx, d.careOfName, "CARE_OF")
         : null;
-      // `existing.lotId` is re-admitted so a correction to a sale whose lot has
-      // since been closed still saves, rather than forcing a reopen to fix a typo.
-      const badLot = await assertUsableLot(
-        tx,
-        { companyId: existing.companyId, centreId: existing.centreId },
-        d.lotId,
-        existing.lotId
-      );
-      if (badLot) throw new Error(badLot.error);
       await tx.sale.update({
         where: { id: saleId },
         data: {

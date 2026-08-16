@@ -71,14 +71,24 @@ export default async function DeliveryNotePage({
             {note.company.name} · {note.centre.name} · record only
           </p>
         </div>
-        {mayEdit && (
+        <div className="flex gap-2">
+          {/* The copy that travels with the vehicle. The browser's print dialog
+              is also where "Save as PDF" lives, so this covers both. */}
           <Link
-            href={`/vouchers/deliveries/${note.id}/edit`}
+            href={`/vouchers/deliveries/${note.id}/print`}
             className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
           >
-            Edit
+            Print Note
           </Link>
-        )}
+          {mayEdit && (
+            <Link
+              href={`/vouchers/deliveries/${note.id}/edit`}
+              className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
+            >
+              Edit
+            </Link>
+          )}
+        </div>
       </div>
 
       <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">

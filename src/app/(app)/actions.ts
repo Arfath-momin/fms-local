@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { setActiveCompanyCookie } from "@/lib/company";
+import {
+  getActiveCompany,
+  getCompanies,
+  setActiveCompanyCookie,
+} from "@/lib/company";
 import { setActiveCentreCookie } from "@/lib/centre";
 import { destroySession, landingPathFor, requireSession } from "@/lib/session";
 
@@ -22,9 +26,16 @@ import { destroySession, landingPathFor, requireSession } from "@/lib/session";
 export async function switchCompany(formData: FormData) {
   const session = await requireSession();
   const companyId = String(formData.get("companyId") ?? "");
-  const company = await prisma.company.findUnique({ where: { id: companyId } });
-  if (!company) throw new Error("Unknown company.");
-  await setActiveCompanyCookie(company.id);
+
+  // Checked against what this user actually holds, not against the company
+  // table. getActiveCompany() would refuse an ungranted cookie anyway, but a
+  // switch that appeared to succeed and then silently put them somewhere else
+  // is a worse answer than saying no here.
+  const allowed = await getCompanies();
+  if (!allowed.some((c) => c.id === companyId))
+    throw new Error("You do not have access to that company.");
+
+  await setActiveCompanyCookie(companyId);
   revalidatePath("/", "layout");
   redirect(landingPathFor(session.role));
 }
@@ -32,7 +43,12 @@ export async function switchCompany(formData: FormData) {
 export async function switchCentre(formData: FormData) {
   const session = await requireSession();
   const centreId = String(formData.get("centreId") ?? "");
-  const centre = await prisma.centre.findUnique({ where: { id: centreId } });
+  // Scoped to the active company: a centre id from another company must not be
+  // settable, or the cookie would point outside the company boundary above.
+  const company = await getActiveCompany();
+  const centre = await prisma.centre.findFirst({
+    where: { id: centreId, companyId: company.id, archivedAt: null },
+  });
   if (!centre) throw new Error("Unknown centre.");
   await setActiveCentreCookie(centre.id);
   revalidatePath("/", "layout");

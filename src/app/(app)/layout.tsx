@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { getActiveCompany, getCompanies } from "@/lib/company";
 import { getActiveCentre, getCentres } from "@/lib/centre";
 import { logout, switchCompany, switchCentre } from "./actions";
+import { NoCompanyNotice } from "./no-company";
 import { NavLinks } from "./nav-links";
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -17,10 +18,14 @@ export default async function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const session = await requireSession();
-  const [companies, activeCompany] = await Promise.all([
-    getCompanies(),
-    getActiveCompany(),
-  ]);
+
+  // Only the companies this account holds — the switcher below is rendered from
+  // the same list getActiveCompany() enforces against, so it can never offer a
+  // company that would then be refused.
+  const companies = await getCompanies();
+  if (companies.length === 0) return <NoCompanyNotice name={session.name} />;
+
+  const activeCompany = await getActiveCompany();
   const [centres, activeCentre] = await Promise.all([
     getCentres(activeCompany.id),
     getActiveCentre(activeCompany.id),
@@ -34,29 +39,41 @@ export default async function AppLayout({
           <div className="heading text-white text-lg font-semibold leading-none">
             FMS
           </div>
-          {/* Company switcher — always visible, unmistakable (design doc #1) */}
+          {/* Company switcher — unmistakable when there is a choice to make
+              (design doc #1). A user granted one company gets a plain label
+              instead: a single button that only ever reloads the same screen
+              reads as broken. */}
           <div className="mt-3 flex gap-1">
-            {companies.map((c) => {
-              const active = c.id === activeCompany.id;
-              return (
-                <form action={switchCompany} key={c.id} className="flex-1">
-                  <input type="hidden" name="companyId" value={c.id} />
-                  <button
-                    type="submit"
-                    aria-pressed={active}
-                    data-company={c.name}
-                    className={
-                      "w-full py-1.5 text-[12px] font-bold tracking-wide border " +
-                      (active
-                        ? "bg-company text-company-ink border-transparent"
-                        : "bg-transparent text-sidebar-ink/70 border-white/20 hover:border-white/50")
-                    }
-                  >
-                    {c.name}
-                  </button>
-                </form>
-              );
-            })}
+            {companies.length === 1 && (
+              <div
+                data-company={activeCompany.name}
+                className="w-full py-1.5 text-center text-[12px] font-bold tracking-wide bg-company text-company-ink"
+              >
+                {activeCompany.name}
+              </div>
+            )}
+            {companies.length > 1 &&
+              companies.map((c) => {
+                const active = c.id === activeCompany.id;
+                return (
+                  <form action={switchCompany} key={c.id} className="flex-1">
+                    <input type="hidden" name="companyId" value={c.id} />
+                    <button
+                      type="submit"
+                      aria-pressed={active}
+                      data-company={c.name}
+                      className={
+                        "w-full py-1.5 text-[12px] font-bold tracking-wide border " +
+                        (active
+                          ? "bg-company text-company-ink border-transparent"
+                          : "bg-transparent text-sidebar-ink/70 border-white/20 hover:border-white/50")
+                      }
+                    >
+                      {c.name}
+                    </button>
+                  </form>
+                );
+              })}
           </div>
 
           {/* Centre switcher — the active centre scopes every entry and ledger */}
@@ -102,9 +119,7 @@ export default async function AppLayout({
 
         <div className="mt-auto px-4 py-3 border-t border-white/10 text-[12px]">
           <div className="text-white">{session.name}</div>
-          <div className="text-sidebar-ink/60">
-            {ROLE_LABELS[session.role]}
-          </div>
+          <div className="text-sidebar-ink/60">{ROLE_LABELS[session.role]}</div>
           <form action={logout} className="mt-2">
             <button
               type="submit"

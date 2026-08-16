@@ -8,7 +8,6 @@ import type { SaleFormState } from "./actions";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
-import { LotField, type LotOption } from "../lot-field";
 import { DateField } from "../../date-field";
 import { PartyCombobox } from "../../masters/party-combobox";
 import {
@@ -34,9 +33,10 @@ export type SaleLineInit = {
 
 export type SaleInit = {
   billNo: string;
-  /** The lot this sale is already filed under, when editing. */
-  lotId: string;
+  /** The purchase day this sale counts against. */
   date: string;
+  /** When the sale happened. Record only. */
+  saleDate: string;
   buyerName: string;
   careOfName: string;
   place: string;
@@ -65,8 +65,6 @@ export function SaleForm({
   type,
   action,
   initial,
-  lots,
-  defaultLotId,
   submitLabel,
   existingAttachments = 0,
   allowBillUpload = true,
@@ -75,10 +73,6 @@ export function SaleForm({
   type: SaleType;
   action: (prev: SaleFormState, formData: FormData) => Promise<SaleFormState>;
   initial?: SaleInit;
-  /** Open lots of this centre, plus the one this sale is already on. */
-  lots: LotOption[];
-  /** Newest open consignment — what a sale entered today usually belongs to. */
-  defaultLotId?: string;
   submitLabel: string;
   existingAttachments?: number;
   /** False once the voucher exists — the Attachments panel handles images then. */
@@ -139,27 +133,42 @@ export function SaleForm({
           />
         </div>
         <div>
-          <label htmlFor="date" className={labelCls}>
-            Date
+          <label htmlFor="saleDate" className={labelCls}>
+            Sale Date
           </label>
           <DateField
-            id="date"
-            name="date"
+            id="saleDate"
+            name="saleDate"
             required
-            defaultValue={initial?.date ?? today}
+            defaultValue={initial?.saleDate ?? today}
             className={inputCls}
           />
+          <p className="text-muted text-[12px] mt-1">
+            When this sale was made. For the record only.
+          </p>
         </div>
       </div>
 
-      {/* Directly under the date, because "which day's fish" is the question
-          right after "what day is it" — and the two are usually different. */}
-      <LotField
-        lots={lots}
-        defaultValue={initial?.lotId || defaultLotId}
-        className={inputCls + " max-w-xs"}
-        labelClassName={labelCls}
-      />
+      {/* The field that decides where the money lands. Fish bought on the 16th
+          and sold on the 18th belongs to the 16th, so that is the day whose
+          profit it counts toward — and the day this must name. */}
+      <div className="max-w-xs">
+        <label htmlFor="date" className={labelCls}>
+          Purchase Date
+        </label>
+        <DateField
+          id="date"
+          name="date"
+          required
+          defaultValue={initial?.date ?? today}
+          className={inputCls}
+        />
+        <p className="text-muted text-[12px] mt-1">
+          Which day&apos;s fish this is. The ledger, the Day Book and every
+          report use this date — not the sale date above.
+        </p>
+      </div>
+
 
       <div className="grid grid-cols-2 gap-4">
         <PartyCombobox
