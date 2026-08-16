@@ -7,7 +7,14 @@ import { getSession } from "@/lib/session";
 
 const COOKIE_NAME = "fms_company";
 
-export type CompanyInfo = { id: string; name: string };
+export type CompanyInfo = {
+  id: string;
+  name: string;
+  /** Band and switcher colour; null falls back to the stylesheet default. */
+  colour: string | null;
+  /** Whether a letterhead logo has been uploaded, for the header and bills. */
+  hasLogo: boolean;
+};
 
 /**
  * The companies the signed-in user may work in.
@@ -28,13 +35,18 @@ export const getCompanies = cache(async function getCompanies(): Promise<
   const session = await getSession();
   if (!session) return [];
 
-  return prisma.company.findMany({
+  const rows = await prisma.company.findMany({
     where: canSeeAllCompanies(session.role)
       ? undefined
       : { users: { some: { userId: session.userId } } },
     orderBy: { name: "asc" },
-    select: { id: true, name: true },
+    select: { id: true, name: true, colour: true, logoKey: true },
   });
+
+  // logoKey is reduced to a boolean: callers only need to know whether to
+  // render an <img>, and the bytes are fetched through /api/company-logo/[id]
+  // rather than travelling with every page render.
+  return rows.map(({ logoKey, ...c }) => ({ ...c, hasLogo: logoKey !== null }));
 });
 
 /** Super admins are never filtered by company grants. */

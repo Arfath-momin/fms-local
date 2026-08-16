@@ -4,6 +4,7 @@ import { getActiveScope } from "@/lib/centre";
 import { requireSession } from "@/lib/session";
 import { lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { Letterhead } from "../../../../letterhead";
 import { PrintToolbar } from "../../../../print-toolbar";
 import "../../../../voucher-print.css";
 
@@ -36,7 +37,12 @@ export default async function DeliveryNotePrintPage({
     // or centre must not print from the scope you are in.
     where: { id, companyId: company.id, centreId: centre.id },
     include: {
-      company: { select: { name: true } },
+      company: {
+        select: {
+          id: true, name: true, legalName: true, address: true,
+          phone: true, email: true, gstin: true, colour: true, logoKey: true,
+        },
+      },
       centre: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
     },
@@ -48,7 +54,15 @@ export default async function DeliveryNotePrintPage({
   return (
     // data-company resolves --company for the band; the print layout has no
     // company of its own to set it from.
-    <div className="bill-sheet" data-company={note.company.name}>
+    <div
+      className="bill-sheet"
+      data-company={note.company.name}
+      style={
+        note.company.colour
+          ? ({ "--company": note.company.colour } as React.CSSProperties)
+          : undefined
+      }
+    >
       <PrintToolbar
         backHref={`/vouchers/deliveries/${note.id}`}
         backLabel="Back to the delivery note"
@@ -56,12 +70,7 @@ export default async function DeliveryNotePrintPage({
 
       <div className="bill-paper">
         <div className="bill-band">
-          <div>
-            <div className="heading text-2xl font-bold leading-tight">
-              {note.company.name}
-            </div>
-            <div className="text-[12px] opacity-80">{note.centre.name}</div>
-          </div>
+          <Letterhead company={note.company} centreName={note.centre.name} />
           <div className="text-right">
             <div className="doc-kind">Delivery Note</div>
             <div className="num text-[13px] mt-1">

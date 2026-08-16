@@ -6,6 +6,7 @@ import { requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS, saleLineTotalKg } from "@/lib/sale";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { rupeesInWords } from "@/lib/amount-words";
+import { Letterhead } from "../../../../letterhead";
 import { PrintToolbar } from "../../../../print-toolbar";
 import "../../../../voucher-print.css";
 
@@ -34,7 +35,12 @@ export default async function SaleBillPage({
     // company or centre must not print from the scope you are in.
     where: { id, companyId: company.id, centreId: centre.id },
     include: {
-      company: { select: { name: true } },
+      company: {
+        select: {
+          id: true, name: true, legalName: true, address: true,
+          phone: true, email: true, gstin: true, colour: true, logoKey: true,
+        },
+      },
       centre: { select: { name: true } },
       party: { select: { name: true, contactInfo: true } },
       careOfParty: { select: { name: true } },
@@ -63,7 +69,15 @@ export default async function SaleBillPage({
   return (
     // data-company resolves --company for the band; the print layout has no
     // company of its own to set it from.
-    <div className="bill-sheet" data-company={sale.company.name}>
+    <div
+      className="bill-sheet"
+      data-company={sale.company.name}
+      style={
+        sale.company.colour
+          ? ({ "--company": sale.company.colour } as React.CSSProperties)
+          : undefined
+      }
+    >
       <PrintToolbar
         backHref={`/vouchers/sales/${sale.id}`}
         backLabel="Back to the sale"
@@ -71,12 +85,7 @@ export default async function SaleBillPage({
 
       <div className="bill-paper">
         <div className="bill-band">
-          <div>
-            <div className="heading text-2xl font-bold leading-tight">
-              {sale.company.name}
-            </div>
-            <div className="text-[12px] opacity-80">{sale.centre.name}</div>
-          </div>
+          <Letterhead company={sale.company} centreName={sale.centre.name} />
           <div className="text-right">
             <div className="doc-kind">
               {SALE_TYPE_LABELS[sale.type]} Sale Bill

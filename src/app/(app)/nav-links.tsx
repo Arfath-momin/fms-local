@@ -20,6 +20,10 @@ const LINKS: { href: string; label: string; roles?: Role[] }[] = [
   { href: "/reports", label: "Reports", roles: ["ADMIN", "AUDITOR"] },
   { href: "/union", label: "Union", roles: ["ADMIN", "AUDITOR"] },
   { href: "/admin/users", label: "Users", roles: ["ADMIN"] },
+  // Super admin only, and not via the ADMIN-matches rule below: a company is
+  // the boundary every other permission is expressed against, so the people it
+  // exists to separate must not be able to add one.
+  { href: "/admin/companies", label: "Companies", roles: ["SUPER_ADMIN"] },
 ];
 
 /**

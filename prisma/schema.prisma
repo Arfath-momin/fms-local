@@ -87,6 +87,40 @@ model UserCompany {
 model Company {
   id        String   @id @default(uuid())
   name      String   @unique // "BFM" / "B2B"
+  /// The colour of this company's band and switcher chip, as `#rrggbb`.
+  ///
+  /// Company identity is the app's first design rule — you must never be in
+  /// doubt whose books are on screen. That used to be two hardcoded CSS rules
+  /// keyed on the names BFM and B2B, which meant a third company rendered in
+  /// the default blue and looked exactly like BFM. Storing it makes the colour
+  /// a property of the company rather than of the stylesheet.
+  ///
+  /// Null falls back to the stylesheet, which is what rows created before this
+  /// column do.
+  colour    String?  @db.VarChar(7)
+
+  // --- Letterhead ---------------------------------------------------------
+  // Printed at the top of every sale bill and delivery note. All optional: a
+  // company with none of it still prints, just with the short name alone, so
+  // adding a company never blocks on paperwork details nobody has to hand yet.
+
+  /// The registered name, when it differs from the short one used in the UI —
+  /// "Bismillah Fish Merchants" against a switcher that reads "BFM". Printed
+  /// in place of `name` on documents when set.
+  legalName     String? @map("legal_name")
+  /// Free-form, newlines preserved — Indian addresses do not fit a fixed shape.
+  address       String?
+  phone         String?
+  email         String?
+  /// Who to ask for. Printed on the bill so a buyer with a query has a name.
+  contactPerson String? @map("contact_person")
+  /// GST identification number, printed on documents where quoted.
+  gstin         String?
+  /// Storage key of the logo in the same image store as bill photos (see
+  /// src/lib/attachments.ts). A key rather than a foreign key to Attachment:
+  /// that model requires a centreId, and a company logo belongs to no centre.
+  logoKey       String? @map("logo_key")
+
   createdAt DateTime @default(now()) @map("created_at")
 
   centres        Centre[]

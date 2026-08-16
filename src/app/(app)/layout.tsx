@@ -32,7 +32,18 @@ export default async function AppLayout({
   ]);
 
   return (
-    <div data-company={activeCompany.name} className="flex-1 flex min-h-screen">
+    <div
+      data-company={activeCompany.name}
+      // Inline so it beats the [data-company] rules in globals.css, which only
+      // know about BFM and B2B. A company added from the Companies screen
+      // carries its own colour and must not fall back to BFM's.
+      style={
+        activeCompany.colour
+          ? ({ "--company": activeCompany.colour } as React.CSSProperties)
+          : undefined
+      }
+      className="flex-1 flex min-h-screen"
+    >
       {/* Gateway sidebar — Tally-style top-level sections */}
       <aside className="w-52 shrink-0 bg-sidebar text-sidebar-ink flex flex-col">
         <div className="px-4 py-4 border-b border-white/10">
@@ -62,6 +73,11 @@ export default async function AppLayout({
                       type="submit"
                       aria-pressed={active}
                       data-company={c.name}
+                      style={
+                        c.colour
+                          ? ({ "--company": c.colour } as React.CSSProperties)
+                          : undefined
+                      }
                       className={
                         "w-full py-1.5 text-[12px] font-bold tracking-wide border " +
                         (active
@@ -134,7 +150,15 @@ export default async function AppLayout({
       <div className="flex-1 flex flex-col min-w-0">
         {/* Company band — constant, colored, impossible to miss (design doc #1) */}
         <header className="bg-company text-company-ink px-6 py-2 flex items-center justify-between">
-          <span className="text-[13px] font-bold tracking-widest uppercase">
+          <span className="text-[13px] font-bold tracking-widest uppercase flex items-center gap-2">
+            {activeCompany.hasLogo && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`/api/company-logo/${activeCompany.id}`}
+                alt=""
+                className="h-5 w-5 object-contain"
+              />
+            )}
             {activeCompany.name}
             {activeCentre ? (
               <span className="font-medium normal-case tracking-normal opacity-90">

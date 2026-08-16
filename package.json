@@ -16,7 +16,8 @@
     "db:verify": "tsx scripts/verify-ledger.ts",
     "db:split-local": "tsx scripts/split-local-individuals.ts",
     "db:backfill-kind": "tsx scripts/backfill-party-kind.ts",
-    "user:create": "tsx scripts/create-user.ts"
+    "user:create": "tsx scripts/create-user.ts",
+    "bootstrap": "tsx scripts/bootstrap.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
