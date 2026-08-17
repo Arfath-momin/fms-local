@@ -36,7 +36,17 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-fms}
       TZ: ${TZ:-Asia/Kolkata}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Mounted at /var/lib/postgresql, NOT at .../data. The Postgres 18 images
+      # moved the default PGDATA to a versioned path — verified in production:
+      #
+      #   $ docker compose exec postgres sh -c 'echo $PGDATA'
+      #   /var/lib/postgresql/18/docker
+      #
+      # Mounting the old .../data path would leave PGDATA on the container's
+      # writable layer instead of the volume: the database appears to work, and
+      # then every row vanishes the next time the container is recreated.
+      # Mounting the parent contains whatever versioned directory PG chooses.
+      - pgdata:/var/lib/postgresql
     # Deliberately no `ports:` — Postgres is reachable only on the compose
     # network, never from the public internet.
     healthcheck:
