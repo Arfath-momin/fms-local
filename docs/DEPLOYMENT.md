@@ -618,13 +618,18 @@ docker compose up -d --build
 
 Deployment does not cover these. They are worth deciding deliberately.
 
-- **Password resets** — an admin does these from the Users screen. If every
-  admin account is lost, recovery is `scripts/create-user.ts` over SSH.
+- **Password resets** — the super admin does these from the Users screen. That
+  screen is super-admin-only: admins run the books but never manage accounts or
+  company access. If the super admin account is lost, recovery is
+  `scripts/create-user.ts` over SSH.
 - **Monitoring.** Nothing tells you if the site goes down at 3 AM. A free
   uptime checker (UptimeRobot, Better Stack) pointed at your domain closes this
   in five minutes.
 - **Postgres major upgrades.** The image is pinned to `postgres:18-alpine`
   deliberately: Postgres refuses to start against a data directory written by a
   different major version. Upgrading needs a dump-and-restore, not a tag bump.
-- **A second admin account.** Create one from the Users screen; if your only
-  admin is lost you are recovering over SSH.
+- **A second super admin.** SUPER_ADMIN cannot be granted from the Users screen
+  by design, so a spare has to be minted with `scripts/create-user.ts` over SSH.
+  Worth doing before you need it: an ordinary admin cannot reach user management
+  at all, so losing your only super admin means no password resets and no new
+  accounts until you SSH in.

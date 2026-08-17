@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 import { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { canAdminister, requireAdmin } from "@/lib/session";
+import { requireSuperAdmin } from "@/lib/session";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 
 export type UserFormState =
@@ -14,11 +14,17 @@ export type UserFormState =
   | { ok: string; password?: string }
   | null;
 
-// SUPER_ADMIN is deliberately absent: it is the role that can undo an admin's
-// housekeeping and delete masters outright, so it must not be grantable by the
-// people it exists to sit above. readRole() rejects anything not listed here,
-// which closes the form-tampering route as well as the UI one. The only way to
-// mint one is scripts/create-user.ts, which needs shell access to the server.
+// Every action in this file is requireSuperAdmin(). User management is not an
+// admin's job: an admin who can create accounts can mint another ADMIN, and an
+// admin who can edit company grants can add themselves to books they were never
+// given. Both were reachable before this, so the guard is the security boundary
+// here and not a convenience — see canSuperAdminister() in lib/session.ts.
+//
+// SUPER_ADMIN is deliberately absent from the grantable list even so. The role
+// is minted only by scripts/bootstrap.ts or scripts/create-user.ts, which need
+// shell access to the server, so a stolen super-admin session still cannot
+// manufacture a second permanent one. readRole() rejects anything not listed
+// here, which closes the form-tampering route as well as the UI one.
 const ROLES: Role[] = ["ADMIN", "ACCOUNTANT", "AUDITOR"];
 const BCRYPT_COST = 12;
 
@@ -56,34 +62,16 @@ function readRole(formData: FormData): Role | null {
   return (ROLES as string[]).includes(raw) ? (raw as Role) : null;
 }
 
-/**
- * Guards every action that acts *on* an existing account.
- *
- * Blocking the granting of SUPER_ADMIN is only half the job — without this, an
- * admin could demote the super admin to ADMIN, deactivate them, or simply reset
- * their password and sign in as them, and any one of those hands over the role
- * they were never allowed to be given. A super admin's account is therefore
- * editable only by a super admin.
- */
-async function assertMayActOn(
-  actor: Role,
-  userId: string
-): Promise<{ error: string } | null> {
-  if (actor === "SUPER_ADMIN") return null;
-  const target = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  });
-  if (target?.role === "SUPER_ADMIN")
-    return { error: "That account can only be changed by the system owner." };
-  return null;
-}
+// The former assertMayActOn() guard is gone with the role change. It existed to
+// stop an ADMIN reaching a SUPER_ADMIN's account — demoting them, resetting
+// their password, signing in as them. No ADMIN reaches this file at all now, so
+// the check could only ever compare a super admin against themselves.
 
 export async function createUser(
   _prev: UserFormState,
   formData: FormData
 ): Promise<UserFormState> {
-  await requireAdmin();
+  await requireSuperAdmin();
 
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const name = String(formData.get("name") ?? "").trim();
@@ -133,23 +121,17 @@ export async function setUserRole(
   _prev: UserFormState,
   formData: FormData
 ): Promise<UserFormState> {
-  const admin = await requireAdmin();
+  const admin = await requireSuperAdmin();
 
   const userId = String(formData.get("userId") ?? "");
   const role = readRole(formData);
   if (!role) return { error: "Choose a role." };
 
-  const blocked = await assertMayActOn(admin.role, userId);
-  if (blocked) return blocked;
-
-  // Losing the last admin would leave nobody able to manage users or edit a
-  // voucher, recoverable only from the server. The same applies a tier up: the
-  // role list here cannot express SUPER_ADMIN, so any self-change by one is a
-  // demotion out of a role only the shell can restore.
-  if (userId === admin.userId && admin.role === "SUPER_ADMIN")
+  // ROLES cannot express SUPER_ADMIN, so any self-change here is a demotion out
+  // of a role only the shell can restore — and with it goes the only account
+  // able to reach this screen. Refused outright.
+  if (userId === admin.userId)
     return { error: "You cannot change your own role." };
-  if (userId === admin.userId && !canAdminister(role))
-    return { error: "You cannot remove your own admin rights." };
 
   await prisma.user.update({ where: { id: userId }, data: { role } });
   revalidatePath("/admin/users");
@@ -160,11 +142,9 @@ export async function resetPassword(
   _prev: UserFormState,
   formData: FormData
 ): Promise<UserFormState> {
-  const admin = await requireAdmin();
+  await requireSuperAdmin();
 
   const userId = String(formData.get("userId") ?? "");
-  const blocked = await assertMayActOn(admin.role, userId);
-  if (blocked) return blocked;
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return { error: "That account no longer exists." };
@@ -218,28 +198,23 @@ export async function setUserCompanies(
   _prev: UserFormState,
   formData: FormData
 ): Promise<UserFormState> {
-  const admin = await requireAdmin();
+  await requireSuperAdmin();
 
   const userId = String(formData.get("userId") ?? "");
-  const blocked = await assertMayActOn(admin.role, userId);
-  if (blocked) return blocked;
 
   const parsed = await readCompanies(formData);
   if ("error" in parsed) return parsed;
 
-  // An admin removing their own access to the company they are standing in
-  // would be bounced to the "no company" screen mid-session with no way back.
-  if (userId === admin.userId && admin.role !== "SUPER_ADMIN") {
-    const own = await prisma.userCompany.findMany({
-      where: { userId },
-      select: { companyId: true },
-    });
-    const losing = own.filter(
-      (g) => !parsed.companyIds.includes(g.companyId)
-    );
-    if (losing.length > 0)
-      return { error: "You cannot remove your own company access." };
-  }
+  // This action is the reason the whole screen moved to super admin. It sets a
+  // company grant to an arbitrary set, and the old self-check only refused to
+  // REMOVE the caller's own access — nothing stopped an admin ADDING one. An
+  // admin granted BFM alone could therefore tick B2B against their own account
+  // and walk into books they were never given, which is precisely the boundary
+  // UserCompany exists to draw.
+  //
+  // No self-check is needed now: a super admin is never filtered by grants at
+  // all (see getCompanies() in lib/company.ts), so editing their own row here
+  // cannot lock them out of anything.
 
   // Delete-then-insert inside one transaction: the set is small and replacing
   // it wholesale is simpler to reason about than diffing, while the
@@ -263,17 +238,20 @@ export async function setUserActive(
   _prev: UserFormState,
   formData: FormData
 ): Promise<UserFormState> {
-  const admin = await requireAdmin();
+  const admin = await requireSuperAdmin();
 
   const userId = String(formData.get("userId") ?? "");
   const isActive = String(formData.get("isActive") ?? "") === "true";
 
-  const blocked = await assertMayActOn(admin.role, userId);
-  if (blocked) return blocked;
-
   if (userId === admin.userId && !isActive)
     return { error: "You cannot deactivate your own account." };
 
+  // Leaves at least one active account that can still edit a voucher. Note this
+  // counts ADMIN too, which is intentionally weaker than "one active super
+  // admin": deactivating the last super admin would strand user management, but
+  // it cannot happen through here anyway, because the only role that reaches
+  // this action is SUPER_ADMIN and the check above stops them deactivating
+  // themselves. So the actor is always a surviving super admin.
   if (!isActive) {
     const otherAdmins = await prisma.user.count({
       where: {

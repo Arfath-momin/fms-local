@@ -50,12 +50,17 @@ export const canEdit = (role: Role): boolean =>
  */
 export const canRequestReview = (role: Role): boolean => role === "ACCOUNTANT";
 
-/** May manage users and centres, and retire a master. Admin and above. */
+/**
+ * May manage centres and retire a master. Admin and above.
+ *
+ * Explicitly NOT user management — that is canSuperAdminister(). An admin runs
+ * the books and the masters; who may sign in at all is a tier above.
+ */
 export const canAdminister = (role: Role): boolean =>
   role === "SUPER_ADMIN" || role === "ADMIN";
 
 /**
- * May un-archive a master, and delete one for real.
+ * May manage user accounts, un-archive a master, and delete one for real.
  *
  * The split from canAdminister is the whole point of the role. An admin running
  * the books can retire a centre or a party they have finished with — that is
@@ -63,6 +68,14 @@ export const canAdminister = (role: Role): boolean =>
  * ordinary: it puts a name the merchant chose to remove back into every picker,
  * and where a party is concerned it revives a ledger. Deleting is narrower
  * still and cannot be undone at all. Both belong to whoever owns the system.
+ *
+ * User management sits here for the same reason, and it was a real hole while
+ * it did not. Granting it to ADMIN handed every admin two escalations: they
+ * could mint another ADMIN, and — because company grants are edited through the
+ * same screen — they could add themselves to a company they had never been
+ * given. An admin created for BFM alone could sign in and take B2B. Both routes
+ * close by making the whole screen super-admin-only: an admin never chooses who
+ * may sign in, nor which books anyone (themselves included) may open.
  */
 export const canSuperAdminister = (role: Role): boolean =>
   role === "SUPER_ADMIN";

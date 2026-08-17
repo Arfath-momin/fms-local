@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { canAdminister, requireSession } from "@/lib/session";
+import { canSuperAdminister, requireSession } from "@/lib/session";
 import { fmtDateTime } from "@/lib/format";
 import {
   ActiveForm,
@@ -20,7 +20,11 @@ const ROLE_LABELS: Record<Role, string> = {
 
 export default async function UsersPage() {
   const session = await requireSession();
-  if (!canAdminister(session.role)) redirect("/dashboard");
+  // Super admin only. An admin reaching this by typed URL is bounced rather
+  // than shown an error: they have no business here, but arriving is a
+  // navigation mistake (a stale bookmark from when this was theirs), not an
+  // attack. The actions enforce the same rule independently.
+  if (!canSuperAdminister(session.role)) redirect("/dashboard");
 
   const [users, companies] = await Promise.all([
     prisma.user.findMany({
@@ -36,19 +40,18 @@ export default async function UsersPage() {
     }),
   ]);
 
-  // A super admin's account is off limits to an ordinary admin — no role
-  // dropdown, no password reset, no deactivate — because each of those is a
-  // route to taking over the tier above. The server refuses these too; this
-  // only stops the buttons being offered. Mirrors assertMayActOn() in actions.
-  const mayActOn = (role: Role) =>
-    session.role === "SUPER_ADMIN" || role !== "SUPER_ADMIN";
+  // Everyone reaching this page is a super admin, so every control is offered
+  // on every row. The one exception is handled inline below: a super admin may
+  // not change their own role or deactivate themselves, because ROLES cannot
+  // express SUPER_ADMIN and the demotion is only reversible from the shell.
+  const isSelf = (userId: string) => userId === session.userId;
 
   return (
     <div className="max-w-4xl">
       <h1 className="heading text-xl font-semibold mb-1">Users</h1>
       <p className="text-muted text-[13px] mb-4">
         Who can sign in, and what they are allowed to do. There is no self-signup
-        — every account is created here.
+        — every account is created here, by the system owner only.
       </p>
 
       <div className="border border-line-strong bg-surface mb-6">
@@ -77,14 +80,16 @@ export default async function UsersPage() {
                 </td>
                 <td>{u.email}</td>
                 <td>
-                  {u.isActive && mayActOn(u.role) ? (
+                  {u.isActive && !isSelf(u.id) ? (
                     <RoleForm userId={u.id} role={u.role} />
                   ) : (
                     ROLE_LABELS[u.role]
                   )}
                 </td>
                 <td>
-                  {u.isActive && mayActOn(u.role) ? (
+                  {/* A super admin is never filtered by grants, so editing
+                      theirs would change nothing — show "All" instead. */}
+                  {u.isActive && u.role !== "SUPER_ADMIN" ? (
                     <CompaniesForm
                       userId={u.id}
                       companies={companies}
@@ -108,10 +113,8 @@ export default async function UsersPage() {
                 </td>
                 <td>
                   <div className="flex gap-3">
-                    {u.isActive && mayActOn(u.role) && (
-                      <ResetPasswordForm userId={u.id} />
-                    )}
-                    {u.id !== session.userId && mayActOn(u.role) && (
+                    {u.isActive && <ResetPasswordForm userId={u.id} />}
+                    {!isSelf(u.id) && (
                       <ActiveForm userId={u.id} isActive={u.isActive} />
                     )}
                   </div>
@@ -127,18 +130,18 @@ export default async function UsersPage() {
       <div className="mt-6 text-[12px] text-muted max-w-lg">
         <p className="font-semibold text-foreground mb-1">What each role can do</p>
         <ul className="space-y-1">
-          {session.role === "SUPER_ADMIN" && (
-            <li>
-              <span className="font-semibold">Super Admin</span> — everything an
-              admin can do, plus restoring an archived centre or party and
-              deleting an unused one for good. Cannot be granted from this
-              screen; it is set on the server.
-            </li>
-          )}
+          <li>
+            <span className="font-semibold">Super Admin</span> — everything an
+            admin can do, plus this screen: who may sign in, what role they
+            hold, and which companies they can open. Also restores an archived
+            centre or party and deletes an unused one for good. Cannot be
+            granted from here; it is set on the server.
+          </li>
           <li>
             <span className="font-semibold">Admin</span> — runs the books.
             Everything else, including changing a voucher after it is saved and
-            archiving a centre or party that is no longer needed.
+            archiving a centre or party that is no longer needed. Does not
+            manage accounts and never sees this screen.
           </li>
           <li>
             <span className="font-semibold">Accountant</span> — enters purchases,

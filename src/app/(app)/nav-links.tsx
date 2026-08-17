@@ -19,10 +19,12 @@ const LINKS: { href: string; label: string; roles?: Role[] }[] = [
   { href: "/ledgers", label: "Ledgers" },
   { href: "/reports", label: "Reports", roles: ["ADMIN", "AUDITOR"] },
   { href: "/union", label: "Union", roles: ["ADMIN", "AUDITOR"] },
-  { href: "/admin/users", label: "Users", roles: ["ADMIN"] },
-  // Super admin only, and not via the ADMIN-matches rule below: a company is
-  // the boundary every other permission is expressed against, so the people it
-  // exists to separate must not be able to add one.
+  // Users and Companies are both super admin only, and deliberately listed as
+  // SUPER_ADMIN rather than ADMIN so the superset rule below does NOT apply.
+  // A company is the boundary every other permission is expressed against, so
+  // the people it exists to separate must not be able to add one — and for the
+  // same reason they must not be able to hand out accounts or company grants.
+  { href: "/admin/users", label: "Users", roles: ["SUPER_ADMIN"] },
   { href: "/admin/companies", label: "Companies", roles: ["SUPER_ADMIN"] },
 ];
 
