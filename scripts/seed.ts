@@ -34,7 +34,6 @@ async function main() {
   await prisma.expense.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.errorFlag.deleteMany();
-  await prisma.dayClose.deleteMany();
   await prisma.centre.deleteMany();
   await prisma.party.deleteMany();
 

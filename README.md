@@ -131,15 +131,20 @@ git pull && docker compose up -d --build
 
 ### Backups
 
-`scripts/backup.sh` dumps the database and archives the uploads volume, keeping
-30 days. Nothing else holds a copy of either — once real entries exist this is
-not optional.
+`scripts/gdrive-backup.sh` dumps the database and syncs the uploads volume
+straight to Google Drive via rclone. Nothing else holds a copy of either — once
+real entries exist this is not optional.
 
 ```
-0 2 * * * /srv/fms/scripts/backup.sh >> /var/log/fms-backup.log 2>&1
+0 */4 * * * /home/arfath/fms-local/scripts/gdrive-backup.sh >> /home/arfath/fms-temp-backup/cron.log 2>&1
 ```
 
-Copy the output off the machine. A backup on the same disk is not a backup.
+Backups go **off the machine by design**: the remote is `gdrive:FMS-Backup`, and
+`/home/arfath/fms-temp-backup` is staging and logs only — the database dump is
+deleted after upload, so backups never accumulate on the VPS disk.
+
+Live data stays local in the `fms_pgdata` and `fms_uploads` volumes. Only the
+backups are remote.
 
 ## Scripts
 

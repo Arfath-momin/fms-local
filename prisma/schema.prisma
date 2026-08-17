@@ -131,7 +131,6 @@ model Company {
   expenses       Expense[]
   ledgerEntries  LedgerEntry[]
   attachments    Attachment[]
-  dayCloses      DayClose[]
   settlements    Settlement[]
   reviewRequests ReviewRequest[]
 
@@ -162,7 +161,6 @@ model Centre {
   expenses       Expense[]
   ledgerEntries  LedgerEntry[]
   attachments    Attachment[]
-  dayCloses      DayClose[]
   settlements    Settlement[]
   reviewRequests ReviewRequest[]
 
@@ -707,25 +705,14 @@ model ReviewRequest {
   @@map("review_requests")
 }
 
-// ---------- Day close & corrections ----------
+// ---------- Corrections ----------
 
-// RETIRED. Day closing was removed from the application: an Admin may edit any
-// voucher at any time, and only an Admin may edit at all. The table is kept so
-// no historic rows are destroyed and the feature can be revived, but nothing
-// writes to it and nothing reads it any more.
-model DayClose {
-  id        String   @id @default(uuid())
-  companyId String   @map("company_id")
-  centreId  String   @map("centre_id")
-  date      DateTime @db.Date
-  closedAt  DateTime @default(now()) @map("closed_at")
-
-  company Company @relation(fields: [companyId], references: [id])
-  centre  Centre  @relation(fields: [centreId], references: [id])
-
-  @@unique([companyId, centreId, date])
-  @@map("day_closes")
-}
+// Day closing (the DayClose model and its `day_closes` table) was removed
+// entirely in 20260817000000_drop_day_closes. It had been retired long before
+// that — an Admin may edit any voucher at any time, and only an Admin may edit
+// at all — and the table was kept only in case the feature was revived. It never
+// was, nothing read or wrote it, and it held no rows in production, so the dead
+// schema went with the dead code.
 
 enum ErrorFlagLinkedType {
   PURCHASE
@@ -734,9 +721,10 @@ enum ErrorFlagLinkedType {
   EXPENSE
 }
 
-// RETIRED alongside DayClose — nothing creates flags any more. Existing rows
-// are still read: a flagged voucher stays visible, struck through, links to
-// whatever replaced it, and is excluded from report totals.
+// RETIRED alongside day closing (see the note above) — nothing creates flags any
+// more. Unlike day closes, this table is NOT dead: existing rows are still read,
+// so a flagged voucher stays visible, struck through, links to whatever replaced
+// it, and is excluded from report totals. Do not drop it.
 model ErrorFlag {
   id                String              @id @default(uuid())
   linkedType        ErrorFlagLinkedType @map("linked_type")

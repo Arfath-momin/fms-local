@@ -29,7 +29,6 @@ export default async function CentresPage() {
             ledgerEntries: true,
             settlements: true,
             attachments: true,
-            dayCloses: true,
             reviewRequests: true,
           },
         },

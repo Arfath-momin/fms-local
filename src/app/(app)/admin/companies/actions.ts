@@ -184,7 +184,6 @@ export async function deleteCompany(
           settlements: true,
           ledgerEntries: true,
           attachments: true,
-          dayCloses: true,
           reviewRequests: true,
         },
       },

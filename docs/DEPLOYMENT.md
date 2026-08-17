@@ -378,20 +378,30 @@ Open `https://fms.yourbusiness.com` in a browser.
 Nothing else holds a copy of your data. Two things must be saved: the database
 and the uploaded bill images.
 
+Backups go straight to Google Drive rather than to local disk. This is
+deliberate: a permanent local archive fills the VPS disk, and **a backup on the
+same disk as the thing it backs up is not a backup** — if that disk dies, or the
+provider suspends the account, both are gone together.
+
+Prerequisite: `rclone` configured with a remote named `gdrive`.
+
 ```bash
-chmod +x /srv/fms/scripts/backup.sh /srv/fms/scripts/restore.sh
-sudo mkdir -p /var/backups/fms && sudo chown $USER:$USER /var/backups/fms
+chmod +x /home/arfath/fms-local/scripts/gdrive-backup.sh
+mkdir -p /home/arfath/fms-temp-backup
 ```
 
 Run it once by hand to confirm it works:
 
 ```bash
-cd /srv/fms && ./scripts/backup.sh
+/home/arfath/fms-local/scripts/gdrive-backup.sh
 ```
 
-You should get a `db-*.dump` and an `uploads-*.tar.gz` in `/var/backups/fms`.
+It checks Postgres is up, dumps the database, uploads the dump to
+`gdrive:FMS-Backup`, syncs the uploads directory, then **deletes the temporary
+dump**. `/home/arfath/fms-temp-backup` is staging and logs only — never a
+permanent archive.
 
-Schedule it nightly at 2 AM:
+Schedule it every four hours:
 
 ```bash
 crontab -e
@@ -400,13 +410,14 @@ crontab -e
 Add:
 
 ```
-0 2 * * * cd /srv/fms && ./scripts/backup.sh >> /var/log/fms-backup.log 2>&1
+0 */4 * * * /home/arfath/fms-local/scripts/gdrive-backup.sh >> /home/arfath/fms-temp-backup/cron.log 2>&1
 ```
 
-### Get them off the machine
+Verify what landed:
 
-**A backup on the same disk as the thing it backs up is not a backup.** If that
-disk dies, or the provider suspends the account, both are gone together.
+```bash
+rclone size gdrive:FMS-Backup
+```
 
 Simplest option — pull them to your own computer nightly:
 
@@ -454,8 +465,8 @@ time, and it is the only one worth knowing.
 **Deploy an update**
 
 ```bash
-cd /srv/fms
-./scripts/backup.sh          # always, before anything else
+cd /home/arfath/fms-local
+./scripts/gdrive-backup.sh   # always, before anything else — confirm it succeeds
 git pull
 docker compose up -d --build
 docker compose logs -f app   # watch it come up, Ctrl-C when healthy

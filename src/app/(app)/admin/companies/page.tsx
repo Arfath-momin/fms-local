@@ -36,7 +36,6 @@ export default async function CompaniesPage() {
           settlements: true,
           ledgerEntries: true,
           attachments: true,
-          dayCloses: true,
           reviewRequests: true,
           users: true,
         },

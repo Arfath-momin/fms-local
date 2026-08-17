@@ -19,7 +19,6 @@ const CENTRE_REFERENCES = {
   ledgerEntries: true,
   settlements: true,
   attachments: true,
-  dayCloses: true,
   reviewRequests: true,
 } as const;
 
