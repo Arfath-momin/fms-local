@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import type { PartyType, PurchaseType } from "@/generated/prisma/enums";
 import { PARTY_TYPE_LABELS } from "@/lib/party";
+import { quickCreateParty } from "./party-quick-create";
 
 export type PartyOption = {
   id: string;
@@ -88,6 +89,8 @@ export function PartyCombobox({
     defaultType ?? types[0]
   );
   const boxRef = useRef<HTMLDivElement>(null);
+  const [creating, startCreate] = useTransition();
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Callers pass `types` as an inline array literal, which is a new object on
   // every render. Depending on it directly would re-run this effect on each
@@ -144,6 +147,33 @@ export function PartyCombobox({
     setChosenType(option.type);
     setOpen(false);
     onSelect?.(option);
+  }
+
+  /**
+   * Write the typed name into the party master straight away, then treat it as
+   * chosen.
+   *
+   * The button used to only close the dropdown and leave creation to save time,
+   * which meant nothing existed for the *next* row to find: adding the same
+   * boat on row 1 and row 2 of one bill offered "Add to master" both times.
+   * Creating here is what makes the second row find it.
+   *
+   * The new party is selected with a zero balance rather than re-fetched: it
+   * has no ledger entries by definition, so a round trip could only confirm
+   * what is already known.
+   */
+  function createAndChoose() {
+    const clean = trimmed;
+    if (!clean || creating) return;
+    setCreateError(null);
+    startCreate(async () => {
+      const res = await quickCreateParty(clean, chosenType, purchaseKind);
+      if ("error" in res) {
+        setCreateError(res.error);
+        return;
+      }
+      choose({ ...res.party, balance: 0 });
+    });
   }
 
   return (
@@ -212,17 +242,22 @@ export function PartyCombobox({
             <div className="border-t border-line">
               <button
                 type="button"
-                onClick={() => {
-                  setOpen(false);
-                  onSelect?.(null);
-                }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-accent hover:bg-background"
+                onClick={createAndChoose}
+                disabled={creating}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-accent hover:bg-background disabled:opacity-60"
               >
                 <span aria-hidden>＋</span>
                 <span>
-                  Add “{trimmed}” to {PARTY_TYPE_LABELS[chosenType]} master
+                  {creating
+                    ? `Adding “${trimmed}”…`
+                    : `Add “${trimmed}” to ${PARTY_TYPE_LABELS[chosenType]} master`}
                 </span>
               </button>
+              {createError && (
+                <div className="px-3 pb-2 text-[12px] text-debit">
+                  {createError}
+                </div>
+              )}
               {types.length > 1 && (
                 <div className="px-3 pb-2 flex flex-wrap gap-1">
                   {types.map((t) => (

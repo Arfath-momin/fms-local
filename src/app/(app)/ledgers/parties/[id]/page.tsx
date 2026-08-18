@@ -157,12 +157,24 @@ export default async function PartyStatementPage({
             {PARTY_TYPE_LABELS[party.type]} · statement for {company.name} ·{" "}
             {centre.name}
           </p>
-          <a
-            href={`/ledgers/parties/${party.id}/export`}
-            className="inline-block mt-1 text-accent text-[12px] underline underline-offset-2"
-          >
-            Export statement (CSV)
-          </a>
+          <div className="mt-1 flex items-center gap-3">
+            <a
+              href={`/ledgers/parties/${party.id}/export`}
+              className="text-accent text-[12px] underline underline-offset-2"
+            >
+              Export statement (CSV)
+            </a>
+            {/* CSV is for a spreadsheet; this is the statement as a document —
+                the one printable that regularly leaves the building, handed to
+                a party querying what they owe. Carries the date window on
+                screen, so both links cover the same period. */}
+            <Link
+              href={`/ledgers/parties/${party.id}/print?from=${listWindow.from}&to=${listWindow.to}`}
+              className="text-accent text-[12px] underline underline-offset-2"
+            >
+              Print statement
+            </Link>
+          </div>
         </div>
         <div className="text-right">
           <div className="text-[12px] uppercase tracking-wide text-muted font-semibold">
