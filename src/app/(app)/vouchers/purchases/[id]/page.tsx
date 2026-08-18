@@ -119,7 +119,19 @@ export default async function PurchaseDetailPage({
   if (!mayEdit) {
     return (
       <div>
-        <h1 className="heading text-xl font-semibold mb-4">Purchase</h1>
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <h1 className="heading text-xl font-semibold">Purchase</h1>
+        {/* Opens the purchase as a document — the browser's print dialog is
+            also where "Save as PDF" lives, so this covers printing and keeping
+            a copy. Offered on the read-only view too: an auditor may not edit a
+            voucher but still has every reason to print one. */}
+        <Link
+          href={`/vouchers/purchases/${purchase.id}/print`}
+          className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
+        >
+          Print
+        </Link>
+        </div>
         <dl className="border border-line-strong bg-surface divide-y divide-line max-w-lg text-[13px]">
           <Row label="Type" value={PURCHASE_TYPE_LABELS[purchase.type]} />
           <Row
@@ -197,7 +209,19 @@ export default async function PurchaseDetailPage({
 
   return (
     <div>
-      <h1 className="heading text-xl font-semibold mb-4">Edit Purchase</h1>
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <h1 className="heading text-xl font-semibold">Edit Purchase</h1>
+        {/* Opens the purchase as a document — the browser's print dialog is
+            also where "Save as PDF" lives, so this covers printing and keeping
+            a copy. Offered on the read-only view too: an auditor may not edit a
+            voucher but still has every reason to print one. */}
+        <Link
+          href={`/vouchers/purchases/${purchase.id}/print`}
+          className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
+        >
+          Print
+        </Link>
+      </div>
       {/* Above the form, not below it: it is the reason this screen is open.
           Collapses to nothing when no review was requested. */}
       <div className="mb-4 empty:hidden [&>*]:mt-0">{review}</div>

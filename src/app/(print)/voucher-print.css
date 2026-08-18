@@ -37,11 +37,42 @@
   color: var(--company-ink);
   padding: 0.75rem 1rem;
   margin: -1.75rem -1.75rem 1.25rem;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1.5rem;
-  flex-wrap: wrap;
+  /* Three columns rather than flex space-between, so the company mark is
+     centred against the SHEET and not merely placed between whatever the two
+     side blocks happen to measure. `1fr auto 1fr` keeps the outer columns equal
+     however long a centre name or a bill number runs, which is what stops the
+     logo drifting off-axis from one document to the next. */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  gap: 1rem;
+}
+
+.bill-band-left {
+  min-width: 0;
+}
+
+.bill-band-centre {
+  text-align: center;
+  min-width: 0;
+}
+
+.bill-band-right {
+  text-align: right;
+  min-width: 0;
+}
+
+/* Narrow screens only — never print, which is always a fixed sheet. Stacking
+   keeps the header readable on a phone previewing a bill before printing it. */
+@media screen and (max-width: 640px) {
+  .bill-band {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+  .bill-band-left,
+  .bill-band-right {
+    text-align: center;
+  }
 }
 
 .bill-band .doc-kind {

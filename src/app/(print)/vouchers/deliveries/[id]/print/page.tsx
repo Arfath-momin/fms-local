@@ -4,7 +4,7 @@ import { getActiveScope } from "@/lib/centre";
 import { requireSession } from "@/lib/session";
 import { lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
-import { Letterhead } from "../../../../letterhead";
+import { PrintHeader } from "../../../../letterhead";
 import { PrintToolbar } from "../../../../print-toolbar";
 import "../../../../voucher-print.css";
 
@@ -69,20 +69,23 @@ export default async function DeliveryNotePrintPage({
       />
 
       <div className="bill-paper">
-        <div className="bill-band">
-          <Letterhead company={note.company} centreName={note.centre.name} />
-          <div className="text-right">
-            <div className="doc-kind">Delivery Note</div>
-            <div className="num text-[13px] mt-1">
-              <span className="opacity-75">No. </span>
-              <span className="font-semibold">{note.billNo}</span>
-            </div>
-            <div className="num text-[13px]">
-              <span className="opacity-75">Date </span>
-              <span className="font-semibold">{fmtDate(note.date)}</span>
-            </div>
-          </div>
-        </div>
+        <PrintHeader
+          company={note.company}
+          centreName={note.centre.name}
+          docKind="Delivery Note"
+          right={
+            <>
+              <div className="num text-[13px]">
+                <span className="opacity-75">No. </span>
+                <span className="font-semibold">{note.billNo}</span>
+              </div>
+              <div className="num text-[13px]">
+                <span className="opacity-75">Date </span>
+                <span className="font-semibold">{fmtDate(note.date)}</span>
+              </div>
+            </>
+          }
+        />
 
         <div className="grid grid-cols-2 gap-6 mb-4">
           <div>

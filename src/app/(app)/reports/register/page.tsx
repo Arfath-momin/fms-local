@@ -8,10 +8,10 @@ import {
   getTransactionRegister,
   type PeriodBucket,
 } from "@/lib/report";
-import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
-import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
-import { SALE_TYPE_LABELS } from "@/lib/sale";
-import { SETTLEMENT_MODE_LABELS } from "@/lib/settlement";
+import {
+  REGISTER_KIND_LABELS,
+  registerSubtypeLabel,
+} from "@/lib/register-labels";
 import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import {
   MAX_RANGE_DAYS,
@@ -66,23 +66,27 @@ function exportHref(
   return `/reports/register/export?${params}`;
 }
 
-const KIND_LABELS: Record<string, string> = {
-  PURCHASE: "Purchase",
-  SALE: "Sale",
-  EXPENSE: "Expense",
-  PAYMENT: "Payment",
-  RECEIPT: "Receipt",
-};
-
-function subtypeLabel(kind: string, subtype: string) {
-  if (kind === "PAYMENT" || kind === "RECEIPT")
-    return SETTLEMENT_MODE_LABELS[subtype as keyof typeof SETTLEMENT_MODE_LABELS] ?? subtype;
-  if (kind === "PURCHASE")
-    return PURCHASE_TYPE_LABELS[subtype as keyof typeof PURCHASE_TYPE_LABELS] ?? subtype;
-  if (kind === "SALE")
-    return SALE_TYPE_LABELS[subtype as keyof typeof SALE_TYPE_LABELS] ?? subtype;
-  return EXPENSE_CATEGORY_LABELS[subtype as keyof typeof EXPENSE_CATEGORY_LABELS] ?? subtype;
+/** The printable view of the same window — see exportHref. */
+function printHref(
+  view: RegisterView,
+  p: { period: string; from: Date; to: Date; scope: string }
+): string {
+  const params = new URLSearchParams();
+  params.set("view", view);
+  params.set("scope", p.scope);
+  if (view === "range") {
+    params.set("from", toInputDate(p.from));
+    params.set("to", toInputDate(p.to));
+  } else {
+    params.set("period", p.period);
+  }
+  return `/reports/register/print?${params}`;
 }
+
+// Both label maps now live in @/lib/register-labels, shared with the printable
+// view so the two renderings of the same row cannot drift apart.
+const KIND_LABELS = REGISTER_KIND_LABELS;
+const subtypeLabel = registerSubtypeLabel;
 
 export default async function RegisterPage({
   searchParams,
@@ -188,6 +192,15 @@ export default async function RegisterPage({
         >
           Export CSV
         </a>
+        {/* Same period, same scope, on paper. CSV is for a spreadsheet; this is
+            for a file or a folder — the browser's print dialog is also where
+            Save as PDF lives. Both links carry the window that is on screen. */}
+        <Link
+          href={printHref(view, { period, from, to, scope })}
+          className="border border-line-strong bg-surface px-3 py-1 text-[12px] font-semibold hover:border-accent"
+        >
+          Print
+        </Link>
         <span className="flex gap-2">
           <Link
             href={registerHref(view, { period, from, to, scope: "centre" })}
