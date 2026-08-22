@@ -3,19 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
-import type { ExpenseCategory } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
 import {
-  EXPENSE_CATEGORIES,
   EXPENSE_SPECS,
   expensePrepaid,
   expenseVendorName,
 } from "@/lib/expense";
-import { clearErrorFlag } from "@/lib/errorflag";
 import { resolveReviews } from "@/lib/review-db";
 import {
   linkStagedAttachment,
@@ -28,7 +25,10 @@ import {
 export type ExpenseFormState = { error: string } | null;
 
 type Parsed = {
-  category: ExpenseCategory;
+  categoryId: string;
+  /** The category's stable code — picks the entry spec in lib/expense. */
+  categoryCode: string;
+  categoryName: string;
   amount: Prisma.Decimal;
   /** Of that total, how much was already paid at the time of entry. */
   prepaid: Prisma.Decimal;
@@ -45,15 +45,26 @@ type Parsed = {
 const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
 const NUMBER = /^\d+(\.\d{1,3})?$/;
 
-function parse(formData: FormData): { error: string } | { data: Parsed } {
-  const category = String(formData.get("category") ?? "") as ExpenseCategory;
+// Async now: the category is a row, so validating the submitted id means
+// reading it — and reading it scoped to the company, so a tampered form cannot
+// file this company's spend under another company's category.
+async function parse(
+  formData: FormData,
+  companyId: string
+): Promise<{ error: string } | { data: Parsed }> {
+  const categoryId = String(formData.get("categoryId") ?? "");
   const dateRaw = String(formData.get("date") ?? "");
   const spentOnRaw = String(formData.get("spentOn") ?? "");
   const notes = String(formData.get("notes") ?? "").trim();
   const file = formData.get("bill");
 
-  if (!EXPENSE_CATEGORIES.includes(category))
-    return { error: "Choose a category." };
+  const category = categoryId
+    ? await prisma.expenseCategory.findFirst({
+        where: { id: categoryId, companyId, archivedAt: null },
+        select: { id: true, code: true, name: true },
+      })
+    : null;
+  if (!category) return { error: "Choose a category." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw))
     return { error: "Pick the purchase date this cost belongs to." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(spentOnRaw))
@@ -67,7 +78,14 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const badFile = validateImageFile(file);
   if (badFile) return { error: badFile };
 
-  const spec = EXPENSE_SPECS[category];
+  // No spec means a category the merchant added themselves: a plain amount,
+  // no bespoke fields. That fallback is what lets Masters add one without a
+  // deploy.
+  const spec = EXPENSE_SPECS[category.code] ?? {
+    label: category.name,
+    fields: [],
+    amountEntered: true,
+  };
   const details: Record<string, string> = {};
   for (const f of spec.fields) {
     const raw = String(formData.get(f.name) ?? "").trim().replace(/\s+/g, " ");
@@ -95,7 +113,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   // Money already handed over cannot exceed the bill it is paying. Without this
   // the vendor's balance would go positive, reading as "the landlord owes us"
   // on the outstanding screen.
-  const prepaid = new Prisma.Decimal(expensePrepaid(category, details));
+  const prepaid = new Prisma.Decimal(expensePrepaid(category.code, details));
   if (prepaid.greaterThan(amount))
     return {
       error:
@@ -105,14 +123,16 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
 
   return {
     data: {
-      category,
+      categoryId: category.id,
+      categoryCode: category.code,
+      categoryName: category.name,
       amount,
       prepaid,
       date: new Date(dateRaw),
       spentOn: new Date(spentOnRaw),
       notes: notes || null,
       details,
-      vendorName: expenseVendorName(category, details),
+      vendorName: expenseVendorName(category.code, category.name, details),
       file,
     },
   };
@@ -134,13 +154,19 @@ async function postExpenseLedger(
   e: {
     companyId: string;
     centreId: string;
-    partyId: string;
+    // Optional now (spec §3.4). An expense with no vendor — a canteen bill, a
+    // salary — posts no ledger entry at all, because nothing is owed to
+    // anybody. It still counts in profit, which reads the expense table rather
+    // than the ledger, so the cost is never lost.
+    partyId: string | null;
     id: string;
     amount: Prisma.Decimal;
     prepaid: Prisma.Decimal;
     date: Date;
   }
 ) {
+  if (!e.partyId) return;
+
   const common = {
     companyId: e.companyId,
     centreId: e.centreId,
@@ -163,12 +189,14 @@ export async function createExpense(
   formData: FormData
 ): Promise<ExpenseFormState> {
   const session = await requireEntry();
-  const parsed = parse(formData);
-  if ("error" in parsed) return { error: parsed.error };
-  const d = parsed.data;
+  // Scope first: parse validates the category against this company, so the
+  // company has to be known before parsing rather than after.
   const scoped = await requireSubmittedScope(formData);
   if ("error" in scoped) return { error: scoped.error };
   const { company, centre } = scoped.scope;
+  const parsed = await parse(formData, company.id);
+  if ("error" in parsed) return { error: parsed.error };
+  const d = parsed.data;
 
   try {
     // Staged before the transaction so a rejected image aborts the save
@@ -181,7 +209,7 @@ export async function createExpense(
           companyId: company.id,
           centreId: centre.id,
           partyId,
-          category: d.category,
+          categoryId: d.categoryId,
           amount: d.amount,
           date: d.date,
           spentOn: d.spentOn,
@@ -232,7 +260,6 @@ export async function deleteExpense(
 
       await removeLedgerEntries(tx, { sourceId: expenseId });
       await unlinkAttachments(tx, "EXPENSE", expenseId);
-      await clearErrorFlag(tx, "EXPENSE", expenseId);
       // Removing the voucher answers any request against it. The request rows
       // themselves survive — they record that a correction was asked for.
       await resolveReviews(tx, "EXPENSE", expenseId, session.userId);
@@ -256,12 +283,12 @@ export async function updateExpense(
   formData: FormData
 ): Promise<ExpenseFormState> {
   const session = await requireAdmin();
-  const parsed = parse(formData);
-  if ("error" in parsed) return { error: parsed.error };
-  const d = parsed.data;
-
   const { company, centre } = await getActiveScope();
   if (!centre) return { error: "No centre is selected." };
+
+  const parsed = await parse(formData, company.id);
+  if ("error" in parsed) return { error: parsed.error };
+  const d = parsed.data;
 
   try {
     const staged = await stageAttachmentFile(d.file);
@@ -282,7 +309,7 @@ export async function updateExpense(
         where: { id: expenseId },
         data: {
           partyId,
-          category: d.category,
+          categoryId: d.categoryId,
           amount: d.amount,
           date: d.date,
           spentOn: d.spentOn,

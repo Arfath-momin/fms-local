@@ -1,29 +1,50 @@
-// Seed: companies, centres, users, and sample entries for the 3-module model
-// (Purchase / Expense / Sale). Every transaction and ledger entry is scoped to
-// a (company, centre). Run with `npm run db:seed`. Re-runnable — it clears
-// transactional data first.
+// Seed: companies, centres, users, expense categories, masters, and one
+// complete trading day entered the way the business actually works.
+//
+// The sample day is the 16 Aug worked example from docs/BFM_REBUILD_PLAN — a
+// real day with three trucks, a market bill carrying the rent, a factory bill
+// and a fish-mill bill. Seeding THAT rather than arbitrary rows means
+// `npm run db:seed && npm run db:verify` demonstrates the §2 money rules end to
+// end: the day's gross profit must read ₹31,400 and the transporters must all
+// close at zero.
+//
+// Run with `npm run db:seed`. Re-runnable — it clears transactional data first.
 import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { PrismaClient, Prisma } from "../src/generated/prisma/client";
-import type {
-  PartyType,
-  LedgerEntryType,
-  LedgerSourceType,
-} from "../src/generated/prisma/enums";
+import type { PartyType } from "../src/generated/prisma/enums";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { FIXED_PURCHASE_PARTY } from "../src/lib/party";
+import { postLedgerEntries } from "../src/lib/ledger";
+import { DIRECT_CODES, OVERHEAD_CODES } from "../src/lib/expense";
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
 });
 
 const D = (v: number | string) => new Prisma.Decimal(v);
-const date = (s: string) => new Date(s);
+const day = (s: string) => new Date(`${s}T00:00:00.000Z`);
+
+/** The buying day everything below is accounted to. */
+const BUYING_DAY = day("2026-08-16");
+
+const CATEGORY_NAMES: Record<string, string> = {
+  ICE: "Ice",
+  LOADERS: "Loaders",
+  LADIES: "Ladies",
+  BATHA: "Batha",
+  CANTEEN: "Canteen",
+  RENT: "Vehicle Rent",
+  SALARY: "Salaries",
+  OFFICE_RENT: "Office Rent",
+  OTHER: "Other",
+};
 
 async function main() {
-  // --- clear transactional data (idempotent re-run) ---
+  // --- clear transactional data (idempotent re-run) ----------------------
+  // Order matters: children before parents, and ledger entries before the
+  // parties they hang off.
   await prisma.ledgerEntry.deleteMany();
-  // Before parties and centres: settlements reference both.
+  await prisma.reserveCollection.deleteMany();
   await prisma.settlement.deleteMany();
   await prisma.saleLine.deleteMany();
   await prisma.sale.deleteMany();
@@ -31,70 +52,85 @@ async function main() {
   await prisma.deliveryNote.deleteMany();
   await prisma.purchaseLine.deleteMany();
   await prisma.purchase.deleteMany();
+  await prisma.expenseLine.deleteMany();
   await prisma.expense.deleteMany();
   await prisma.attachment.deleteMany();
-  await prisma.errorFlag.deleteMany();
+  await prisma.vehicle.deleteMany();
+  await prisma.expenseCategory.deleteMany();
   await prisma.centre.deleteMany();
   await prisma.party.deleteMany();
 
-  // --- companies ---
+  // --- companies and centres ---------------------------------------------
   const companies: Record<string, string> = {};
-  for (const name of ["BFM", "B2B"]) {
+  const centres: Record<string, string> = {};
+  for (const [i, name] of ["BFM", "B2B"].entries()) {
     const c = await prisma.company.upsert({
       where: { name },
       update: {},
-      create: { name },
-    });
-    companies[name] = c.id;
-  }
-
-  // --- centres (each company gets two isolated centres) ---
-  const centres: Record<string, string> = {}; // key: `${company}:${centreName}`
-  for (const companyName of ["BFM", "B2B"]) {
-    for (const centreName of ["Centre 1", "Centre 2"]) {
-      const centre = await prisma.centre.create({
-        data: { companyId: companies[companyName], name: centreName },
-      });
-      centres[`${companyName}:${centreName}`] = centre.id;
-    }
-  }
-
-  // --- users ---
-  // Development logins only — these passwords are in version control. Never
-  // run this seed against production; use `npm run user:create` there.
-  const users = [
-    { email: "admin@fms.local", name: "Admin", role: "ADMIN" as const, password: "admin123" },
-    { email: "accountant@fms.local", name: "Accountant", role: "ACCOUNTANT" as const, password: "accountant123" },
-    { email: "auditor@fms.local", name: "Auditor", role: "AUDITOR" as const, password: "auditor123" },
-  ];
-  for (const u of users) {
-    const user = await prisma.user.upsert({
-      where: { email: u.email },
-      update: {},
-      create: {
-        email: u.email,
-        name: u.name,
-        role: u.role,
-        passwordHash: await bcrypt.hash(u.password, 10),
-      },
+      create: { name, colour: i === 0 ? "#1e4d8c" : "#8c5a1e" },
       select: { id: true },
     });
+    companies[name] = c.id;
+    const centre = await prisma.centre.create({
+      data: { companyId: c.id, name: "Malpe" },
+      select: { id: true },
+    });
+    centres[name] = centre.id;
+  }
+  const BFM = companies["BFM"];
+  const MALPE = centres["BFM"];
 
-    // Every seeded login gets every company. A user with no grant is refused by
-    // getActiveCompany() and lands on the "no company access" screen, so
-    // skipping this leaves a freshly seeded database that nobody can sign in
-    // and use — the migration's own backfill cannot help here, because it ran
-    // before these users existed.
+  // --- users --------------------------------------------------------------
+  // Published passwords, deliberately: this is sample data for a development
+  // database. scripts/bootstrap.ts is what creates accounts on a live server.
+  const hash = await bcrypt.hash("password123", 10);
+  for (const [email, name, role] of [
+    ["owner@bfm.test", "Owner", "SUPER_ADMIN"],
+    ["admin@bfm.test", "Admin", "ADMIN"],
+    ["clerk@bfm.test", "Clerk", "ACCOUNTANT"],
+    ["ca@bfm.test", "Auditor", "AUDITOR"],
+  ] as const) {
+    const u = await prisma.user.upsert({
+      where: { email },
+      update: {},
+      create: { email, name, role, passwordHash: hash },
+      select: { id: true },
+    });
     await prisma.userCompany.createMany({
       data: Object.values(companies).map((companyId) => ({
-        userId: user.id,
+        userId: u.id,
         companyId,
       })),
       skipDuplicates: true,
     });
   }
 
-  // --- helpers ---
+  // --- expense categories -------------------------------------------------
+  // The DIRECT / OVERHEAD split is the whole point: only DIRECT costs reach a
+  // buying day's gross profit.
+  const categoryId: Record<string, string> = {};
+  for (const companyId of Object.values(companies)) {
+    let order = 0;
+    for (const code of [...DIRECT_CODES, ...OVERHEAD_CODES]) {
+      const kind = (DIRECT_CODES as readonly string[]).includes(code)
+        ? "DIRECT"
+        : "OVERHEAD";
+      const cat = await prisma.expenseCategory.create({
+        data: {
+          companyId,
+          code,
+          name: CATEGORY_NAMES[code] ?? code,
+          kind,
+          allowsLines: code === "OTHER",
+          sortOrder: order++,
+        },
+        select: { id: true },
+      });
+      if (companyId === BFM) categoryId[code] = cat.id;
+    }
+  }
+
+  // --- masters ------------------------------------------------------------
   const partyCache = new Map<string, string>();
   async function party(name: string, type: PartyType): Promise<string> {
     const key = `${type}:${name}`;
@@ -104,295 +140,224 @@ async function main() {
       where: { name_type: { name, type } },
       update: {},
       create: { name, type },
+      select: { id: true },
     });
     partyCache.set(key, p.id);
     return p.id;
   }
 
-  const balances = new Map<string, Prisma.Decimal>();
-  async function ledger(
-    companyId: string,
-    centreId: string,
-    partyId: string,
-    type: LedgerEntryType,
-    sourceType: LedgerSourceType,
-    sourceId: string,
-    amount: Prisma.Decimal,
-    on: Date
-  ) {
-    const key = `${companyId}:${centreId}:${partyId}`;
-    const prev = balances.get(key) ?? D(0);
-    const running = type === "DEBIT" ? prev.add(amount) : prev.sub(amount);
-    balances.set(key, running);
-    await prisma.ledgerEntry.create({
-      data: {
-        companyId,
-        centreId,
-        partyId,
-        type,
-        sourceType,
-        sourceId,
-        amount,
-        date: on,
-        runningBalance: running,
-      },
-    });
-  }
+  const society = await party("Society", "PURCHASE_GROUP");
+  const marketA = await party("Kondatty", "MARKET_BUYER");
+  const factory = await party("West Coast Marine", "FACTORY");
+  const mill = await party("Karavali Fishmeal", "FISH_MILL");
+  const icePlant = await party("Malpe Ice Plant", "EXPENSE_VENDOR");
+  const loaders = await party("Loaders", "EXPENSE_VENDOR");
 
-  const bfm = companies["BFM"];
-  const c1 = centres["BFM:Centre 1"];
-
-  /**
-   * Settlement is its own voucher now, so the seed creates a real Payment or
-   * Receipt and posts the ledger entry against *that* — never against the
-   * trade, which is what the old `paid` / `amountReceived` flags did.
-   */
-  async function settle(
-    kind: "PAYMENT" | "RECEIPT",
-    partyId: string,
-    amount: Prisma.Decimal,
-    on: Date
-  ) {
-    const st = await prisma.settlement.create({
-      data: {
-        companyId: bfm,
-        centreId: c1,
-        partyId,
-        kind,
-        mode: "CASH",
-        amount,
-        date: on,
-      },
-    });
-    await ledger(
-      bfm, c1, partyId,
-      kind === "PAYMENT" ? "DEBIT" : "CREDIT",
-      kind, st.id, amount, on
-    );
-  }
-
-  // --- Purchases (BFM · Centre 1) ---
-  //
-  // Mirrors the create action: every bill is itemised, the total is the sum of
-  // its rows, and the ledger belongs to whoever the bill is owed to — Society
-  // or KFDC for those types, the named individual for Private and Local. Boats
-  // are named per row on Society/KFDC bills and carry no ledger.
-  type SeedLine = {
-    boat?: string;
-    particular: string;
-    qtyKg: number;
-    pricePerKg: number;
+  // Three transporters, one per truck, so each trip's rent settles against a
+  // named account rather than a shared bucket.
+  const transporters = {
+    market: await party("Ravi Transport", "TRANSPORTER"),
+    factory: await party("Shetty Carriers", "TRANSPORTER"),
+    mill: await party("Local Tempo", "TRANSPORTER"),
   };
 
-  async function purchase(opts: {
-    type: "SOCIETY" | "KFDC" | "PRIVATE" | "LOCAL";
-    /** Private / Local only — who the money is owed to. */
-    seller?: string;
-    billNo?: string;
-    paid: boolean;
-    on: Date;
-    lines: SeedLine[];
-  }) {
-    const { type, seller, billNo, paid, on, lines } = opts;
-    const partyName = FIXED_PURCHASE_PARTY[type] ?? seller!;
-    const partyId = await party(partyName, "PURCHASE_GROUP");
+  const vehicles = {
+    market: await prisma.vehicle.create({
+      data: { companyId: BFM, number: "KA20B5521", transporterId: transporters.market },
+      select: { id: true },
+    }),
+    factory: await prisma.vehicle.create({
+      data: { companyId: BFM, number: "KA20A9087", transporterId: transporters.factory },
+      select: { id: true },
+    }),
+    mill: await prisma.vehicle.create({
+      data: { companyId: BFM, number: "KA20C3311", transporterId: transporters.mill },
+      select: { id: true },
+    }),
+  };
 
-    const rows = [];
-    for (const l of lines) {
-      rows.push({
-        boatId: l.boat ? await party(l.boat, "BOAT") : null,
-        particular: l.particular,
-        qtyKg: D(l.qtyKg),
-        pricePerKg: D(l.pricePerKg),
-        total: D(l.qtyKg).mul(D(l.pricePerKg)),
-      });
-    }
-    const amount = rows.reduce((a, r) => a.add(r.total), D(0));
+  const scope = { companyId: BFM, centreId: MALPE };
 
-    const p = await prisma.purchase.create({
-      data: {
-        companyId: bfm,
-        centreId: c1,
-        partyId,
-        billNo: billNo ?? null,
-        type,
-        amount,
-        date: on,
-        lines: { create: rows },
-      },
-    });
-    await ledger(bfm, c1, partyId, "CREDIT", "PURCHASE", p.id, amount, on);
-    if (paid) await settle("PAYMENT", partyId, amount, on);
-  }
-
-  await purchase({
-    type: "SOCIETY",
-    billNo: "S-114",
-    paid: true,
-    on: date("2026-07-20"),
-    lines: [
-      { boat: "Boat No. 12", particular: "Prawn", qtyKg: 60, pricePerKg: 500 },
-      { boat: "Boat No. 7", particular: "Seer Fish", qtyKg: 30, pricePerKg: 500 },
-    ],
-  });
-  await purchase({
-    type: "KFDC",
-    billNo: "K-207",
-    paid: true,
-    on: date("2026-07-21"),
-    lines: [
-      { boat: "Boat No. 7", particular: "Sardine", qtyKg: 400, pricePerKg: 80 },
-    ],
-  });
-  await purchase({
-    type: "PRIVATE",
-    seller: "Ravi Traders",
-    billNo: "INV-31",
-    paid: false,
-    on: date("2026-07-21"),
-    lines: [
-      { particular: "Pomfret", qtyKg: 25, pricePerKg: 740 },
-    ],
-  });
-  // Two Local sellers on the same day: each keeps their own balance, which is
-  // the whole point of them no longer sharing one "Local Individuals" account.
-  await purchase({
-    type: "LOCAL",
-    seller: "Ramesh",
-    paid: true,
-    on: date("2026-07-21"),
-    lines: [
-      { particular: "Prawn", qtyKg: 20, pricePerKg: 450 },
-      { particular: "Mackerel", qtyKg: 50, pricePerKg: 120 },
-    ],
-  });
-  await purchase({
-    type: "LOCAL",
-    seller: "Raju",
-    paid: false,
-    on: date("2026-07-22"),
-    lines: [{ particular: "Anchovy", qtyKg: 120, pricePerKg: 90 }],
-  });
-
-  // --- Expenses (BFM · Centre 1) ---
-  async function expense(
-    category: "ICE" | "LOADERS" | "LADIES" | "BATHA" | "CANTEEN" | "RENT",
-    vendorName: string,
-    amount: Prisma.Decimal,
-    on: Date,
-    details: Record<string, string> = {}
-  ) {
-    const partyId = await party(vendorName, "EXPENSE_VENDOR");
-    const e = await prisma.expense.create({
-      data: { companyId: bfm, centreId: c1, partyId, category, amount, date: on, details },
-    });
-    await ledger(bfm, c1, partyId, "CREDIT", "EXPENSE", e.id, amount, on);
-    await settle("PAYMENT", partyId, amount, on);
-  }
-
-  await expense("ICE", "Sagar Ice", D(1500), date("2026-07-21"), {
-    slNo: "1",
-    vehicleNo: "KA-01-1234",
-    plantName: "Sagar Ice",
-    blocks: "10",
-    ratePerBlock: "150",
-  });
-  await expense("LOADERS", "Loaders", D(2400), date("2026-07-21"), { boxes: "200", ratePerBox: "12" });
-  await expense("LADIES", "Ladies", D(1600), date("2026-07-21"), { boxes: "200", ratePerBox: "8" });
-  await expense("CANTEEN", "Canteen", D(800), date("2026-07-21"));
-  await expense("RENT", "KA-09-5678", D(1000), date("2026-07-21"), { slNo: "1", vehicleNo: "KA-09-5678", rent: "1000" });
-
-  // --- Sales (BFM · Centre 1) ---
-  // Each sale posts to the buyer's (or CareOf's) ledger; received nets it,
-  // any shortfall stays outstanding.
-  async function factorySale(
-    buyerName: string,
-    billNo: string,
-    amount: Prisma.Decimal,
-    received: Prisma.Decimal,
-    careOfName: string | null,
-    on: Date
-  ) {
-    const buyerId = await party(buyerName, "FACTORY");
-    const careOfId = careOfName ? await party(careOfName, "CARE_OF") : null;
-    const s = await prisma.sale.create({
-      data: {
-        companyId: bfm,
-        centreId: c1,
-        type: "FACTORY",
-        partyId: buyerId,
-        careOfPartyId: careOfId,
-        billNo,
-        date: on,
-        amount,
-        vehicleNo: "KA-05-9090",
-      },
-    });
-    const ledgerParty = careOfId ?? buyerId;
-    await ledger(bfm, c1, ledgerParty, "DEBIT", "SALE", s.id, amount, on);
-    if (received.gt(0)) await settle("RECEIPT", ledgerParty, received, on);
-  }
-
-  async function marketSale(
-    sellerName: string,
-    billNo: string,
-    totalBill: Prisma.Decimal,
-    netBill: Prisma.Decimal,
-    received: Prisma.Decimal,
-    on: Date
-  ) {
-    const buyerId = await party(sellerName, "MARKET_BUYER");
-    const s = await prisma.sale.create({
-      data: {
-        companyId: bfm,
-        centreId: c1,
-        type: "MARKET",
-        partyId: buyerId,
-        billNo,
-        date: on,
-        amount: netBill,
-        place: "City Market",
-        totalBill,
-        commission: totalBill.mul(0.02),
-      },
-    });
-    await ledger(bfm, c1, buyerId, "DEBIT", "SALE", s.id, netBill, on);
-    // Every Market sale accrues 2% into the house commission account.
-    const commissionId = await party("Commission (2%)", "COMMISSION");
-    await ledger(
-      bfm, c1, commissionId, "DEBIT", "COMMISSION", s.id,
-      totalBill.mul(0.02), on
-    );
-    if (received.gt(0)) await settle("RECEIPT", buyerId, received, on);
-  }
-
-  await factorySale("Coastal Exports", "F-1001", D(52000), D(52000), null, date("2026-07-20"));
-  await factorySale("Bay Foods", "F-1002", D(38000), D(20000), "Fayaz", date("2026-07-21"));
-  await marketSale("City Market", "M-2001", D(100000), D(92000), D(50000), date("2026-07-21"));
-
-  // --- Delivery note (record only, BFM · Centre 1) ---
-  await prisma.deliveryNote.create({
+  // --- purchases: ₹1,85,000 -----------------------------------------------
+  const purchase = await prisma.purchase.create({
     data: {
-      companyId: bfm,
-      centreId: c1,
-      billNo: "DN-3001",
-      date: date("2026-07-21"),
-      recipient: "City Market",
-      vehicleNo: "KA-02-3131",
-      advancePaid: D(2000),
-      driverName: "Suresh",
-      mobileNo: "9876543210",
+      ...scope,
+      partyId: society,
+      billNo: "S-1042",
+      type: "SOCIETY",
+      amount: D(185_000),
+      date: BUYING_DAY,
       lines: {
         create: [
-          { particulars: "Prawn", kg: D(120), box: 10, bigBox: 2, loose: 3, pcs: 0 },
-          { particulars: "Mackerel", kg: D(200), box: 15, bigBox: 0, loose: 5, pcs: 0 },
+          { particular: "Bangda", qtyKg: D(900), pricePerKg: D(125), total: D(112_500) },
+          { particular: "Anjal", qtyKg: D(150), pricePerKg: D(460), total: D(69_000) },
+          { particular: "Tarli", qtyKg: D(50), pricePerKg: D(70), total: D(3_500) },
         ],
       },
     },
+    select: { id: true },
+  });
+  await postLedgerEntries(prisma, [
+    { ...scope, partyId: society, type: "CREDIT", sourceType: "PURCHASE", sourceId: purchase.id, amount: D(185_000), date: BUYING_DAY },
+  ]);
+
+  // --- direct expenses: ₹15,000 -------------------------------------------
+  for (const [code, vendor, amount] of [
+    ["ICE", icePlant, 7_000],
+    ["LOADERS", loaders, 5_000],
+    ["CANTEEN", null, 3_000],
+  ] as const) {
+    const e = await prisma.expense.create({
+      data: {
+        ...scope,
+        categoryId: categoryId[code],
+        // Canteen has no vendor worth a ledger — partyId is optional now, and
+        // forcing one only fills the master with junk.
+        partyId: vendor,
+        amount: D(amount),
+        date: BUYING_DAY,
+        spentOn: BUYING_DAY,
+      },
+      select: { id: true },
+    });
+    if (vendor) {
+      await postLedgerEntries(prisma, [
+        { ...scope, partyId: vendor, type: "CREDIT", sourceType: "EXPENSE", sourceId: e.id, amount: D(amount), date: BUYING_DAY },
+      ]);
+    }
+  }
+
+  // --- three trips, rent expensed once each on the buying day -------------
+  const trips: Record<string, string> = {};
+  for (const [key, channel, vehicle, transporterId, rent, advance, billNo] of [
+    ["market", "MARKET", vehicles.market.id, transporters.market, 20_000, 5_000, "DN-201"],
+    ["factory", "FACTORY", vehicles.factory.id, transporters.factory, 8_000, null, "DN-202"],
+    ["mill", "FISH_MILL", vehicles.mill.id, transporters.mill, 4_000, null, "DN-203"],
+  ] as const) {
+    const trip = await prisma.deliveryNote.create({
+      data: {
+        ...scope,
+        billNo,
+        date: BUYING_DAY,
+        channel,
+        vehicleId: vehicle,
+        rentAmount: D(rent),
+        advancePaid: advance === null ? null : D(advance),
+        status: "DISPATCHED",
+        lines: {
+          create: [{ particulars: "Mixed", kg: D(300), box: 100, bigBox: 0, loose: 0, pcs: 0 }],
+        },
+      },
+      select: { id: true },
+    });
+    trips[key] = trip.id;
+
+    // RENT credit, then the advance debited straight back. Only the market
+    // trip takes an advance — the others are paid in full on return.
+    await postLedgerEntries(prisma, [
+      { ...scope, partyId: transporterId, type: "CREDIT", sourceType: "RENT", sourceId: trip.id, amount: D(rent), date: BUYING_DAY },
+      ...(advance
+        ? [{ ...scope, partyId: transporterId, type: "DEBIT" as const, sourceType: "PAYMENT" as const, sourceId: trip.id, amount: D(advance), date: BUYING_DAY }]
+        : []),
+    ]);
+
+    // Rent is a DIRECT expense of the buying day, posted once from the trip.
+    await prisma.expense.create({
+      data: {
+        ...scope,
+        categoryId: categoryId["RENT"],
+        partyId: transporterId,
+        amount: D(rent),
+        date: BUYING_DAY,
+        spentOn: BUYING_DAY,
+        notes: `Rent for trip ${billNo}`,
+      },
+    });
+  }
+
+  // --- the market bill, carrying the trip's rent --------------------------
+  //   total 180,000 − commission 3,600 − labour 2,000 − reserve 6,000
+  //                 − rent 20,000 = net 148,400
+  // Revenue recognised is net + rent = 168,400.
+  const marketSale = await prisma.sale.create({
+    data: {
+      ...scope,
+      type: "MARKET",
+      partyId: marketA,
+      billNo: "M-501",
+      date: BUYING_DAY,
+      saleDate: day("2026-08-18"),
+      deliveryNoteId: trips["market"],
+      amount: D(148_400),
+      totalBill: D(180_000),
+      commission: D(3_600),
+      commissionRate: D(2),
+      otherDeduction: D(2_000),
+      reserve: D(6_000),
+      carriesRent: true,
+      rentDeducted: D(20_000),
+      place: "Kondatty",
+    },
+    select: { id: true },
+  });
+  await postLedgerEntries(prisma, [
+    // The party owes the net bill for the fish.
+    { ...scope, partyId: marketA, type: "DEBIT", sourceType: "SALE", sourceId: marketSale.id, amount: D(148_400), date: BUYING_DAY },
+    // They paid the driver ₹15,000 of the rent on BFM's behalf: debit the
+    // transporter (settling his rent) and credit the party (not out of pocket).
+    { ...scope, partyId: transporters.market, type: "DEBIT", sourceType: "RENT_BY_PARTY", sourceId: marketSale.id, amount: D(15_000), date: BUYING_DAY },
+    { ...scope, partyId: marketA, type: "CREDIT", sourceType: "RENT_BY_PARTY", sourceId: marketSale.id, amount: D(15_000), date: BUYING_DAY },
+  ]);
+
+  // --- factory and mill bills, paid in full -------------------------------
+  for (const [type, partyId, tripKey, amount, billNo] of [
+    ["FACTORY", factory, "factory", 70_000, "F-88"],
+    ["FISH_MILL", mill, "mill", 25_000, "FM-30"],
+  ] as const) {
+    const sale = await prisma.sale.create({
+      data: {
+        ...scope,
+        type,
+        partyId,
+        billNo,
+        date: BUYING_DAY,
+        saleDate: day("2026-08-18"),
+        deliveryNoteId: trips[tripKey],
+        amount: D(amount),
+      },
+      select: { id: true },
+    });
+    await postLedgerEntries(prisma, [
+      { ...scope, partyId, type: "DEBIT", sourceType: "SALE", sourceId: sale.id, amount: D(amount), date: BUYING_DAY },
+    ]);
+    // BFM pays these drivers in full on their return.
+    await postLedgerEntries(prisma, [
+      { ...scope, partyId: tripKey === "factory" ? transporters.factory : transporters.mill, type: "DEBIT", sourceType: "PAYMENT", sourceId: trips[tripKey], amount: D(tripKey === "factory" ? 8_000 : 4_000), date: BUYING_DAY },
+    ]);
+  }
+
+  // --- one overhead, to prove it stays out of the day's gross -------------
+  await prisma.expense.create({
+    data: {
+      ...scope,
+      categoryId: categoryId["SALARY"],
+      amount: D(40_000),
+      date: BUYING_DAY,
+      spentOn: BUYING_DAY,
+      notes: "Monthly salaries — OVERHEAD, must not touch this day's gross.",
+    },
   });
 
-  console.log("Seeded BFM/B2B, two centres each, users, and sample entries in BFM · Centre 1.");
-  for (const u of users) console.log(`  ${u.email} / ${u.password} (${u.role})`);
+  console.log("Seeded the 16 Aug 2026 worked example for BFM / Malpe.");
+  console.log("  purchases 185,000 · direct 47,000 · revenue 263,400");
+  console.log("  expected GROSS profit 31,400 (salary 40,000 excluded)");
+  console.log("  reserve outstanding 6,000 against Kondatty");
+  console.log("Sign in as owner@bfm.test / password123");
 }
 
-main().finally(() => prisma.$disconnect());
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+  })
+  .finally(() => prisma.$disconnect());

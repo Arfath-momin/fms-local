@@ -2,11 +2,9 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { getFlagsFor } from "@/lib/errorflag";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
-import { CorrectedBadge } from "../../lock-mark";
 import { DateWindow, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
@@ -41,7 +39,6 @@ export default async function SalesPage({
     }),
     prisma.sale.count({ where }),
   ]);
-  const flags = await getFlagsFor("SALE", sales.map((s) => s.id));
 
   return (
     <div>
@@ -87,36 +84,25 @@ export default async function SalesPage({
             </thead>
             <tbody>
               {sales.map((s) => {
-                const flag = flags.get(s.id);
-                const struck = flag ? "line-through opacity-60" : "";
                 return (
                   <tr key={s.id}>
                     <td className="whitespace-nowrap">
                       {fmtDate(s.date)}
                     </td>
-                    <td className={`num ${struck}`}>{s.billNo}</td>
-                    <td className={struck}>{SALE_TYPE_LABELS[s.type]}</td>
+                    <td className="num">{s.billNo}</td>
+                    <td >{SALE_TYPE_LABELS[s.type]}</td>
                     <td className="font-medium">
-                      <span className={struck}>{s.party.name}</span>
+                      <span>{s.party.name}</span>
                       {s.careOfParty && (
                         <span className="text-muted text-[12px]">
                           {" "}· c/o {s.careOfParty.name}
                         </span>
                       )}
-                      {flag && (
-                        <CorrectedBadge
-                          href={
-                            flag.correctingEntryId
-                              ? `/vouchers/sales/${flag.correctingEntryId}`
-                              : null
-                          }
-                        />
-                      )}
                     </td>
-                    <td className={`num ${struck}`}>
+                    <td className="num">
                       {s.vehicleNo ?? <span className="text-muted">—</span>}
                     </td>
-                    <td className={`num-col num text-credit ${struck}`}>
+                    <td className="num-col num text-credit">
                       {fmtMoney(s.amount)}
                     </td>
                     <td>
@@ -124,7 +110,7 @@ export default async function SalesPage({
                         href={`/vouchers/sales/${s.id}`}
                         className="text-accent underline underline-offset-2 text-[12px]"
                       >
-                        {mayEdit && !flag ? "Edit" : "View"}
+                        {mayEdit ? "Edit" : "View"}
                       </Link>
                     </td>
                   </tr>

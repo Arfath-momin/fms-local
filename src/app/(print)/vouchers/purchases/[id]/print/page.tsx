@@ -49,7 +49,6 @@ export default async function PurchasePrintPage({
       },
       centre: { select: { name: true } },
       party: { select: { name: true, contactInfo: true } },
-      boat: { select: { name: true } },
       lines: {
         orderBy: { id: "asc" },
         include: { boat: { select: { name: true } } },
@@ -141,12 +140,9 @@ export default async function PurchasePrintPage({
             )}
           </div>
           <div className="text-[12px] grid gap-0.5">
-            {/* Only for the shapes that carry one voucher-level boat. On a
-                Society or KFDC bill the boat belongs to the row, and is
-                printed in the table instead. */}
-            {!hasLineBoats && purchase.boat && (
-              <Detail label="Boat" value={purchase.boat.name} />
-            )}
+            {/* The voucher-level boat is gone (spec §3.7) — a bill can cover
+                several vessels, so the boat belongs to the line and is printed
+                in the table. */}
             <Detail label="Centre" value={purchase.centre.name} />
           </div>
         </div>

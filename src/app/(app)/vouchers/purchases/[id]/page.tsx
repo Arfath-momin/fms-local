@@ -34,7 +34,6 @@ export default async function PurchaseDetailPage({
     where: { id, companyId: company.id, centreId: centre.id },
     include: {
       party: { select: { name: true } },
-      boat: { select: { name: true } },
       lines: {
         orderBy: { id: "asc" },
         include: { boat: { select: { name: true } } },
@@ -45,37 +44,6 @@ export default async function PurchaseDetailPage({
   });
   if (!purchase) notFound();
 
-  // Historic flags from the old closed-day correction flow are still honoured:
-  // the original stays visible and points at whatever replaced it.
-  const flag = await prisma.errorFlag.findUnique({
-    where: {
-      linkedType_linkedId: { linkedType: "PURCHASE", linkedId: purchase.id },
-    },
-  });
-
-  if (flag) {
-    return (
-      <div>
-        <h1 className="heading text-xl font-semibold mb-4">Purchase</h1>
-        <div className="text-[13px] border border-debit bg-surface px-4 py-3 max-w-lg">
-          <p className="font-semibold text-debit">
-            This purchase was flagged as an error and corrected.
-          </p>
-          {flag.reason && <p className="mt-1 text-muted">Reason: {flag.reason}</p>}
-          {flag.correctingEntryId && (
-            <p className="mt-1">
-              <Link
-                href={`/vouchers/purchases/${flag.correctingEntryId}`}
-                className="text-accent underline underline-offset-2"
-              >
-                View the corrected entry →
-              </Link>
-            </p>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   const attachments = await getAttachments("PURCHASE", purchase.id);
   const panel = (
@@ -198,10 +166,7 @@ export default async function PurchaseDetailPage({
     date: toInputDate(purchase.date),
     notes: purchase.notes ?? "",
     lines: purchase.lines.map((l) => ({
-      // A bill entered before boats moved onto the line has its vessel in the
-      // header; carrying it onto the first row keeps the name rather than
-      // silently dropping it when this edit rewrites the bill as rows.
-      boatName: l.boat?.name ?? purchase.boat?.name ?? "",
+      boatName: l.boat?.name ?? "",
       particular: l.particular,
       qtyKg: l.qtyKg.toString(),
       pricePerKg: l.pricePerKg.toString(),

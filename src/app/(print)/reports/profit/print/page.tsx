@@ -4,7 +4,6 @@ import { requireReports } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { computeProfit } from "@/lib/report";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
-import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { businessTodayDate, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { PrintHeader } from "../../../letterhead";
@@ -55,7 +54,7 @@ export default async function ProfitPrintPage({
     sp.to && /^\d{4}-\d{2}-\d{2}$/.test(sp.to) ? new Date(sp.to) : today;
 
   const r = await computeProfit(company.id, centre.id, from, to);
-  const isProfit = r.profit.greaterThanOrEqualTo(0);
+  const isProfit = r.grossProfit.greaterThanOrEqualTo(0);
 
   return (
     <div
@@ -112,7 +111,7 @@ export default async function ProfitPrintPage({
         <Section
           title="Expenses"
           rows={r.expenseByCategory.map((x) => ({
-            label: EXPENSE_CATEGORY_LABELS[x.category],
+            label: x.name,
             amount: x.amount,
           }))}
           total={r.expense}
@@ -142,7 +141,7 @@ export default async function ProfitPrintPage({
                 {isProfit ? "Net profit" : "Net loss"}
               </td>
               <td className="r num font-semibold">
-                {fmtMoney(r.profit.abs())}
+                {fmtMoney(r.grossProfit.abs())}
               </td>
             </tr>
           </tfoot>

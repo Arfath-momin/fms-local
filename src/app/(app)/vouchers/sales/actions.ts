@@ -14,17 +14,12 @@ import {
 } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
 import {
-  COMMISSION_PARTY_NAME,
-  RESERVE_PARTY_NAME,
-} from "@/lib/settlement";
-import {
   SALE_TYPES,
   SALE_BUYER_TYPE,
   SALE_TYPE_ALLOWS_CARE_OF,
   commissionAmount,
   MAX_COMMISSION_RATE,
 } from "@/lib/sale";
-import { clearErrorFlag } from "@/lib/errorflag";
 import { resolveReviews } from "@/lib/review-db";
 import {
   linkStagedAttachment,
@@ -345,47 +340,19 @@ async function postSaleLedger(
     },
   ];
 
-  if (s.commission && s.commission.gt(0)) {
-    const commissionPartyId = await findOrCreateParty(
-      tx,
-      COMMISSION_PARTY_NAME,
-      "COMMISSION"
-    );
-    // DEBIT: commission earned is income accruing to us, so the account grows
-    // in the same direction as money owed to us.
-    entries.push({
-      companyId: s.companyId,
-      centreId: s.centreId,
-      partyId: commissionPartyId,
-      type: "DEBIT" as const,
-      sourceType: "COMMISSION" as const,
-      sourceId: s.id,
-      amount: s.commission,
-      date: s.date,
-    });
-  }
-
-  if (s.reserve && s.reserve.gt(0)) {
-    const reservePartyId = await findOrCreateParty(
-      tx,
-      RESERVE_PARTY_NAME,
-      "RESERVE"
-    );
-    // CREDIT, opposite to commission, and the sign is the whole point: money
-    // held back is money we owe the seller, not income we earned. Posting it
-    // DEBIT like commission would read as the house being owed its own
-    // retention, and the two accounts would then sum to something meaningless.
-    entries.push({
-      companyId: s.companyId,
-      centreId: s.centreId,
-      partyId: reservePartyId,
-      type: "CREDIT" as const,
-      sourceType: "RESERVE" as const,
-      sourceId: s.id,
-      amount: s.reserve,
-      date: s.date,
-    });
-  }
+  // Commission and reserve post NOTHING, deliberately (spec §2, invariants 4
+  // and 5).
+  //
+  // Both used to open a standing house account: commission was DEBITed as
+  // income and reserve CREDITed as a pooled liability. Both were wrong. BFM
+  // buys fish outright and owns it — it is not a commission agent. The market
+  // charges BFM a commission and withholds a reserve, and both are already
+  // netted inside the net bill this sale posts. Posting them again would
+  // count the same rupee twice and invent income the business never earned.
+  //
+  // Reserve is not lost by going unposted: its balance is DERIVED per market
+  // party as SUM(sales.reserve) − SUM(reserve collections), which is what
+  // keeps it per-party instead of pooled into one meaningless figure.
 
   await postLedgerEntries(tx, entries);
 }
@@ -510,7 +477,6 @@ export async function deleteSale(
 
       await removeLedgerEntries(tx, { sourceId: saleId });
       await unlinkAttachments(tx, "SALE", saleId);
-      await clearErrorFlag(tx, "SALE", saleId);
       // Removing the voucher answers any request against it. The request rows
       // themselves survive — they record that a correction was asked for.
       await resolveReviews(tx, "SALE", saleId, session.userId);

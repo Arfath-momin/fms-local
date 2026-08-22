@@ -10,14 +10,16 @@
     "postinstall": "prisma generate",
     "db:dev": "node scripts/dev-db.mjs",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "tsx scripts/seed.ts",
+    "db:seed": "tsx --conditions=react-server scripts/seed.ts",
     "db:studio": "prisma studio",
-    "db:check": "tsx scripts/check-ledger.ts",
-    "db:verify": "tsx scripts/verify-ledger.ts",
+    "db:check": "tsx --conditions=react-server scripts/check-ledger.ts",
+    "db:verify": "tsx --conditions=react-server scripts/verify-ledger.ts",
     "db:split-local": "tsx scripts/split-local-individuals.ts",
     "db:backfill-kind": "tsx scripts/backfill-party-kind.ts",
-    "user:create": "tsx scripts/create-user.ts",
-    "bootstrap": "tsx scripts/bootstrap.ts"
+    "user:create": "tsx --conditions=react-server scripts/create-user.ts",
+    "bootstrap": "tsx --conditions=react-server scripts/bootstrap.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
@@ -28,6 +30,7 @@
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "server-only": "^0.0.1",
     "uuid": "^14.0.1"
   },
   "devDependencies": {
@@ -42,6 +45,7 @@
     "prisma": "^7.8.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }

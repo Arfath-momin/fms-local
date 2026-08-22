@@ -32,7 +32,11 @@ const GROUPS: { key: string; label: string; types: PartyType[] }[] = [
   { key: "purchase", label: "Purchase Parties", types: PURCHASE_LEDGER_TYPES },
   { key: "sale", label: "Sale Ledgers", types: SALE_LEDGER_TYPES },
   { key: "expense", label: "Expense Vendors", types: EXPENSE_LEDGER_TYPES },
-  { key: "commission", label: "Commission", types: ["COMMISSION"] },
+  // Transporters carry a real balance: rent is credited when a trip is
+  // created and settled by the advance and by whatever a market party paid the
+  // driver. A balance that does not close at zero means something is genuinely
+  // unpaid, which is exactly what this screen is for (spec §2).
+  { key: "transport", label: "Transporters", types: ["TRANSPORTER"] },
 ];
 
 const groupOf = (type: PartyType) =>

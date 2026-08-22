@@ -76,9 +76,9 @@ export default async function DashboardPage() {
     }
   }
 
-  const pfCls = day.profit.greaterThan(0)
+  const pfCls = day.grossProfit.greaterThan(0)
     ? "text-credit"
-    : day.profit.lessThan(0)
+    : day.grossProfit.lessThan(0)
       ? "text-debit"
       : "";
 
@@ -157,7 +157,7 @@ export default async function DashboardPage() {
         <Tile
           href="/ledgers/day-book"
           label="Profit today"
-          value={fmtMoney(day.profit)}
+          value={fmtMoney(day.grossProfit)}
           sub="Sale − (Purchase + Expense)"
           valueCls={pfCls}
         />

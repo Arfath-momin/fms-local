@@ -1,17 +1,24 @@
-import type { ExpenseCategory } from "@/generated/prisma/enums";
+// Categories are rows in `expense_categories` now, not an enum — the merchant
+// owns the list, and each row carries the DIRECT / OVERHEAD kind that decides
+// which profit tier it lands in (spec §3.4).
+//
+// What could NOT move into the database is the *entry shape*: ice is blocks ×
+// rate per block, loaders is boxes × rate per box, canteen is a flat total.
+// Those are form layouts, which is code. So the specs below are keyed by the
+// category's stable `code`, and a category whose code has no spec here simply
+// gets the plain amount field — which is what makes adding "Electricity" from
+// Masters work without a deploy.
 
-export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
-  ICE: "Ice",
-  LOADERS: "Loaders",
-  LADIES: "Ladies",
-  BATHA: "Batha",
-  CANTEEN: "Canteen",
-  RENT: "Rent",
-};
-
-export const EXPENSE_CATEGORIES = Object.keys(
-  EXPENSE_CATEGORY_LABELS
-) as ExpenseCategory[];
+/** Codes seeded by scripts/seed.ts. Others are user-created and are fine. */
+export const DIRECT_CODES = [
+  "ICE",
+  "LOADERS",
+  "LADIES",
+  "BATHA",
+  "CANTEEN",
+  "RENT",
+] as const;
+export const OVERHEAD_CODES = ["SALARY", "OFFICE_RENT", "OTHER"] as const;
 
 export type ExpenseFieldSpec = {
   name: string; // form field name + key inside details JSON
@@ -61,7 +68,7 @@ const n = (name: string, label: string, required = true): ExpenseFieldSpec => ({
 
 // Per-category entry shapes (client spec). `details` stores every field; the
 // ledger + Profit report only ever read `amount` (the computed/entered total).
-export const EXPENSE_SPECS: Record<ExpenseCategory, ExpenseCategorySpec> = {
+export const EXPENSE_SPECS: Record<string, ExpenseCategorySpec> = {
   ICE: {
     label: "Ice",
     fields: [
@@ -98,20 +105,12 @@ export const EXPENSE_SPECS: Record<ExpenseCategory, ExpenseCategorySpec> = {
     fields: [],
     amountEntered: true,
   },
-  RENT: {
-    label: "Rent",
-    fields: [
-      t("slNo", "SL No", false),
-      t("vehicleNo", "Vehicle No"),
-      n("rent", "Total Rent"),
-      n("advance", "Advance Paid", false),
-      n("collected", "Collected / Adjusted", false),
-    ],
-    totalField: "rent",
-    prepaidFrom: ["advance", "collected"],
-    amountEntered: false,
-    vendorFrom: "vehicleNo",
-  },
+  // RENT has no entry spec on purpose. Vehicle rent is expensed exactly once,
+  // from the trip, dated to the buying day (spec §2, invariant 2) — the
+  // advance and whatever a market party paid the driver are settlements
+  // against it, never further expenses. A hand-entered rent voucher would be
+  // the second one. The category still exists so the trip's expense has
+  // somewhere to file itself.
 };
 
 /**
@@ -119,20 +118,23 @@ export const EXPENSE_SPECS: Record<ExpenseCategory, ExpenseCategorySpec> = {
  * fields named by `prepaidFrom`. Zero for every category that has none.
  */
 export function expensePrepaid(
-  category: ExpenseCategory,
+  code: string,
   details: Record<string, string>
 ): number {
-  const keys = EXPENSE_SPECS[category].prepaidFrom;
+  const keys = EXPENSE_SPECS[code]?.prepaidFrom;
   if (!keys) return 0;
   return keys.reduce((sum, k) => sum + (Number(details[k]) || 0), 0);
 }
 
 /** Ledger/party name for an expense — the vendor field where given, else the category. */
 export function expenseVendorName(
-  category: ExpenseCategory,
+  code: string,
+  categoryName: string,
   details: Record<string, string>
 ): string {
-  const spec = EXPENSE_SPECS[category];
-  const v = spec.vendorFrom ? details[spec.vendorFrom]?.trim() : "";
-  return v || spec.label;
+  const spec = EXPENSE_SPECS[code];
+  const v = spec?.vendorFrom ? details[spec.vendorFrom]?.trim() : "";
+  // Falls back to the category's own name from the database rather than a
+  // hardcoded label, so a user-created category still names its ledger.
+  return v || spec?.label || categoryName;
 }

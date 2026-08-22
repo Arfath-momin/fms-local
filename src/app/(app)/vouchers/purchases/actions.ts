@@ -10,7 +10,6 @@ import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { FIXED_PURCHASE_PARTY, purchaseHasLineBoats } from "@/lib/party";
 import { findOrCreateParty } from "@/lib/party-db";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
-import { clearErrorFlag } from "@/lib/errorflag";
 import { resolveReviews } from "@/lib/review-db";
 import {
   linkStagedAttachment,
@@ -159,6 +158,9 @@ async function resolveLineBoats(
 async function lineData(tx: Prisma.TransactionClient, lines: ParsedLine[]) {
   const boatIds = await resolveLineBoats(tx, lines);
   return lines.map((l, i) => ({
+    // The line-level boat is the ONLY place a vessel is recorded now — the
+    // header boat was deleted (spec §3.7) because one Society bill covers
+    // several vessels.
     boatId: boatIds[i],
     particular: l.particular,
     qtyKg: l.qtyKg,
@@ -292,7 +294,6 @@ export async function deletePurchase(
       // No sourceType filter: nothing keyed to this voucher should outlive it.
       await removeLedgerEntries(tx, { sourceId: purchaseId });
       await unlinkAttachments(tx, "PURCHASE", purchaseId);
-      await clearErrorFlag(tx, "PURCHASE", purchaseId);
       // Removing the voucher answers any request against it. The request rows
       // themselves survive — they record that a correction was asked for.
       await resolveReviews(tx, "PURCHASE", purchaseId, session.userId);
@@ -358,7 +359,6 @@ export async function updatePurchase(
           // Cleared, not carried over: this save rewrites the bill as rows, and
           // the boat now lives on them. A leftover header boat would keep
           // printing a vessel name the lines no longer agree with.
-          boatId: null,
           billNo: d.billNo,
           notes: d.notes,
           type: d.type,

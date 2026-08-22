@@ -2,7 +2,6 @@ import type { PartyType, PurchaseType } from "@/generated/prisma/enums";
 
 export const PARTY_TYPE_LABELS: Record<PartyType, string> = {
   BOAT: "Boat",
-  LOCAL_SELLER: "Local Seller",
   MARKET_BUYER: "Market Buyer",
   FACTORY: "Factory",
   FISH_MILL: "Fish Mill",
@@ -10,13 +9,11 @@ export const PARTY_TYPE_LABELS: Record<PartyType, string> = {
   EXPENSE_VENDOR: "Expense Vendor",
   CARE_OF: "CareOf",
   PURCHASE_GROUP: "Purchase Party",
-  COMMISSION: "Commission",
-  RESERVE: "Reserve",
+  TRANSPORTER: "Transporter",
 };
 
 export const PARTY_TYPE_PLURALS: Record<PartyType, string> = {
   BOAT: "Boats",
-  LOCAL_SELLER: "Local Sellers",
   MARKET_BUYER: "Market Buyers",
   FACTORY: "Factories",
   FISH_MILL: "Fish Mills",
@@ -24,8 +21,7 @@ export const PARTY_TYPE_PLURALS: Record<PartyType, string> = {
   EXPENSE_VENDOR: "Expense Vendors",
   CARE_OF: "CareOf Agents",
   PURCHASE_GROUP: "Purchase Parties",
-  COMMISSION: "Commission Account",
-  RESERVE: "Reserve Account",
+  TRANSPORTER: "Transporters",
 };
 
 export const PARTY_TYPES = Object.keys(PARTY_TYPE_LABELS) as PartyType[];
@@ -40,12 +36,11 @@ export const PARTY_TYPES = Object.keys(PARTY_TYPE_LABELS) as PartyType[];
  * vessel. Nothing ever posts a LedgerEntry against them, so listing them among
  * the ledgers only produced a screenful of permanently-zero balances.
  *
- * LOCAL_SELLER is here for the same reason it always was, but it is now a dead
- * type: a Local seller is a real counterparty and gets a PURCHASE_GROUP ledger
- * of their own (see FIXED_PURCHASE_PARTY). Only rows written before that change
- * still carry the type, and they never had entries either.
+ * LOCAL_SELLER used to sit here too and has been deleted outright (spec §3.7):
+ * a Local seller is a real counterparty and gets a PURCHASE_GROUP ledger of
+ * their own (see FIXED_PURCHASE_PARTY).
  */
-export const RECORD_ONLY_PARTY_TYPES: PartyType[] = ["BOAT", "LOCAL_SELLER"];
+export const RECORD_ONLY_PARTY_TYPES: PartyType[] = ["BOAT"];
 
 export function isLedgerPartyType(type: PartyType): boolean {
   return !RECORD_ONLY_PARTY_TYPES.includes(type);

@@ -37,6 +37,7 @@ export default async function DeliveryNotePrintPage({
     // or centre must not print from the scope you are in.
     where: { id, companyId: company.id, centreId: centre.id },
     include: {
+        vehicle: { select: { number: true, transporter: { select: { name: true } } } },
       company: {
         select: {
           id: true, name: true, legalName: true, address: true,
@@ -95,7 +96,7 @@ export default async function DeliveryNotePrintPage({
             <div className="text-[15px] font-semibold">{note.recipient}</div>
           </div>
           <div className="text-[12px] grid gap-0.5">
-            <Detail label="Vehicle No." value={note.vehicleNo} />
+            <Detail label="Vehicle No." value={note.vehicle.number} />
             {note.driverName && (
               <Detail label="Driver" value={note.driverName} />
             )}

@@ -133,6 +133,9 @@ model Company {
   attachments    Attachment[]
   settlements    Settlement[]
   reviewRequests ReviewRequest[]
+  vehicles       Vehicle[]
+  expenseCategories ExpenseCategory[]
+  reserveCollections ReserveCollection[]
 
   @@map("companies")
 }
@@ -163,6 +166,7 @@ model Centre {
   attachments    Attachment[]
   settlements    Settlement[]
   reviewRequests ReviewRequest[]
+  reserveCollections ReserveCollection[]
 
   @@unique([companyId, name])
   @@map("centres")
@@ -176,37 +180,39 @@ model Centre {
 enum PartyType {
   BOAT // the vessel named on each line of a Society / KFDC purchase. A name
   // registry only — nothing ever posts a LedgerEntry against it, because the
-  // money is owed to the party that sent the boat, not to the boat.
-  LOCAL_SELLER // RETIRED. Local sellers used to be registry-only names hung off
-  // a single shared "Local Individuals" ledger, which meant two sellers owed
-  // ₹40k and ₹50k read as one ₹90k debt to nobody in particular. A Local
-  // purchase now names its seller as a PURCHASE_GROUP with a ledger of their
-  // own, exactly like a Private one. Kept so historic rows still resolve.
+  // money is owed to the society that sent the boat, not to the boat.
   MARKET_BUYER
   FACTORY
   FISH_MILL
   LOCAL_BUYER
   EXPENSE_VENDOR // ice plant, landlord, loaders group, etc.
-  CARE_OF // commission agent who pays immediately; a Fish Mill/Factory sale
-  // "via CareOf" keeps the real buyer on the sale record but posts the ledger
-  // to this CareOf party instead.
+  CARE_OF // an agent who pays immediately; a Fish Mill/Factory sale "via
+  // CareOf" keeps the real buyer on the sale record but posts the ledger to
+  // this CareOf party instead.
   PURCHASE_GROUP // whoever a purchase is owed to. Society and KFDC are one
   // standing account each, fixed by the purchase type, however many boats they
   // send; a Private or Local purchase names its own seller, who gets a ledger
   // of their own so payments settle against the right person. The individual
   // boat is recorded on the line, never as a ledger. See src/lib/party.ts
   // (FIXED_PURCHASE_PARTY).
-  COMMISSION // the house's own commission account — one per company/centre,
-  // credited by every Market sale at whatever rate that bill was struck at.
-  // Modelled as a party so the commission ledger is an ordinary statement
-  // rather than a parallel reporting table.
-  RESERVE // money held back from a Market seller. The mirror of COMMISSION and
-  // modelled the same way, but it is emphatically NOT income: commission is
-  // what the house earned, reserve is the seller's own money being retained.
-  // Kept in its own account so the two never sum into a single misleading
-  // figure, and shown alongside commission on the same screen because they are
-  // the two things withheld from the same bill.
+  TRANSPORTER // owns the vehicles. Rent for a trip is credited here and
+  // settled by the advance and by whatever a market party paid the driver on
+  // BFM's behalf; a balance that does not close at zero means something is
+  // genuinely unpaid, and that signal must not be suppressed (spec §2).
 }
+
+// LOCAL_SELLER, COMMISSION and RESERVE were removed here (spec §3.7).
+//
+// LOCAL_SELLER was already retired — a Local purchase names its seller as a
+// PURCHASE_GROUP with a ledger of their own.
+//
+// COMMISSION and RESERVE were a misreading of the business. BFM is a fish
+// merchant, not a commission agent: commission is a cost the market charges
+// BFM and is netted inside the bill, never credited to a BFM account, and
+// reserve is withheld by the market with a balance derived PER MARKET PARTY,
+// never pooled into one standing account. Removing the enum values makes
+// recreating either of those accounts a compile error rather than a decision
+// somebody could quietly make again.
 
 model Party {
   id          String    @id @default(uuid())
@@ -233,16 +239,43 @@ model Party {
   purchaseKind PurchaseType? @map("purchase_kind")
 
   purchases           Purchase[]
-  purchasesAsBoat     Purchase[]     @relation("PurchaseBoat")
   purchaseLinesAsBoat PurchaseLine[] @relation("PurchaseLineBoat")
   expenses            Expense[]
   ledgerEntries       LedgerEntry[]
   salesAsBuyer        Sale[]         @relation("SaleBuyer")
   salesAsCareOf       Sale[]         @relation("SaleCareOf")
   settlements         Settlement[]
+  vehicles            Vehicle[]      @relation("VehicleTransporter")
+  reserveCollections  ReserveCollection[]
 
   @@unique([name, type])
   @@map("parties")
+}
+
+/// A truck, and who owns it.
+///
+/// Vehicles were free text on the delivery note, which meant "KA-20-B-5521",
+/// "KA20B5521" and "ka 20 b 5521" were three different trucks and none of them
+/// pointed at a transporter to owe rent to. A master fixes both: the number is
+/// stored normalised so a lookup can never miss on formatting, and every trip
+/// reaches its transporter's ledger through this row.
+model Vehicle {
+  id            String    @id @default(uuid())
+  companyId     String    @map("company_id")
+  /// Stored normalised (uppercase, no spaces or dashes) so lookups can never
+  /// miss on formatting; display formatting is a UI concern.
+  number        String
+  transporterId String    @map("transporter_id")
+  archivedAt    DateTime? @map("archived_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  company     Company        @relation(fields: [companyId], references: [id])
+  transporter Party          @relation("VehicleTransporter", fields: [transporterId], references: [id])
+  trips       DeliveryNote[]
+
+  @@unique([companyId, number])
+  @@index([transporterId])
+  @@map("vehicles")
 }
 
 // ---------- Purchases ----------
@@ -269,11 +302,6 @@ model Purchase {
   /// one — the same field under two names on paper. Deliberately not unique:
   /// real bill books repeat numbers across centres and across years.
   billNo      String?      @map("bill_no")
-  /// RETIRED for new entries — the boat now lives on the line (see
-  /// PurchaseLine.boatId), because one Society bill covers several vessels.
-  /// Still written by nothing and read by the party statement, which falls back
-  /// to it for purchases entered before the line-level boat existed.
-  boatId      String?      @map("boat_id")
   type        PurchaseType
   amount      Decimal      @db.Decimal(14, 2)
   date        DateTime     @db.Date
@@ -291,13 +319,11 @@ model Purchase {
   company   Company        @relation(fields: [companyId], references: [id])
   centre    Centre         @relation(fields: [centreId], references: [id])
   party     Party          @relation(fields: [partyId], references: [id])
-  boat      Party?         @relation("PurchaseBoat", fields: [boatId], references: [id])
   createdBy User?          @relation("PurchaseCreatedBy", fields: [createdById], references: [id])
   updatedBy User?          @relation("PurchaseUpdatedBy", fields: [updatedById], references: [id])
   lines     PurchaseLine[]
 
   @@index([companyId, centreId, date])
-  @@index([boatId])
   @@map("purchases")
 }
 
@@ -330,13 +356,59 @@ model PurchaseLine {
 
 // ---------- Expenses ----------
 
-enum ExpenseCategory {
-  ICE
-  LOADERS
-  LADIES
-  BATHA
-  CANTEEN
-  RENT
+/// Which profit tier an expense belongs to.
+///
+/// This is the whole reason categories became data. A salary is not a cost of
+/// Tuesday's catch, and charging it against Tuesday's gross profit makes the
+/// daily figure meaningless. DIRECT costs belong to a buying day; OVERHEAD
+/// costs belong to a month and touch net profit only (spec §2).
+enum ExpenseKind {
+  DIRECT // ice, loaders, ladies, batha, canteen, vehicle rent
+  OVERHEAD // salaries, office rent, electricity
+}
+
+/// Expense categories as rows, not as an enum.
+///
+/// They were an enum, which meant adding "electricity" was a migration and a
+/// deploy, and — worse — gave nowhere to record whether a category is a direct
+/// cost of a catch or a monthly overhead. Both problems are the same problem:
+/// a category is data the merchant owns, not a fact about the code.
+model ExpenseCategory {
+  id          String      @id @default(uuid())
+  companyId   String      @map("company_id")
+  code        String // ICE, LOADERS, LADIES, BATHA, CANTEEN, RENT, SALARY, ...
+  name        String
+  kind        ExpenseKind
+  /// True for OTHER and similar: the voucher shows a description/amount line
+  /// table that sums into `amount`, instead of one flat figure.
+  allowsLines Boolean     @default(false) @map("allows_lines")
+  sortOrder   Int         @default(0) @map("sort_order")
+  archivedAt  DateTime?   @map("archived_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  company  Company   @relation(fields: [companyId], references: [id])
+  expenses Expense[]
+
+  @@unique([companyId, code])
+  @@map("expense_categories")
+}
+
+/// One line of an itemised expense, for categories with `allowsLines`.
+///
+/// "Other ₹4,300" tells nobody anything a month later. The lines sum into
+/// Expense.amount, which stays the single figure every report reads — so the
+/// detail is additive, and no report has to know whether a voucher was
+/// itemised.
+model ExpenseLine {
+  id          String  @id @default(uuid())
+  expenseId   String  @map("expense_id")
+  description String
+  amount      Decimal @db.Decimal(14, 2)
+
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@index([expenseId])
+  @@map("expense_lines")
 }
 
 // One row per expense. `details` holds the per-category fields (ICE: vehicle,
@@ -346,8 +418,11 @@ model Expense {
   id          String          @id @default(uuid())
   companyId   String          @map("company_id")
   centreId    String          @map("centre_id")
-  partyId     String          @map("party_id") // expense vendor / category ledger
-  category    ExpenseCategory
+  /// OPTIONAL. A canteen bill or a salary line has no vendor worth a ledger,
+  /// and forcing one only fills the party master with junk nobody settles
+  /// against. Set it when the money is genuinely owed to someone.
+  partyId     String?         @map("party_id")
+  categoryId  String          @map("category_id")
   amount      Decimal         @db.Decimal(14, 2)
   details     Json?
   notes       String?
@@ -367,11 +442,14 @@ model Expense {
 
   company   Company @relation(fields: [companyId], references: [id])
   centre    Centre  @relation(fields: [centreId], references: [id])
-  party     Party   @relation(fields: [partyId], references: [id])
-  createdBy User?   @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
-  updatedBy User?   @relation("ExpenseUpdatedBy", fields: [updatedById], references: [id])
+  party     Party?          @relation(fields: [partyId], references: [id])
+  category  ExpenseCategory @relation(fields: [categoryId], references: [id])
+  createdBy User?           @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?           @relation("ExpenseUpdatedBy", fields: [updatedById], references: [id])
+  lines     ExpenseLine[]
 
-  @@index([companyId, centreId, category, date])
+  @@index([companyId, centreId, categoryId, date])
+  @@index([companyId, centreId, date])
   @@map("expenses")
 }
 
@@ -381,19 +459,70 @@ model Expense {
 // money movement. Header fields + line items + an optional bill image. Column
 // totals (box / big box / loose / pcs) are summed on the fly for display; the
 // note itself carries no accounting.
+/// Which channel a trip was dispatched to. Replaces the old free-text
+/// recipient as the thing the system reasons about: rent settles differently
+/// per channel, and only MARKET carries deductions.
+enum TripChannel {
+  MARKET
+  FACTORY
+  FISH_MILL
+  LOCAL
+}
+
+/// How far along a trip is. Bills come back 2–3 days later, so a trip is
+/// normally open for a while and "what is still out" is a question worth
+/// answering every morning.
+enum TripStatus {
+  DISPATCHED // out, no bills yet
+  PART_BILLED // some bills in
+  CLOSED // all bills in, reconciled
+}
+
+/// A trip: one truck, one buying day, one channel.
+///
+/// Still called DeliveryNote, and still `delivery_notes`, deliberately —
+/// renaming would churn every route under vouchers/deliveries and
+/// (print)/vouchers/deliveries for no gain (rebuild plan, ground rule 5).
+/// What changed is what it MEANS: it used to be a despatch slip addressed to a
+/// recipient, and it is now the thing bills point back at.
 model DeliveryNote {
   id          String    @id @default(uuid())
   companyId   String    @map("company_id")
   centreId    String    @map("centre_id")
   billNo      String    @map("bill_no")
-  date        DateTime  @db.Date
-  recipient   String // the "To" field
-  vehicleNo   String    @map("vehicle_no")
-  advancePaid Decimal?  @map("advance_paid") @db.Decimal(14, 2)
-  driverName  String?   @map("driver_name")
-  mobileNo    String?   @map("mobile_no")
+
+  /// THE BUYING DAY this load came from. One trip, one buying day — a load is
+  /// never split across buying days, which is what lets a bill arriving three
+  /// days later still be accounted to the day the fish was bought.
+  date         DateTime  @db.Date
+  /// When the truck actually left. Record only — read by nothing that computes
+  /// a figure.
+  dispatchedOn DateTime? @map("dispatched_on") @db.Date
+
+  channel   TripChannel
+  vehicleId String      @map("vehicle_id")
+
+  /// Total rent agreed for this trip. Expensed ONCE, on `date`, as a direct
+  /// expense — never as a separate rent voucher. The advance and whatever a
+  /// market party paid the driver are settlements against this, not further
+  /// expenses.
+  rentAmount  Decimal? @map("rent_amount") @db.Decimal(14, 2)
+  /// Paid to the driver before departure. MARKET only; null on other channels,
+  /// where BFM pays the driver in full on his return.
+  advancePaid Decimal? @map("advance_paid") @db.Decimal(14, 2)
+
+  status TripStatus @default(DISPATCHED)
+  /// Empty crates that came back. Closes the box loop.
+  cratesReturned Int? @map("crates_returned")
+
+  /// Free text, retained for the printed note. No longer load-bearing — who
+  /// received what comes from the bills that point back at this trip.
+  recipient  String?
+  driverName String? @map("driver_name")
+  mobileNo   String? @map("mobile_no")
   /// Free-form remark — see the note on Purchase.notes.
-  notes       String?
+  notes      String?
+
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime? @map("updated_at")
   createdById String?   @map("created_by_id")
@@ -401,11 +530,15 @@ model DeliveryNote {
 
   company   Company            @relation(fields: [companyId], references: [id])
   centre    Centre             @relation(fields: [centreId], references: [id])
+  vehicle   Vehicle            @relation(fields: [vehicleId], references: [id])
   createdBy User?              @relation("DeliveryNoteCreatedBy", fields: [createdById], references: [id])
   updatedBy User?              @relation("DeliveryNoteUpdatedBy", fields: [updatedById], references: [id])
   lines     DeliveryNoteLine[]
+  sales     Sale[]
 
   @@index([companyId, centreId, date])
+  @@index([status])
+  @@index([vehicleId])
   @@map("delivery_notes")
 }
 
@@ -471,14 +604,36 @@ model Sale {
 
   amount Decimal @db.Decimal(14, 2)
 
-  // Market-only:
-  totalBill  Decimal? @map("total_bill") @db.Decimal(14, 2) // gross incl. seller profit + expenses
-  /// The commission amount actually earned on this sale, in rupees.
+  /// The trip this bill came off. Required for MARKET, FACTORY and FISH_MILL —
+  /// enforced in the action, not here, because LOCAL sales have no trip and a
+  /// required column would block them.
   ///
-  /// Stored rather than derived on read: the rate is now per-sale, so a bill
-  /// entered at 2% must keep reading as 2% for ever, even after the house
-  /// changes what it charges. Recomputing from a live rate would silently
-  /// restate every historic bill.
+  /// This is the link that replaces matching on date + vehicle text, which
+  /// could never be reliable (spec invariant 8).
+  deliveryNoteId String? @map("delivery_note_id")
+
+  // --- Market deductions -------------------------------------------------
+  // MARKET only. Factory, fish mill and local bills are paid in full and the
+  // action rejects any of these on them.
+  //
+  // The market bill reads:
+  //     Total bill − commission − labour/other − reserve − rent = Net bill
+  //
+  // Commission, labour and reserve stay NETTED INSIDE the net bill and are
+  // never posted as separate expenses or income. Only the rent is grossed back
+  // up, because it is settled through the transporter's account.
+
+  /// Gross, before any deduction.
+  totalBill  Decimal? @map("total_bill") @db.Decimal(14, 2)
+  /// Commission the market charged BFM on this bill, in rupees.
+  ///
+  /// A COST, not income. BFM is a fish merchant, not a commission agent — it
+  /// buys fish outright and owns it, and the market deducts its commission
+  /// from what it pays. This is netted inside the net bill and must never be
+  /// credited to a BFM account (spec invariant 4).
+  ///
+  /// Stored rather than derived: the rate is per-bill, so a bill struck at 2%
+  /// must keep reading as 2% after the market changes its terms.
   commission Decimal? @db.Decimal(14, 2)
   /// The percentage `commission` was calculated at — 2.5 means 2.5%.
   ///
@@ -486,14 +641,27 @@ model Sale {
   /// ₹1,20,000") rather than an unexplained figure. Null on rows entered
   /// before the rate became variable, which were all at the old fixed 2%.
   commissionRate Decimal? @map("commission_rate") @db.Decimal(5, 2)
-  /// Money held back from the seller on a Market sale — their own reserve,
-  /// not the house's income.
+  /// Reserve the market withheld from this bill, collected by BFM at year end.
   ///
-  /// Like commission it is posted to a standing account of its own and is
-  /// deliberately NOT part of `amount`: the net bill is what the seller owes
-  /// us for the fish, and folding a retention into it would misstate both the
-  /// debt and the day's revenue.
+  /// Netted inside the net bill like the other deductions. Its BALANCE is
+  /// derived per market party — SUM(sales.reserve) − SUM(reserve collections)
+  /// — and is never pooled into one standing account (spec invariant 5).
   reserve    Decimal? @db.Decimal(14, 2)
+
+  /// Labour and sundry deductions on a market bill.
+  otherDeduction Decimal? @map("other_deduction") @db.Decimal(14, 2)
+
+  /// This bill carries the trip's vehicle rent — the last market stop, which
+  /// paid the driver the balance on BFM's behalf. At most one sale per trip
+  /// may set this; enforced in the action.
+  carriesRent  Boolean  @default(false) @map("carries_rent")
+  /// Rent deducted on this bill. Set only when `carriesRent`, and may not
+  /// exceed the trip's unsettled rent.
+  ///
+  /// This is the one deduction that is grossed back up: market revenue is
+  /// `net bill + rentDeducted`, because the money did leave the business — it
+  /// went to the transporter, through the market party (spec §2).
+  rentDeducted Decimal? @map("rent_deducted") @db.Decimal(14, 2)
   place      String? // Market "Place"
 
   // Fish Mill-only:
@@ -517,12 +685,14 @@ model Sale {
   centre      Centre     @relation(fields: [centreId], references: [id])
   party       Party      @relation("SaleBuyer", fields: [partyId], references: [id])
   careOfParty Party?     @relation("SaleCareOf", fields: [careOfPartyId], references: [id])
+  deliveryNote DeliveryNote? @relation(fields: [deliveryNoteId], references: [id])
   createdBy   User?      @relation("SaleCreatedBy", fields: [createdById], references: [id])
   updatedBy   User?      @relation("SaleUpdatedBy", fields: [updatedById], references: [id])
   lines       SaleLine[]
 
   @@index([companyId, centreId, date])
   @@index([companyId, centreId, type])
+  @@index([deliveryNoteId])
   @@map("sales")
 }
 
@@ -533,7 +703,13 @@ model SaleLine {
   id         String  @id @default(uuid())
   saleId     String  @map("sale_id")
   particular String
-  box        Int? // Fish Mill only
+  /// Box count. Fish Mill and MARKET both use it — a market bill is counted in
+  /// boxes, and that count is what the trip reconciliation tallies against the
+  /// boxes dispatched (spec §3.3).
+  box        Int?
+  /// On a FACTORY line this is the ACCEPTED weight, not the weight sent.
+  /// Factories reweigh on arrival and pay for less; the gap against the trip's
+  /// dispatched kilos is the rejection tally, and it has to be visible.
   qtyKg      Decimal @map("qty_kg") @db.Decimal(12, 3)
   ratePerKg  Decimal @map("rate_per_kg") @db.Decimal(12, 2)
   count      Int? // Fish Mill only
@@ -601,6 +777,38 @@ model Settlement {
 
 // ---------- Ledger ----------
 
+/// Reserve money actually collected back from a market party.
+///
+/// Deliberately NOT a ledger entry and NOT a Settlement. Reserve never sat in
+/// the trade ledger — it is netted inside a market bill — so collecting it
+/// settles nothing there. What it does is clear the DERIVED reserve balance for
+/// that party (sales less collections) and recognise the money as income, in
+/// the net-profit tier only, on the day it was actually collected.
+///
+/// `date` here is the one date in the system that is NOT a buying day: the
+/// money arrives when it arrives, usually at year end.
+model ReserveCollection {
+  id          String         @id @default(uuid())
+  companyId   String         @map("company_id")
+  centreId    String         @map("centre_id")
+  partyId     String         @map("party_id")
+  amount      Decimal        @db.Decimal(14, 2)
+  /// The day the money was actually collected — NOT a buying day.
+  date        DateTime       @db.Date
+  mode        SettlementMode @default(CASH)
+  reference   String?
+  notes       String?
+  createdAt   DateTime       @default(now()) @map("created_at")
+  createdById String?        @map("created_by_id")
+
+  company Company @relation(fields: [companyId], references: [id])
+  centre  Centre  @relation(fields: [centreId], references: [id])
+  party   Party   @relation(fields: [partyId], references: [id])
+
+  @@index([companyId, centreId, partyId])
+  @@map("reserve_collections")
+}
+
 enum LedgerEntryType {
   DEBIT
   CREDIT
@@ -612,8 +820,16 @@ enum LedgerSourceType {
   EXPENSE
   PAYMENT // money out — settles what we owe a supplier
   RECEIPT // money in — settles what a customer owes us
-  COMMISSION // agent commission earned on a Market sale
-  RESERVE // money withheld from a Market seller and held on their behalf
+  RENT // credit to the transporter when a trip is created — the rent owed for
+  // that trip, expensed once on the buying day
+  RENT_BY_PARTY // a market party paid the driver on BFM's behalf. Debits the
+  // transporter (settling his rent) and credits the market party (who is not
+  // out of pocket), so the trip's rent closes without a second expense
+  COMMISSION // RETIRED — never post again. Commission is a cost the market
+  // charges BFM and is netted inside the bill; it was previously credited to a
+  // BFM account, which read as income the business never earned.
+  RESERVE // RETIRED — never post again. Reserve is derived per market party
+  // from sales less collections, never posted to a pooled account.
 }
 
 // One generic ledger table powers every party statement — no per-party-type
@@ -751,25 +967,10 @@ model ReviewRequest {
 // was, nothing read or wrote it, and it held no rows in production, so the dead
 // schema went with the dead code.
 
-enum ErrorFlagLinkedType {
-  PURCHASE
-  DELIVERY_NOTE
-  SALE
-  EXPENSE
-}
-
-// RETIRED alongside day closing (see the note above) — nothing creates flags any
-// more. Unlike day closes, this table is NOT dead: existing rows are still read,
-// so a flagged voucher stays visible, struck through, links to whatever replaced
-// it, and is excluded from report totals. Do not drop it.
-model ErrorFlag {
-  id                String              @id @default(uuid())
-  linkedType        ErrorFlagLinkedType @map("linked_type")
-  linkedId          String              @map("linked_id")
-  flaggedAt         DateTime            @default(now()) @map("flagged_at")
-  reason            String?
-  correctingEntryId String?             @map("correcting_entry_id")
-
-  @@unique([linkedType, linkedId])
-  @@map("error_flags")
-}
+// ErrorFlag and ErrorFlagLinkedType were deleted here (spec §3.7).
+//
+// They belonged to the closed-day correction flow: once a day was closed you
+// could not edit its vouchers, so a mistake was flagged and superseded instead.
+// Day closing was removed, an Admin now edits any voucher at any time, and
+// nothing has created a flag since. The read path that rendered flagged rows
+// struck through went with them.

@@ -2,14 +2,12 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { getFlagsFor } from "@/lib/errorflag";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import {
   dateWhere,
   parseListWindow,
   type SearchParams,
 } from "@/lib/paging";
-import { CorrectedBadge } from "../../lock-mark";
 import { DateWindow, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
@@ -51,10 +49,6 @@ export default async function PurchasesPage({
     }),
     prisma.purchase.count({ where }),
   ]);
-  const flags = await getFlagsFor(
-    "PURCHASE",
-    purchases.map((p) => p.id)
-  );
 
   return (
     <div>
@@ -100,33 +94,22 @@ export default async function PurchasesPage({
             </thead>
             <tbody>
               {purchases.map((p) => {
-                const flag = flags.get(p.id);
-                const struck = flag ? "line-through opacity-60" : "";
                 return (
                   <tr key={p.id}>
                     <td className="whitespace-nowrap">
                       {fmtDate(p.date)}
                     </td>
-                    <td className={struck}>
+                    <td >
                       {p.billNo ?? <span className="text-muted">—</span>}
                     </td>
                     <td className="font-medium">
-                      <span className={struck}>{p.party.name}</span>
-                      {flag && (
-                        <CorrectedBadge
-                          href={
-                            flag.correctingEntryId
-                              ? `/vouchers/purchases/${flag.correctingEntryId}`
-                              : null
-                          }
-                        />
-                      )}
+                      <span>{p.party.name}</span>
                     </td>
-                    <td className={struck}>{TYPE_LABELS[p.type]}</td>
-                    <td className={`num-col num text-muted ${struck}`}>
+                    <td >{TYPE_LABELS[p.type]}</td>
+                    <td className="num-col num text-muted">
                       {p._count.lines || "—"}
                     </td>
-                    <td className={`num-col num text-debit ${struck}`}>
+                    <td className="num-col num text-debit">
                       {fmtMoney(p.amount)}
                     </td>
                     <td>
@@ -134,7 +117,7 @@ export default async function PurchasesPage({
                         href={`/vouchers/purchases/${p.id}`}
                         className="text-accent underline underline-offset-2 text-[12px]"
                       >
-                        {mayEdit && !flag ? "Edit" : "View"}
+                        {mayEdit ? "Edit" : "View"}
                       </Link>
                     </td>
                   </tr>
