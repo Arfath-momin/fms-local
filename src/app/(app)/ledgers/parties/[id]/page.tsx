@@ -18,6 +18,9 @@ const SOURCE_LABELS: Record<LedgerSourceType, string> = {
   EXPENSE: "Expense",
   PAYMENT: "Payment",
   RECEIPT: "Receipt",
+  RENT: "Vehicle rent",
+  RENT_BY_PARTY: "Rent paid to driver",
+  // Retired — kept only so historic rows still render a name (spec §3.6).
   COMMISSION: "Commission",
   RESERVE: "Reserve",
 };
@@ -86,7 +89,6 @@ export default async function PartyStatementPage({
       where: { id: { in: sourceIds } },
       select: {
         id: true,
-        boat: { select: { name: true } },
         lines: { select: { boat: { select: { name: true } } } },
       },
     }),
@@ -101,8 +103,8 @@ export default async function PartyStatementPage({
   ]);
 
   // One Society bill covers several vessels, so the column lists whichever
-  // ones this bill names, de-duplicated. `p.boat` is the header field older
-  // purchases used before boats moved onto the line.
+  // ones this bill names, de-duplicated. The header-level boat is gone (spec
+  // §3.7) — the line is the only place a vessel is recorded now.
   const boatBySource = new Map(
     purchases
       .map((p) => {
@@ -111,7 +113,7 @@ export default async function PartyStatementPage({
             p.lines.map((l) => l.boat?.name).filter((n): n is string => !!n)
           ),
         ];
-        const label = fromLines.length > 0 ? fromLines.join(", ") : p.boat?.name;
+        const label = fromLines.length > 0 ? fromLines.join(", ") : undefined;
         return [p.id, label] as const;
       })
       .filter((e): e is readonly [string, string] => !!e[1])

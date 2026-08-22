@@ -36,11 +36,13 @@ const ITEMS = [
     label: "Sales",
     desc: "Every buyer and what they owe us, grouped by sale category.",
   },
-  {
-    href: "/ledgers/commission",
-    label: "Commission & Reserve",
-    desc: "What is withheld from a Market sale — the house's commission and the seller's reserve, each with its own running balance.",
-  },
+  // The Commission & Reserve ledger was removed here (spec §3.7).
+  //
+  // It was built on two standing house accounts that should never have
+  // existed: commission is a cost the market charges BFM, not income to credit
+  // anywhere, and reserve is tracked per market party as sales less
+  // collections, never pooled. The replacement — a screen listing which market
+  // party holds how much reserve — is Phase 3.
 ];
 
 export default async function LedgersPage() {

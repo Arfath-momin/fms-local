@@ -1,12 +1,11 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import type {
+  ExpenseKind,
   SaleType,
-  ExpenseCategory,
   PurchaseType,
 } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { getFlaggedIds } from "@/lib/errorflag";
 
 const ZERO = new Prisma.Decimal(0);
 
@@ -29,13 +28,29 @@ export async function getBalancesAsOf(
   return new Map(latest.map((e) => [e.partyId, e.runningBalance]));
 }
 
+export type ExpenseCategoryTotal = {
+  categoryId: string;
+  code: string;
+  name: string;
+  kind: ExpenseKind;
+  amount: Prisma.Decimal;
+};
+
 export type ProfitReport = {
   sale: Prisma.Decimal;
   purchase: Prisma.Decimal;
+  /** Every expense in the range, both tiers. Kept for list screens. */
   expense: Prisma.Decimal;
-  profit: Prisma.Decimal; // sale − (purchase + expense)
+  /** Ice, loaders, ladies, batha, canteen, vehicle rent — cost of the catch. */
+  directExpense: Prisma.Decimal;
+  /** Salaries, office rent, electricity — cost of the month, not the catch. */
+  overheadExpense: Prisma.Decimal;
+  /** sale − purchase − directExpense. The per-buying-day figure. */
+  grossProfit: Prisma.Decimal;
+  /** grossProfit − overheadExpense. The per-month figure, before reserve. */
+  netProfit: Prisma.Decimal;
   purchaseByType: { type: PurchaseType; amount: Prisma.Decimal }[];
-  expenseByCategory: { category: ExpenseCategory; amount: Prisma.Decimal }[];
+  expenseByCategory: ExpenseCategoryTotal[];
   saleByType: { type: SaleType; amount: Prisma.Decimal }[];
 };
 
@@ -61,11 +76,6 @@ export async function computeProfit(
 ): Promise<ProfitReport> {
   const dateRange = { gte: from, lte: to };
   const centreWhere = centreId ? { centreId } : {};
-  const [flaggedPurchases, flaggedExpenses, flaggedSales] = await Promise.all([
-    getFlaggedIds("PURCHASE"),
-    getFlaggedIds("EXPENSE"),
-    getFlaggedIds("SALE"),
-  ]);
 
   const [purchaseGroups, expenseGroups, saleGroups] = await Promise.all([
     prisma.purchase.groupBy({
@@ -74,17 +84,15 @@ export async function computeProfit(
         companyId,
         ...centreWhere,
         date: dateRange,
-        id: { notIn: flaggedPurchases },
       },
       _sum: { amount: true },
     }),
     prisma.expense.groupBy({
-      by: ["category"],
+      by: ["categoryId"],
       where: {
         companyId,
         ...centreWhere,
         date: dateRange,
-        id: { notIn: flaggedExpenses },
       },
       _sum: { amount: true },
     }),
@@ -94,9 +102,11 @@ export async function computeProfit(
         companyId,
         ...centreWhere,
         date: dateRange,
-        id: { notIn: flaggedSales },
       },
-      _sum: { amount: true },
+      // rentDeducted comes back with the amount because market revenue is
+      // `net bill + rent deducted` (spec §2). It is null on every non-market
+      // bill, so summing it unconditionally adds nothing there.
+      _sum: { amount: true, rentDeducted: true },
     }),
   ]);
 
@@ -105,21 +115,69 @@ export async function computeProfit(
     .sort((a, b) => a.type.localeCompare(b.type));
   const purchase = purchaseByType.reduce((a, r) => a.add(r.amount), ZERO);
 
-  const expenseByCategory = expenseGroups
-    .map((g) => ({ category: g.category, amount: g._sum.amount ?? ZERO }))
-    .sort((a, b) => a.category.localeCompare(b.category));
-  const expense = expenseByCategory.reduce((a, r) => a.add(r.amount), ZERO);
+  // Categories are rows now, so their names and — crucially — their DIRECT /
+  // OVERHEAD kind have to be resolved. One query over the ids in the result,
+  // never one per group.
+  const categories = await prisma.expenseCategory.findMany({
+    where: { id: { in: expenseGroups.map((g) => g.categoryId) } },
+    select: { id: true, code: true, name: true, kind: true, sortOrder: true },
+  });
+  const categoryById = new Map(categories.map((c) => [c.id, c]));
 
+  const expenseByCategory: ExpenseCategoryTotal[] = expenseGroups
+    .map((g) => {
+      const c = categoryById.get(g.categoryId);
+      return {
+        categoryId: g.categoryId,
+        code: c?.code ?? "UNKNOWN",
+        name: c?.name ?? "Unknown",
+        // An expense whose category row has vanished is counted as DIRECT
+        // rather than dropped: losing it entirely would overstate profit, and
+        // overstating profit is the failure that matters here.
+        kind: c?.kind ?? ("DIRECT" as ExpenseKind),
+        amount: g._sum.amount ?? ZERO,
+      };
+    })
+    .sort(
+      (a, b) =>
+        (categoryById.get(a.categoryId)?.sortOrder ?? 0) -
+          (categoryById.get(b.categoryId)?.sortOrder ?? 0) ||
+        a.code.localeCompare(b.code)
+    );
+
+  const expense = expenseByCategory.reduce((a, r) => a.add(r.amount), ZERO);
+  const directExpense = expenseByCategory
+    .filter((r) => r.kind === "DIRECT")
+    .reduce((a, r) => a.add(r.amount), ZERO);
+  const overheadExpense = expenseByCategory
+    .filter((r) => r.kind === "OVERHEAD")
+    .reduce((a, r) => a.add(r.amount), ZERO);
+
+  // Revenue, not the bill total: the market rent is grossed back up here,
+  // because that money left the business through the transporter's account and
+  // is already carried as a cost on the trip. Leaving it out would understate
+  // the day twice over.
   const saleByType = saleGroups
-    .map((g) => ({ type: g.type, amount: g._sum.amount ?? ZERO }))
+    .map((g) => ({
+      type: g.type,
+      amount: (g._sum.amount ?? ZERO).add(g._sum.rentDeducted ?? ZERO),
+    }))
     .sort((a, b) => a.type.localeCompare(b.type));
   const sale = saleByType.reduce((a, r) => a.add(r.amount), ZERO);
+
+  // Two tiers, per spec §2. Gross belongs to a buying day and must never carry
+  // an overhead: a salary is not a cost of Tuesday's catch, and charging it
+  // there makes the daily figure meaningless. Net is the monthly view.
+  const grossProfit = sale.sub(purchase).sub(directExpense);
 
   return {
     sale,
     purchase,
     expense,
-    profit: sale.sub(purchase).sub(expense),
+    directExpense,
+    overheadExpense,
+    grossProfit,
+    netProfit: grossProfit.sub(overheadExpense),
     purchaseByType,
     expenseByCategory,
     saleByType,
@@ -183,7 +241,7 @@ export async function computeUnion(
 ): Promise<UnionReport> {
   const dateRange = { gte: from, lte: to };
   const companyWhere = companyId ? { companyId } : {};
-  const [companies, centres, flaggedPurchases, flaggedExpenses, flaggedSales] =
+  const [companies, centres] =
     await Promise.all([
       prisma.company.findMany({
         where: companyId ? { id: companyId } : {},
@@ -195,25 +253,22 @@ export async function computeUnion(
         orderBy: { name: "asc" },
         select: { id: true, name: true, companyId: true },
       }),
-      getFlaggedIds("PURCHASE"),
-      getFlaggedIds("EXPENSE"),
-      getFlaggedIds("SALE"),
     ]);
 
   const [purchaseGroups, saleGroups, expenseGroups] = await Promise.all([
     prisma.purchase.groupBy({
       by: ["centreId"],
-      where: { ...companyWhere, date: dateRange, id: { notIn: flaggedPurchases } },
+      where: { ...companyWhere, date: dateRange },
       _sum: { amount: true },
     }),
     prisma.sale.groupBy({
       by: ["centreId"],
-      where: { ...companyWhere, date: dateRange, id: { notIn: flaggedSales } },
+      where: { ...companyWhere, date: dateRange },
       _sum: { amount: true },
     }),
     prisma.expense.groupBy({
       by: ["centreId"],
-      where: { ...companyWhere, date: dateRange, id: { notIn: flaggedExpenses } },
+      where: { ...companyWhere, date: dateRange },
       _sum: { amount: true },
     }),
   ]);
@@ -276,11 +331,19 @@ export type PeriodBucket = {
   label: string;
   purchaseByType: Record<PurchaseType, Prisma.Decimal>;
   saleByType: Record<SaleType, Prisma.Decimal>;
-  expenseByCategory: Record<ExpenseCategory, Prisma.Decimal>;
+  /// Keyed by category ID, because categories are rows now and the set is no
+  /// longer knowable at compile time. Labels come from `categories` on the
+  /// result, so a bucket carries figures and the caller carries names.
+  expenseByCategory: Record<string, Prisma.Decimal>;
   purchase: Prisma.Decimal;
   sale: Prisma.Decimal;
+  /** Every expense in the bucket, both tiers. */
   expense: Prisma.Decimal;
-  profit: Prisma.Decimal;
+  /** Direct costs only — what a buying day's gross profit is charged. */
+  directExpense: Prisma.Decimal;
+  overheadExpense: Prisma.Decimal;
+  /** sale − purchase − directExpense. Overheads never touch this. */
+  grossProfit: Prisma.Decimal;
 };
 
 export type PeriodBreakdown = {
@@ -299,14 +362,15 @@ function emptyBucket(key: string, label: string): PeriodBucket {
     label,
     purchaseByType: { SOCIETY: ZERO, KFDC: ZERO, PRIVATE: ZERO, LOCAL: ZERO },
     saleByType: { MARKET: ZERO, FISH_MILL: ZERO, FACTORY: ZERO, LOCAL: ZERO },
-    expenseByCategory: {
-      ICE: ZERO, LOADERS: ZERO, LADIES: ZERO,
-      BATHA: ZERO, CANTEEN: ZERO, RENT: ZERO,
-    },
+    // Starts empty and fills as groups arrive — the category set is data, so
+    // there is nothing to pre-seed. Readers use `?? ZERO`.
+    expenseByCategory: {},
     purchase: ZERO,
     sale: ZERO,
     expense: ZERO,
-    profit: ZERO,
+    directExpense: ZERO,
+    overheadExpense: ZERO,
+    grossProfit: ZERO,
   };
 }
 
@@ -352,29 +416,35 @@ export async function computePeriodBreakdown(args: {
     date: { gte: from, lte: to },
   };
 
-  const [flaggedPurchases, flaggedExpenses, flaggedSales] = await Promise.all([
-    getFlaggedIds("PURCHASE"),
-    getFlaggedIds("EXPENSE"),
-    getFlaggedIds("SALE"),
-  ]);
-
   const [purchaseGroups, saleGroups, expenseGroups] = await Promise.all([
     prisma.purchase.groupBy({
       by: ["date", "type"],
-      where: { ...scope, id: { notIn: flaggedPurchases } },
+      where: { ...scope },
       _sum: { amount: true },
     }),
     prisma.sale.groupBy({
       by: ["date", "type"],
-      where: { ...scope, id: { notIn: flaggedSales } },
+      where: { ...scope },
       _sum: { amount: true },
     }),
     prisma.expense.groupBy({
-      by: ["date", "category"],
-      where: { ...scope, id: { notIn: flaggedExpenses } },
+      by: ["date", "categoryId"],
+      where: { ...scope },
       _sum: { amount: true },
     }),
   ]);
+
+  // One lookup of the categories present, so each bucket can split its spend
+  // into the two tiers. An unknown category counts as DIRECT: dropping it
+  // would overstate profit, which is the failure that matters.
+  const kindById = new Map(
+    (
+      await prisma.expenseCategory.findMany({
+        where: { id: { in: expenseGroups.map((g) => g.categoryId) } },
+        select: { id: true, kind: true },
+      })
+    ).map((c) => [c.id, c.kind])
+  );
 
   // Pre-seed every bucket in the range so gaps render as zero rows.
   const buckets = new Map<string, PeriodBucket>();
@@ -422,18 +492,33 @@ export async function computePeriodBreakdown(args: {
     const b = buckets.get(bucketKeyOf(g.date, bucket));
     if (!b) continue;
     const amount = g._sum.amount ?? ZERO;
-    b.expenseByCategory[g.category] =
-      b.expenseByCategory[g.category].add(amount);
+    b.expenseByCategory[g.categoryId] = (
+      b.expenseByCategory[g.categoryId] ?? ZERO
+    ).add(amount);
     b.expense = b.expense.add(amount);
-    total.expenseByCategory[g.category] =
-      total.expenseByCategory[g.category].add(amount);
+    total.expenseByCategory[g.categoryId] = (
+      total.expenseByCategory[g.categoryId] ?? ZERO
+    ).add(amount);
     total.expense = total.expense.add(amount);
+
+    // Split by tier as we go. A salary is not a cost of Tuesday's catch, so it
+    // must not reach Tuesday's gross figure (spec §2).
+    const direct = kindById.get(g.categoryId) !== "OVERHEAD";
+    if (direct) {
+      b.directExpense = b.directExpense.add(amount);
+      total.directExpense = total.directExpense.add(amount);
+    } else {
+      b.overheadExpense = b.overheadExpense.add(amount);
+      total.overheadExpense = total.overheadExpense.add(amount);
+    }
   }
 
   for (const b of buckets.values()) {
-    b.profit = b.sale.sub(b.purchase).sub(b.expense);
+    b.grossProfit = b.sale.sub(b.purchase).sub(b.directExpense);
   }
-  total.profit = total.sale.sub(total.purchase).sub(total.expense);
+  total.grossProfit = total.sale
+    .sub(total.purchase)
+    .sub(total.directExpense);
 
   return { buckets: [...buckets.values()], total };
 }
@@ -485,11 +570,6 @@ export async function getTransactionRegister(
 ): Promise<RegisterRow[]> {
   const dateRange = { gte: from, lte: to };
   const centreWhere = centreId ? { centreId } : {};
-  const [flaggedPurchases, flaggedExpenses, flaggedSales] = await Promise.all([
-    getFlaggedIds("PURCHASE"),
-    getFlaggedIds("EXPENSE"),
-    getFlaggedIds("SALE"),
-  ]);
 
   const [purchases, sales, expenses, settlements] = await Promise.all([
     prisma.purchase.findMany({
@@ -497,7 +577,6 @@ export async function getTransactionRegister(
         companyId,
         ...centreWhere,
         date: dateRange,
-        id: { notIn: flaggedPurchases },
       },
       include: { centre: { select: { name: true } }, party: { select: { name: true } } },
     }),
@@ -506,7 +585,6 @@ export async function getTransactionRegister(
         companyId,
         ...centreWhere,
         date: dateRange,
-        id: { notIn: flaggedSales },
       },
       include: {
         centre: { select: { name: true } },
@@ -519,12 +597,14 @@ export async function getTransactionRegister(
         companyId,
         ...centreWhere,
         date: dateRange,
-        id: { notIn: flaggedExpenses },
       },
-      include: { centre: { select: { name: true } }, party: { select: { name: true } } },
+      include: {
+        centre: { select: { name: true } },
+        party: { select: { name: true } },
+        // The register names the category, which is a row now.
+        category: { select: { code: true, name: true } },
+      },
     }),
-    // Settlements have no error-flag concept — that mechanism is retired and
-    // only ever covered the three trade vouchers.
     prisma.settlement.findMany({
       where: { companyId, ...centreWhere, date: dateRange },
       include: { centre: { select: { name: true } }, party: { select: { name: true } } },
@@ -562,8 +642,11 @@ export async function getTransactionRegister(
       createdAt: e.createdAt,
       centreName: e.centre.name,
       kind: "EXPENSE" as const,
-      subtype: e.category,
-      partyName: e.party.name,
+      subtype: e.category.code,
+      // A canteen bill or a salary has no vendor worth a ledger, so the party
+      // is optional now. The register falls back to the category name, which
+      // is the honest answer to "who was this paid to" when nobody was named.
+      partyName: e.party?.name ?? e.category.name,
       amount: e.amount,
       href: `/vouchers/expenses/${e.id}`,
     })),

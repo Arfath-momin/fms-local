@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
@@ -32,44 +31,13 @@ export default async function ExpenseDetailPage({
     where: { id, companyId: company.id, centreId: centre.id },
     include: {
       party: { select: { name: true } },
+      category: { select: { id: true, code: true, name: true } },
       createdBy: { select: { name: true } },
       updatedBy: { select: { name: true } },
     },
   });
   if (!expense) notFound();
 
-  // Historic flags from the old closed-day correction flow are still honoured.
-  const flag = await prisma.errorFlag.findUnique({
-    where: {
-      linkedType_linkedId: { linkedType: "EXPENSE", linkedId: expense.id },
-    },
-  });
-
-  if (flag) {
-    return (
-      <div>
-        <h1 className="heading text-xl font-semibold mb-4">Expense</h1>
-        <div className="text-[13px] border border-debit bg-surface px-4 py-3 max-w-lg">
-          <p className="font-semibold text-debit">
-            This expense was flagged as an error and corrected.
-          </p>
-          {flag.reason && (
-            <p className="mt-1 text-muted">Reason: {flag.reason}</p>
-          )}
-          {flag.correctingEntryId && (
-            <p className="mt-1">
-              <Link
-                href={`/vouchers/expenses/${flag.correctingEntryId}`}
-                className="text-accent underline underline-offset-2"
-              >
-                View the corrected entry →
-              </Link>
-            </p>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   const attachments = await getAttachments("EXPENSE", expense.id);
   const panel = (
@@ -109,8 +77,9 @@ export default async function ExpenseDetailPage({
       <div>
         <h1 className="heading text-xl font-semibold mb-4">Expense</h1>
         <dl className="border border-line-strong bg-surface divide-y divide-line max-w-lg text-[13px]">
-          <Row label="Category" value={expense.category} />
-          <Row label="Vendor" value={expense.party.name} />
+          <Row label="Category" value={expense.category.name} />
+          {/* Optional now — a canteen bill or a salary has no vendor. */}
+          {expense.party && <Row label="Vendor" value={expense.party.name} />}
           <Row label="Purchase Date" value={fmtDate(expense.date)} />
           <Row
             label="Expense Date"
@@ -130,8 +99,16 @@ export default async function ExpenseDetailPage({
   }
 
 
+  // Categories are data now, so the form is handed the live list rather than
+  // importing a constant. Archived ones drop out; ordering is the merchant's.
+  const categories = await prisma.expenseCategory.findMany({
+    where: { companyId: company.id, archivedAt: null },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: { id: true, code: true, name: true, allowsLines: true },
+  });
+
   const initial = {
-    category: expense.category,
+    categoryId: expense.categoryId,
     amount: expense.amount.toString(),
     date: toInputDate(expense.date),
     spentOn: toInputDate(expense.spentOn ?? expense.date),
@@ -146,6 +123,7 @@ export default async function ExpenseDetailPage({
           Collapses to nothing when no review was requested. */}
       <div className="mb-4 empty:hidden [&>*]:mt-0">{review}</div>
       <ExpenseForm
+        categories={categories}
         action={updateExpense.bind(null, expense.id)}
         initial={initial}
         submitLabel="Save Changes"

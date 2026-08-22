@@ -1,12 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
-import type { ExpenseCategory } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { canEdit, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
-import { getFlagsFor } from "@/lib/errorflag";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { NoCentreNotice } from "../../../no-centre";
 
@@ -20,19 +17,25 @@ export default async function ExpenseCategoryPage({
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const category = (await params).category.toUpperCase() as ExpenseCategory;
-  if (!EXPENSE_CATEGORIES.includes(category)) notFound();
+  // The URL still carries the category CODE, not its id — a link that survives
+  // the category being renamed, and one a person can read.
+  const code = (await params).category.toUpperCase();
+  const category = await prisma.expenseCategory.findUnique({
+    where: { companyId_code: { companyId: company.id, code } },
+    select: { id: true, name: true, kind: true },
+  });
+  if (!category) notFound();
 
   const expenses = await prisma.expense.findMany({
-    where: { companyId: company.id, centreId: centre.id, category },
+    where: {
+      companyId: company.id,
+      centreId: centre.id,
+      categoryId: category.id,
+    },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   });
-  const flags = await getFlagsFor(
-    "EXPENSE",
-    expenses.map((e) => e.id)
-  );
   const total = expenses.reduce(
-    (acc, e) => (flags.has(e.id) ? acc : acc.add(e.amount)),
+    (acc, e) => acc.add(e.amount),
     new Prisma.Decimal(0)
   );
 
@@ -46,7 +49,7 @@ export default async function ExpenseCategoryPage({
       </Link>
       <div className="flex items-end justify-between mt-1 mb-4">
         <h1 className="heading text-xl font-semibold">
-          {EXPENSE_CATEGORY_LABELS[category]} — {company.name}
+          {category.name} — {company.name}
         </h1>
         <div className="text-right">
           <div className="text-[12px] uppercase tracking-wide text-muted font-semibold">
@@ -60,7 +63,7 @@ export default async function ExpenseCategoryPage({
 
       {expenses.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
-          No {EXPENSE_CATEGORY_LABELS[category].toLowerCase()} expenses for{" "}
+          No {category.name.toLowerCase()} expenses for{" "}
           {company.name} yet.
         </p>
       ) : (
@@ -76,12 +79,11 @@ export default async function ExpenseCategoryPage({
             </thead>
             <tbody>
               {expenses.map((e) => {
-                const struck = flags.has(e.id) ? "line-through opacity-60" : "";
                 return (
                 <tr key={e.id}>
                   <td className="whitespace-nowrap">{fmtDate(e.date)}</td>
-                  <td className={`text-muted ${struck}`}>{e.notes ?? "—"}</td>
-                  <td className={`num-col num text-debit ${struck}`}>
+                  <td className={`text-muted`}>{e.notes ?? "—"}</td>
+                  <td className={`num-col num text-debit`}>
                     {fmtMoney(e.amount)}
                   </td>
                   <td>

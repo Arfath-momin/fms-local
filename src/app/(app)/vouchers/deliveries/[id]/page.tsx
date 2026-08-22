@@ -42,6 +42,7 @@ export default async function DeliveryNotePage({
     // centre must not open — let alone be editable — from the scope you are in.
     where: { id, companyId: company.id, centreId: centre.id },
     include: {
+        vehicle: { select: { number: true, transporter: { select: { name: true } } } },
       company: { select: { name: true } },
       centre: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
@@ -94,8 +95,10 @@ export default async function DeliveryNotePage({
       <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
         <Field label="Bill No." value={note.billNo} />
         <Field label="Date" value={fmtDate(note.date)} />
-        <Field label="To" value={note.recipient} />
-        <Field label="Vehicle No." value={note.vehicleNo} />
+        <Field label="To" value={note.recipient ?? "—"} />
+        <Field label="Channel" value={note.channel} />
+        <Field label="Vehicle No." value={note.vehicle.number} />
+        <Field label="Transporter" value={note.vehicle.transporter.name} />
         <Field
           label="Advance Paid"
           value={note.advancePaid ? fmtMoney(note.advancePaid) : "—"}

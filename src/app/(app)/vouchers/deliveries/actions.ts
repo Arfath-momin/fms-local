@@ -3,10 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
+import type { TripChannel } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
+import { findOrCreateVehicle } from "@/lib/vehicle";
+import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
-import { clearErrorFlag } from "@/lib/errorflag";
 import { resolveReviews } from "@/lib/review-db";
 import {
   linkStagedAttachment,
@@ -17,6 +19,63 @@ import {
 } from "@/lib/attachments";
 
 export type DeliveryFormState = { error: string } | null;
+
+const TRIP_CHANNELS: TripChannel[] = [
+  "MARKET",
+  "FACTORY",
+  "FISH_MILL",
+  "LOCAL",
+];
+
+/**
+ * The rent settlement chain for one trip (spec §2).
+ *
+ * Rent is a property of the TRIP, entered once and dated to the buying day.
+ * It is credited to the transporter — we owe him — and the advance is debited
+ * straight back, because that money has already left. What remains open is
+ * exactly what is still unpaid, which is the signal the outstanding screen
+ * exists to show. A market party paying the driver the balance closes the rest
+ * later, through RENT_BY_PARTY on the sale that carries it.
+ *
+ * Deliberately NOT a separate rent expense voucher: that would be the second
+ * rent expense, and the day would be charged twice.
+ */
+async function postTripRent(
+  tx: Prisma.TransactionClient,
+  t: {
+    companyId: string;
+    centreId: string;
+    transporterId: string;
+    id: string;
+    rentAmount: Prisma.Decimal | null;
+    advancePaid: Prisma.Decimal | null;
+    date: Date;
+  }
+) {
+  if (!t.rentAmount || t.rentAmount.lte(0)) return;
+
+  const common = {
+    companyId: t.companyId,
+    centreId: t.centreId,
+    partyId: t.transporterId,
+    sourceId: t.id,
+    date: t.date,
+  };
+
+  await postLedgerEntries(tx, [
+    { ...common, type: "CREDIT" as const, sourceType: "RENT" as const, amount: t.rentAmount },
+    ...(t.advancePaid && t.advancePaid.gt(0)
+      ? [
+          {
+            ...common,
+            type: "DEBIT" as const,
+            sourceType: "PAYMENT" as const,
+            amount: t.advancePaid,
+          },
+        ]
+      : []),
+  ]);
+}
 
 const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
 const DECIMAL3 = /^\d+(\.\d{1,3})?$/;
@@ -35,7 +94,10 @@ type Parsed = {
   billNo: string;
   date: Date;
   recipient: string;
+  channel: TripChannel;
   vehicleNo: string;
+  transporterName: string;
+  rentAmount: Prisma.Decimal | null;
   advancePaid: Prisma.Decimal | null;
   driverName: string | null;
   mobileNo: string | null;
@@ -52,7 +114,10 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const billNo = clean(formData.get("billNo"));
   const dateRaw = String(formData.get("date") ?? "");
   const recipient = clean(formData.get("recipient"));
+  const channelRaw = clean(formData.get("channel"));
   const vehicleNo = clean(formData.get("vehicleNo"));
+  const transporterName = clean(formData.get("transporterName"));
+  const rentRaw = clean(formData.get("rentAmount"));
   const advanceRaw = clean(formData.get("advancePaid"));
   const driverName = clean(formData.get("driverName"));
   const mobileNo = clean(formData.get("mobileNo"));
@@ -63,6 +128,18 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
   if (!recipient) return { error: "Enter the recipient (To)." };
   if (!vehicleNo) return { error: "Enter the vehicle number." };
+  if (!transporterName)
+    return { error: "Enter the transporter — the rent is owed to them." };
+  if (!TRIP_CHANNELS.includes(channelRaw as TripChannel))
+    return { error: "Choose a channel." };
+  const channel = channelRaw as TripChannel;
+
+  let rentAmount: Prisma.Decimal | null = null;
+  if (rentRaw) {
+    if (!DECIMAL2.test(rentRaw))
+      return { error: "Rent must be a number (up to 2 decimals)." };
+    rentAmount = new Prisma.Decimal(rentRaw);
+  }
 
   let advancePaid: Prisma.Decimal | null = null;
   if (advanceRaw) {
@@ -121,12 +198,27 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
 
   if (lines.length === 0) return { error: "Add at least one line item." };
 
+  // Spec §4: only a market trip takes an advance. On every other channel BFM
+  // pays the driver in full on his return, so an advance there is a data-entry
+  // mistake that would leave the transporter's balance not closing at zero.
+  if (advancePaid && advancePaid.gt(0) && channel !== "MARKET")
+    return {
+      error:
+        "An advance is only paid on a market trip — on other channels the " +
+        "driver is paid in full on his return.",
+    };
+  if (advancePaid && rentAmount && advancePaid.gt(rentAmount))
+    return { error: "The advance cannot be more than the rent." };
+
   return {
     data: {
       billNo,
       date: new Date(dateRaw),
       recipient,
+      channel,
       vehicleNo,
+      transporterName,
+      rentAmount,
       advancePaid,
       driverName: driverName || null,
       mobileNo: mobileNo || null,
@@ -155,6 +247,11 @@ export async function createDelivery(
     // leaving a delivery note with no bill against it.
     const staged = await stageAttachmentFile(d.file);
     noteId = await prisma.$transaction(async (tx) => {
+      const vehicle = await findOrCreateVehicle(tx, {
+        companyId: company.id,
+        number: d.vehicleNo,
+        transporterName: d.transporterName,
+      });
       const note = await tx.deliveryNote.create({
         data: {
           companyId: company.id,
@@ -162,7 +259,9 @@ export async function createDelivery(
           billNo: d.billNo,
           date: d.date,
           recipient: d.recipient,
-          vehicleNo: d.vehicleNo,
+          channel: d.channel,
+          vehicleId: vehicle.id,
+          rentAmount: d.rentAmount,
           advancePaid: d.advancePaid,
           driverName: d.driverName,
           mobileNo: d.mobileNo,
@@ -180,6 +279,16 @@ export async function createDelivery(
           },
         },
       });
+      await postTripRent(tx, {
+        companyId: company.id,
+        centreId: centre.id,
+        transporterId: vehicle.transporterId,
+        id: note.id,
+        rentAmount: d.rentAmount,
+        advancePaid: d.advancePaid,
+        date: d.date,
+      });
+
       await linkStagedAttachment(tx, staged, {
         companyId: company.id,
         centreId: centre.id,
@@ -222,8 +331,14 @@ export async function deleteDelivery(
       });
       if (!existing) throw new Error("Delivery note not found.");
 
+      // The trip's rent entries go with it, and the transporter's chain is
+      // repaired — otherwise deleting a trip would leave him permanently owed
+      // rent for a journey that no longer exists.
+      await removeLedgerEntries(tx, {
+        sourceId: deliveryNoteId,
+        sourceType: ["RENT", "PAYMENT"],
+      });
       await unlinkAttachments(tx, "DELIVERY_NOTE", deliveryNoteId);
-      await clearErrorFlag(tx, "DELIVERY_NOTE", deliveryNoteId);
       // Removing the voucher answers any request against it. The request rows
       // themselves survive — they record that a correction was asked for.
       await resolveReviews(tx, "DELIVERY_NOTE", deliveryNoteId, session.userId);
@@ -264,6 +379,21 @@ export async function updateDelivery(
       });
       if (!existing) throw new Error("Delivery note not found.");
 
+      const updVehicle = await findOrCreateVehicle(tx, {
+        companyId: company.id,
+        number: d.vehicleNo,
+        transporterName: d.transporterName,
+      });
+
+      // The rent chain is rebuilt, not patched: editing a trip can change the
+      // rent, the advance or the truck, and each of those moves a different
+      // transporter's balance. Removing what this trip posted and reposting is
+      // the same discipline the voucher actions use for every other ledger.
+      await removeLedgerEntries(tx, {
+        sourceId: deliveryNoteId,
+        sourceType: ["RENT", "PAYMENT"],
+      });
+
       await tx.deliveryNoteLine.deleteMany({ where: { deliveryNoteId } });
       await tx.deliveryNote.update({
         where: { id: deliveryNoteId },
@@ -271,7 +401,9 @@ export async function updateDelivery(
           billNo: d.billNo,
           date: d.date,
           recipient: d.recipient,
-          vehicleNo: d.vehicleNo,
+          channel: d.channel,
+          vehicleId: updVehicle.id,
+          rentAmount: d.rentAmount,
           advancePaid: d.advancePaid,
           driverName: d.driverName,
           mobileNo: d.mobileNo,
@@ -290,6 +422,16 @@ export async function updateDelivery(
           },
         },
       });
+      await postTripRent(tx, {
+        companyId: company.id,
+        centreId: centre.id,
+        transporterId: updVehicle.transporterId,
+        id: deliveryNoteId,
+        rentAmount: d.rentAmount,
+        advancePaid: d.advancePaid,
+        date: d.date,
+      });
+
       // A newly chosen image replaces the old bill rather than piling up
       // beside it; leaving the field empty keeps whatever is attached.
       await replaceStagedAttachment(tx, staged, {

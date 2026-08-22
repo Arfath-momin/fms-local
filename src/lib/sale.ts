@@ -82,3 +82,58 @@ export function saleLineTotalKg(line: {
 }): number {
   return line.box && line.box > 0 ? line.qtyKg * line.box : line.qtyKg;
 }
+
+/**
+ * Revenue recognised for one bill (spec §2).
+ *
+ *   MARKET                     net bill + rent deducted on that bill
+ *   FACTORY / FISH_MILL / LOCAL   the bill amount
+ *
+ * The market case is the one worth explaining. A market bill reads:
+ *
+ *     total − commission − labour − reserve − rent = net
+ *
+ * Commission, labour and reserve stay netted inside the net bill and are never
+ * posted separately — they are what the market charged, and the money never
+ * belonged to BFM. Rent is different: the last market paid the driver on BFM's
+ * behalf, so that money DID leave the business, through the transporter's
+ * account. Grossing it back up is what stops the day's revenue being understated
+ * by a cost that is already counted as an expense on the trip.
+ *
+ * Pure and total: no database, no Decimal, so the money tests can call it
+ * directly and the arithmetic is checkable in isolation.
+ */
+export function saleRevenue(sale: {
+  type: SaleType;
+  /** The net bill for MARKET; the bill amount otherwise. */
+  amount: number;
+  /** Only ever set on the market bill that carried the trip's rent. */
+  rentDeducted?: number | null;
+}): number {
+  if (sale.type !== "MARKET") return sale.amount;
+  return sale.amount + (sale.rentDeducted ?? 0);
+}
+
+/**
+ * The two profit tiers (spec §2).
+ *
+ *   gross = revenue − purchases − DIRECT expenses      per buying day
+ *   net   = gross − overheads + reserve collected      per month
+ *
+ * Overheads never touch gross. A salary is not a cost of Tuesday's catch, and
+ * charging it there makes the daily figure — the one the merchant actually
+ * reads every morning — meaningless.
+ */
+export function profitTiers(f: {
+  revenue: number;
+  purchases: number;
+  directExpenses: number;
+  overheads?: number;
+  reserveCollected?: number;
+}): { gross: number; net: number } {
+  const gross = f.revenue - f.purchases - f.directExpenses;
+  return {
+    gross,
+    net: gross - (f.overheads ?? 0) + (f.reserveCollected ?? 0),
+  };
+}

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { prisma } from "@/lib/db";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { createExpense } from "../actions";
@@ -11,6 +12,13 @@ export default async function NewExpensePage() {
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
+  // Categories are data now, so the form is handed the live list rather than
+  // importing a constant. Archived ones drop out; ordering is the merchant's.
+  const categories = await prisma.expenseCategory.findMany({
+    where: { companyId: company.id, archivedAt: null },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: { id: true, code: true, name: true, allowsLines: true },
+  });
 
   return (
     <div>
@@ -20,6 +28,7 @@ export default async function NewExpensePage() {
       </p>
       <ExpenseForm
         action={createExpense}
+        categories={categories}
         submitLabel="Save Expense"
         scope={scopeFieldValues({ company, centre })}
       />

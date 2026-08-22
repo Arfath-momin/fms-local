@@ -4,7 +4,6 @@ import { requireReports } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { computeDayBook } from "@/lib/report";
 import { NoCentreNotice } from "../../no-centre";
-import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { businessTodayDate, fmtMoney, toInputDate } from "@/lib/format";
@@ -28,9 +27,9 @@ export default async function DayBookPage({
       : businessTodayDate();
 
   const d = await computeDayBook(company.id, centre.id, date);
-  const pfCls = d.profit.greaterThan(0)
+  const pfCls = d.grossProfit.greaterThan(0)
     ? "text-credit"
-    : d.profit.lessThan(0)
+    : d.grossProfit.lessThan(0)
       ? "text-debit"
       : "";
 
@@ -101,7 +100,7 @@ export default async function DayBookPage({
                 {fmtMoney(d.sale)}
               </td>
               <td className={`num-col num font-bold ${pfCls}`}>
-                {fmtMoney(d.profit)}
+                {fmtMoney(d.grossProfit)}
               </td>
             </tr>
           </tbody>
@@ -125,7 +124,7 @@ export default async function DayBookPage({
         <Breakdown
           title="Expense by category"
           rows={d.expenseByCategory.map((r) => ({
-            label: EXPENSE_CATEGORY_LABELS[r.category],
+            label: r.name,
             amount: r.amount,
           }))}
           total={d.expense}

@@ -2,11 +2,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
-import { getFlagsFor } from "@/lib/errorflag";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
-import { CorrectedBadge } from "../../lock-mark";
 import { DateWindow, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
@@ -34,13 +31,11 @@ export default async function ExpensesPage({
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       skip: listWindow.skip,
       take: listWindow.take,
+      // One query with the category joined, never one lookup per row.
+      include: { category: { select: { name: true } } },
     }),
     prisma.expense.count({ where }),
   ]);
-  const flags = await getFlagsFor(
-    "EXPENSE",
-    expenses.map((e) => e.id)
-  );
 
   return (
     <div>
@@ -83,29 +78,14 @@ export default async function ExpensesPage({
             </thead>
             <tbody>
               {expenses.map((e) => {
-                const flag = flags.get(e.id);
-                const struck = flag ? "line-through opacity-60" : "";
                 return (
                   <tr key={e.id}>
                     <td className="whitespace-nowrap">
                       {fmtDate(e.date)}
                     </td>
-                    <td className="font-medium">
-                      <span className={struck}>
-                        {EXPENSE_CATEGORY_LABELS[e.category]}
-                      </span>
-                      {flag && (
-                        <CorrectedBadge
-                          href={
-                            flag.correctingEntryId
-                              ? `/vouchers/expenses/${flag.correctingEntryId}`
-                              : null
-                          }
-                        />
-                      )}
-                    </td>
-                    <td className={`text-muted ${struck}`}>{e.notes ?? "—"}</td>
-                    <td className={`num-col num text-debit ${struck}`}>
+                    <td className="font-medium">{e.category.name}</td>
+                    <td className="text-muted">{e.notes ?? "—"}</td>
+                    <td className="num-col num text-debit">
                       {fmtMoney(e.amount)}
                     </td>
                     <td>
@@ -113,7 +93,7 @@ export default async function ExpensesPage({
                         href={`/vouchers/expenses/${e.id}`}
                         className="text-accent underline underline-offset-2 text-[12px]"
                       >
-                        {mayEdit && !flag ? "Edit" : "View"}
+                        {mayEdit ? "Edit" : "View"}
                       </Link>
                     </td>
                   </tr>

@@ -19,6 +19,9 @@ const SOURCE_LABELS: Record<LedgerSourceType, string> = {
   EXPENSE: "Expense",
   PAYMENT: "Payment",
   RECEIPT: "Receipt",
+  RENT: "Vehicle rent",
+  RENT_BY_PARTY: "Rent paid to driver",
+  // Retired — kept only so historic rows still render a name (spec §3.6).
   COMMISSION: "Commission",
   RESERVE: "Reserve",
 };

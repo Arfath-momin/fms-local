@@ -44,13 +44,14 @@ export default async function PartiesPage({
         _count: {
           select: {
             purchases: true,
-            purchasesAsBoat: true,
             purchaseLinesAsBoat: true,
             expenses: true,
             ledgerEntries: true,
             salesAsBuyer: true,
             salesAsCareOf: true,
             settlements: true,
+            vehicles: true,
+            reserveCollections: true,
           },
         },
       },

@@ -283,7 +283,7 @@ async function TransactionsView({
   const rows = truncated ? allRows.slice(0, MAX_RANGE_ROWS) : allRows;
   const cols = showDate ? 9 : 8;
 
-  const { purchase, sale, expense, profit } = pl;
+  const { purchase, sale, expense, grossProfit: profit } = pl;
 
   // Settlements are money moving, not trade, so they are totalled separately
   // and deliberately left out of `profit` — counting a payment as a cost would
@@ -467,9 +467,9 @@ async function BreakdownView({
                   <td className="num-col num text-debit">{money(b.expense)}</td>
                   <td className="num-col num text-credit">{money(b.sale)}</td>
                   <td
-                    className={`num-col num font-semibold ${profitClass(b.profit)}`}
+                    className={`num-col num font-semibold ${profitClass(b.grossProfit)}`}
                   >
-                    {money(b.profit)}
+                    {money(b.grossProfit)}
                   </td>
                 </tr>
               );
@@ -481,8 +481,8 @@ async function BreakdownView({
               <td className="num-col num text-debit">{money(total.purchase)}</td>
               <td className="num-col num text-debit">{money(total.expense)}</td>
               <td className="num-col num text-credit">{money(total.sale)}</td>
-              <td className={`num-col num ${profitClass(total.profit)}`}>
-                {money(total.profit)}
+              <td className={`num-col num ${profitClass(total.grossProfit)}`}>
+                {money(total.grossProfit)}
               </td>
             </tr>
           </tfoot>
@@ -495,8 +495,8 @@ async function BreakdownView({
         <Stat label="Expense" value={total.expense} cls="text-debit" />
         <Stat
           label="Profit"
-          value={total.profit}
-          cls={profitClass(total.profit)}
+          value={total.grossProfit}
+          cls={profitClass(total.grossProfit)}
           strong
         />
       </div>

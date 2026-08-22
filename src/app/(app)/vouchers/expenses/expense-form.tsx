@@ -3,8 +3,11 @@
 import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { ExpenseFormState } from "./actions";
-import type { ExpenseCategory } from "@/generated/prisma/enums";
-import { EXPENSE_CATEGORIES, EXPENSE_SPECS, expensePrepaid } from "@/lib/expense";
+import {
+  EXPENSE_SPECS,
+  expensePrepaid,
+  type ExpenseFieldSpec,
+} from "@/lib/expense";
 import { businessToday, fmtMoney } from "@/lib/format";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
@@ -16,8 +19,18 @@ const inputCls =
 const labelCls =
   "block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1";
 
+/// A category as the form needs it. Passed in from the server rather than
+/// imported from a constant: the list is data now, so the form cannot know it
+/// at build time.
+export type ExpenseCategoryOption = {
+  id: string;
+  code: string;
+  name: string;
+  allowsLines: boolean;
+};
+
 export type ExpenseInit = {
-  category: ExpenseCategory;
+  categoryId: string;
   amount: string;
   /** The purchase day this cost counts against. */
   date: string;
@@ -29,6 +42,7 @@ export type ExpenseInit = {
 
 export function ExpenseForm({
   action,
+  categories,
   initial,
   submitLabel,
   reasonField,
@@ -40,6 +54,8 @@ export function ExpenseForm({
     prev: ExpenseFormState,
     formData: FormData
   ) => Promise<ExpenseFormState>;
+  /** Every live category for this company, in display order. */
+  categories: ExpenseCategoryOption[];
   initial?: ExpenseInit;
   submitLabel: string;
   reasonField?: boolean;
@@ -52,14 +68,29 @@ export function ExpenseForm({
     action,
     null
   );
-  const [category, setCategory] = useState<ExpenseCategory>(
-    initial?.category ?? "ICE"
+  const [categoryId, setCategoryId] = useState<string>(
+    initial?.categoryId ?? categories[0]?.id ?? ""
   );
+  const category = categories.find((c) => c.id === categoryId);
   const [details, setDetails] = useState<Record<string, string>>(
     initial?.details ?? {}
   );
 
-  const spec = EXPENSE_SPECS[category];
+  // A category with no entry spec — anything the merchant added from Masters —
+  // falls back to a plain amount field. That fallback is what lets a new
+  // category work without a deploy.
+  //
+  // Memoised because the fallback is a fresh object literal every render, and
+  // the total below depends on it: without this the useMemo never hits.
+  const spec = useMemo(
+    () =>
+      (category && EXPENSE_SPECS[category.code]) ?? {
+        label: category?.name ?? "",
+        fields: [] as ExpenseFieldSpec[],
+        amountEntered: true,
+      },
+    [category]
+  );
   const today = businessToday();
 
   const computedTotal = useMemo(() => {
@@ -73,7 +104,7 @@ export function ExpenseForm({
   }, [spec, details]);
 
   // What has already been handed over against this total, and what is left.
-  const prepaid = expensePrepaid(category, details);
+  const prepaid = expensePrepaid(category?.code ?? "", details);
   const balance = (computedTotal ?? 0) - prepaid;
 
   const setField = (name: string, value: string) =>
@@ -88,16 +119,16 @@ export function ExpenseForm({
             Category
           </label>
           <select
-            id="category"
-            name="category"
+            id="categoryId"
+            name="categoryId"
             required
-            value={category}
-            onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value)}
             className={inputCls}
           >
-            {EXPENSE_CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {EXPENSE_SPECS[c].label}
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
             ))}
           </select>

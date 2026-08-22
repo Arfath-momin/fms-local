@@ -23,7 +23,7 @@ export default async function EditDeliveryPage({
     // Scoped, not just found by id. A voucher belonging to another company or
     // centre must not open — let alone be editable — from the scope you are in.
     where: { id, companyId: company.id, centreId: centre.id },
-    include: { lines: { orderBy: { id: "asc" } } },
+    include: { lines: { orderBy: { id: "asc" } }, vehicle: { select: { number: true, transporter: { select: { name: true } } } } },
   });
   if (!note) notFound();
 
@@ -49,8 +49,13 @@ export default async function EditDeliveryPage({
         initial={{
           billNo: note.billNo,
           date: toInputDate(note.date),
-          recipient: note.recipient,
-          vehicleNo: note.vehicleNo,
+          // Optional now — who received what comes from the bills that point
+          // back at this trip, not from a typed name (spec §3.2).
+          recipient: note.recipient ?? "",
+          channel: note.channel,
+          vehicleNo: note.vehicle.number,
+          transporterName: note.vehicle.transporter.name,
+          rentAmount: note.rentAmount?.toString() ?? "",
           advancePaid: note.advancePaid?.toString() ?? "",
           driverName: note.driverName ?? "",
           mobileNo: note.mobileNo ?? "",

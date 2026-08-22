@@ -28,7 +28,7 @@ export default async function DeliveriesPage({
   const [notes, total] = await Promise.all([
     prisma.deliveryNote.findMany({
       where,
-      include: { lines: true },
+      include: { lines: true, vehicle: { select: { number: true, transporter: { select: { name: true } } } } },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       skip: listWindow.skip,
       take: listWindow.take,
@@ -90,7 +90,7 @@ export default async function DeliveriesPage({
                     <td className="whitespace-nowrap">{fmtDate(n.date)}</td>
                     <td className="num">{n.billNo}</td>
                     <td className="font-medium">{n.recipient}</td>
-                    <td className="num">{n.vehicleNo}</td>
+                    <td className="num">{n.vehicle.number}</td>
                     <td className="num-col num">{t.box || "—"}</td>
                     <td className="num-col num">
                       {t.totalKg.isZero() ? "—" : t.totalKg.toString()}

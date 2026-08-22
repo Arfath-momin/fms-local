@@ -62,7 +62,7 @@ export async function GET(req: Request) {
       computeProfit(company.id, centreId, from, to),
     ]);
 
-    const { purchase, sale, expense, profit } = pl;
+    const { purchase, sale, expense, grossProfit: profit } = pl;
 
     // Same split as the screen: settlements are totalled on their own and kept
     // out of profit, so the CSV can never disagree with the report it came from.
@@ -143,7 +143,7 @@ export async function GET(req: Request) {
           formatValue(b.purchase),
           formatValue(b.expense),
           formatValue(b.sale),
-          formatValue(b.profit),
+          formatValue(b.grossProfit),
         ].join(",")
       ),
       "",
@@ -152,7 +152,7 @@ export async function GET(req: Request) {
         formatValue(total.purchase),
         formatValue(total.expense),
         formatValue(total.sale),
-        formatValue(total.profit),
+        formatValue(total.grossProfit),
       ].join(","),
     ];
     csv = lines.join("\r\n");

@@ -1,7 +1,6 @@
 import { SETTLEMENT_MODE_LABELS } from "@/lib/settlement";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
-import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 
 /**
  * How a register row is named on screen and on paper.
@@ -35,9 +34,12 @@ export function registerSubtypeLabel(kind: string, subtype: string): string {
     return (
       SALE_TYPE_LABELS[subtype as keyof typeof SALE_TYPE_LABELS] ?? subtype
     );
-  return (
-    EXPENSE_CATEGORY_LABELS[
-      subtype as keyof typeof EXPENSE_CATEGORY_LABELS
-    ] ?? subtype
-  );
+  // Expense subtypes are category CODES now. getTransactionRegister already
+  // resolves the row, so the code arriving here is the fallback label — title
+  // -cased so "OFFICE_RENT" reads as "Office Rent" rather than shouting.
+  return subtype
+    .toLowerCase()
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }

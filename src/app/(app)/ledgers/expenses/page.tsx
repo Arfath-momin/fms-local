@@ -3,8 +3,6 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
-import { getFlaggedIds } from "@/lib/errorflag";
 import { sectionLedgers } from "@/lib/ledger-index";
 import { EXPENSE_LEDGER_TYPES } from "@/lib/party";
 import { fmtMoney } from "@/lib/format";
@@ -22,21 +20,29 @@ export default async function ExpenseLedgersPage() {
 
   const [groups, vendors] = await Promise.all([
     prisma.expense.groupBy({
-      by: ["category"],
+      by: ["categoryId"],
       where: {
         companyId: company.id,
         centreId: centre.id,
-        id: { notIn: await getFlaggedIds("EXPENSE") },
       },
       _sum: { amount: true },
-      _count: true,
+      _count: { _all: true },
     }),
     sectionLedgers(
       { companyId: company.id, centreId: centre.id },
       EXPENSE_LEDGER_TYPES
     ),
   ]);
-  const byCategory = new Map(groups.map((g) => [g.category, g]));
+
+  // Every category the company has, spent-against or not — a head with no
+  // entries this period is a real answer ("we spent nothing on ice"), and
+  // showing only what was spent would hide it. Archived ones drop out.
+  const categories = await prisma.expenseCategory.findMany({
+    where: { companyId: company.id, archivedAt: null },
+    orderBy: [{ kind: "asc" }, { sortOrder: "asc" }, { code: "asc" }],
+    select: { id: true, code: true, name: true, kind: true },
+  });
+  const byCategory = new Map(groups.map((g) => [g.categoryId, g]));
 
   const total = groups.reduce(
     (acc, g) => acc.add(g._sum.amount ?? 0),
@@ -70,32 +76,37 @@ export default async function ExpenseLedgersPage() {
 
       <h2 className="heading text-[15px] font-semibold mb-1">By category</h2>
       <p className="text-muted text-[12px] mb-2">
-        What was spent under each head — ice, loaders, ladies, batha, canteen,
-        rent.
+        What was spent under each head. Direct costs belong to a buying day and
+        set the gross profit; overheads belong to the month and touch the net
+        figure only.
       </p>
       <div className="border border-line-strong bg-surface">
         <table className="ledger-table">
           <thead>
             <tr>
               <th>Category</th>
+              <th>Kind</th>
               <th className="num-col">Entries</th>
               <th className="num-col">Total</th>
             </tr>
           </thead>
           <tbody>
-            {EXPENSE_CATEGORIES.map((cat) => {
-              const g = byCategory.get(cat);
+            {categories.map((cat) => {
+              const g = byCategory.get(cat.id);
               return (
-                <tr key={cat}>
+                <tr key={cat.id}>
                   <td className="font-medium">
                     <Link
-                      href={`/ledgers/expenses/${cat.toLowerCase()}`}
+                      href={`/ledgers/expenses/${cat.code.toLowerCase()}`}
                       className="text-accent underline underline-offset-2"
                     >
-                      {EXPENSE_CATEGORY_LABELS[cat]}
+                      {cat.name}
                     </Link>
                   </td>
-                  <td className="num-col num">{g?._count ?? 0}</td>
+                  <td className="text-muted text-[12px]">
+                    {cat.kind === "DIRECT" ? "Direct" : "Overhead"}
+                  </td>
+                  <td className="num-col num">{g?._count._all ?? 0}</td>
                   <td className="num-col num text-debit">
                     {fmtMoney(g?._sum.amount ?? 0)}
                   </td>

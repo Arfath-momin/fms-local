@@ -187,8 +187,8 @@ export default async function RegisterPrintPage({
           </div>
           <div className="grid gap-0.5">
             <Detail
-              label={pl.profit.greaterThanOrEqualTo(0) ? "Profit" : "Loss"}
-              value={fmtMoney(pl.profit.abs())}
+              label={pl.grossProfit.greaterThanOrEqualTo(0) ? "Profit" : "Loss"}
+              value={fmtMoney(pl.grossProfit.abs())}
             />
             <Detail label="Paid out" value={fmtMoney(settledOut)} />
             <Detail label="Received" value={fmtMoney(settledIn)} />

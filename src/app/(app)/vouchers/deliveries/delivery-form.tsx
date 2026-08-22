@@ -29,7 +29,13 @@ export type DeliveryInit = {
   billNo: string;
   date: string;
   recipient: string;
+  /** Which channel this trip went to — decides how its rent settles. */
+  channel: string;
   vehicleNo: string;
+  transporterName: string;
+  /** Total rent agreed for the trip. Expensed once, on the buying day. */
+  rentAmount: string;
+  /** MARKET only — paid to the driver before departure. */
   advancePaid: string;
   driverName: string;
   mobileNo: string;
@@ -149,6 +155,29 @@ export function DeliveryForm({
           />
         </div>
         <div>
+          <label htmlFor="channel" className={labelCls}>
+            Channel
+          </label>
+          <select
+            id="channel"
+            name="channel"
+            required
+            defaultValue={initial?.channel ?? "MARKET"}
+            className={inputCls}
+          >
+            <option value="MARKET">Market</option>
+            <option value="FACTORY">Factory</option>
+            <option value="FISH_MILL">Fish Mill</option>
+            <option value="LOCAL">Local</option>
+          </select>
+          <p className="text-muted text-[12px] mt-1">
+            Decides how the rent settles. Only a market trip takes an advance.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div>
           <label htmlFor="vehicleNo" className={labelCls}>
             Vehicle No.
           </label>
@@ -159,6 +188,37 @@ export function DeliveryForm({
             defaultValue={initial?.vehicleNo ?? ""}
             className={inputCls}
           />
+        </div>
+        <div>
+          <label htmlFor="transporterName" className={labelCls}>
+            Transporter
+          </label>
+          <input
+            id="transporterName"
+            name="transporterName"
+            required
+            defaultValue={initial?.transporterName ?? ""}
+            placeholder="Who owns the truck"
+            className={inputCls}
+          />
+          <p className="text-muted text-[12px] mt-1">
+            The rent is owed to them.
+          </p>
+        </div>
+        <div>
+          <label htmlFor="rentAmount" className={labelCls}>
+            Rent (₹)
+          </label>
+          <input
+            id="rentAmount"
+            name="rentAmount"
+            inputMode="decimal"
+            defaultValue={initial?.rentAmount ?? ""}
+            className={inputCls + " num text-right"}
+          />
+          <p className="text-muted text-[12px] mt-1">
+            Charged once, to this buying day.
+          </p>
         </div>
       </div>
 

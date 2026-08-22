@@ -5,7 +5,6 @@ import { getActiveScope } from "@/lib/centre";
 import { computeProfit } from "@/lib/report";
 import { NoCentreNotice } from "../../no-centre";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
-import { EXPENSE_CATEGORY_LABELS } from "@/lib/expense";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { businessTodayDate, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { DateField } from "../../date-field";
@@ -33,9 +32,9 @@ export default async function ProfitReportPage({
     sp.to && /^\d{4}-\d{2}-\d{2}$/.test(sp.to) ? new Date(sp.to) : today;
 
   const r = await computeProfit(company.id, centre.id, from, to);
-  const pfCls = r.profit.greaterThan(0)
+  const pfCls = r.grossProfit.greaterThan(0)
     ? "text-credit"
-    : r.profit.lessThan(0)
+    : r.grossProfit.lessThan(0)
       ? "text-debit"
       : "";
 
@@ -103,7 +102,7 @@ export default async function ProfitReportPage({
         <Stat label="Sale" value={r.sale} cls="text-credit" />
         <Stat label="Purchase" value={r.purchase} cls="text-debit" />
         <Stat label="Expense" value={r.expense} cls="text-debit" />
-        <Stat label="Profit" value={r.profit} cls={pfCls} strong />
+        <Stat label="Profit" value={r.grossProfit} cls={pfCls} strong />
       </div>
 
       <div className="grid sm:grid-cols-3 gap-3">
@@ -118,7 +117,7 @@ export default async function ProfitReportPage({
         <Breakdown
           title="Expense by category"
           rows={r.expenseByCategory.map((x) => ({
-            label: EXPENSE_CATEGORY_LABELS[x.category],
+            label: x.name,
             amount: x.amount,
           }))}
           total={r.expense}
