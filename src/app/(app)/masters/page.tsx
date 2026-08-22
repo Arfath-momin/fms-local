@@ -50,11 +50,21 @@ export default async function MastersPage() {
             may use the same truck, but each keeps its own row. */}
         <Link
           href="/masters/vehicles"
-          className="block px-4 py-3 hover:bg-background"
+          className="block px-4 py-3 hover:bg-background border-b border-line"
         >
           <div className="font-semibold text-[14px]">Vehicles</div>
           <div className="text-muted text-[12px]">
             The trucks trips go out on, and who each one belongs to.
+          </div>
+        </Link>
+        <Link
+          href="/masters/expense-categories"
+          className="block px-4 py-3 hover:bg-background"
+        >
+          <div className="font-semibold text-[14px]">Expense Categories</div>
+          <div className="text-muted text-[12px]">
+            What a cost is called, and whether it belongs to the buying day or
+            to the month.
           </div>
         </Link>
       </div>

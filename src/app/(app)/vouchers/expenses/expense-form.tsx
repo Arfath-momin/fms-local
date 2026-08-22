@@ -29,8 +29,12 @@ export type ExpenseCategoryOption = {
   allowsLines: boolean;
 };
 
+/** One row of an itemised expense. */
+export type ExpenseLineInit = { description: string; amount: string };
+
 export type ExpenseInit = {
   categoryId: string;
+  lines?: ExpenseLineInit[];
   amount: string;
   /** The purchase day this cost counts against. */
   date: string;
@@ -74,6 +78,15 @@ export function ExpenseForm({
   const category = categories.find((c) => c.id === categoryId);
   const [details, setDetails] = useState<Record<string, string>>(
     initial?.details ?? {}
+  );
+  const [itemLines, setItemLines] = useState<ExpenseLineInit[]>(
+    initial?.lines?.length ? initial.lines : [{ description: "", amount: "" }]
+  );
+  const setItemLine = (i: number, patch: Partial<ExpenseLineInit>) =>
+    setItemLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const itemTotal = itemLines.reduce(
+    (sum, l) => sum + (Number(l.amount) || 0),
+    0
   );
 
   // A category with no entry spec — anything the merchant added from Masters —
@@ -194,7 +207,93 @@ export function ExpenseForm({
         </div>
       )}
 
-      {spec.amountEntered ? (
+      {/* An itemised category — "Other ₹4,300" tells nobody anything a month
+          later. The lines sum into `amount`, which stays the single figure
+          every report reads, so the detail is additive and no report has to
+          know whether a voucher was itemised. */}
+      {category?.allowsLines ? (
+        <div className="border border-line-strong bg-surface">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-line">
+                <th className="text-left font-semibold px-2 py-2">
+                  Description
+                </th>
+                <th className="text-right font-semibold px-2 py-2 w-40">
+                  Amount (₹)
+                </th>
+                <th className="w-10" />
+              </tr>
+            </thead>
+            <tbody>
+              {itemLines.map((l, i) => (
+                <tr key={i} className="border-t border-line">
+                  <td className="px-1 py-1">
+                    <input
+                      name="lineDescription"
+                      aria-label={`Description, row ${i + 1}`}
+                      value={l.description}
+                      onChange={(e) =>
+                        setItemLine(i, { description: e.target.value })
+                      }
+                      className={inputCls}
+                      placeholder="What it was for"
+                    />
+                  </td>
+                  <td className="px-1 py-1">
+                    <input
+                      name="lineAmount"
+                      aria-label={`Amount, row ${i + 1}`}
+                      inputMode="decimal"
+                      value={l.amount}
+                      onChange={(e) =>
+                        setItemLine(i, { amount: e.target.value })
+                      }
+                      className={inputCls + " num text-right"}
+                    />
+                  </td>
+                  <td className="px-1 py-1 text-center">
+                    {itemLines.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setItemLines((ls) => ls.filter((_, j) => j !== i))
+                        }
+                        aria-label={`Remove row ${i + 1}`}
+                        className="text-muted hover:text-debit px-1"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-line-strong">
+                <td className="px-2 py-2 font-semibold">Total</td>
+                <td className="px-2 py-2 num text-right font-semibold text-debit">
+                  {fmtMoney(itemTotal)}
+                </td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+          <div className="px-2 py-2 border-t border-line">
+            <button
+              type="button"
+              onClick={() =>
+                setItemLines((ls) => [...ls, { description: "", amount: "" }])
+              }
+              className="text-accent text-[13px] underline underline-offset-2"
+            >
+              + Add row
+            </button>
+          </div>
+          {/* The summed total is what posts; the rows travel alongside it. */}
+          <input type="hidden" name="amount" value={itemTotal || ""} />
+        </div>
+      ) : spec.amountEntered ? (
         <div>
           <label htmlFor="amount" className={labelCls}>
             Total (₹)
