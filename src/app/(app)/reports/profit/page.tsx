@@ -98,12 +98,47 @@ export default async function ProfitReportPage({
         </Link>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-        <Stat label="Sale" value={r.sale} cls="text-credit" />
-        <Stat label="Purchase" value={r.purchase} cls="text-debit" />
-        <Stat label="Expense" value={r.expense} cls="text-debit" />
-        <Stat label="Profit" value={r.grossProfit} cls={pfCls} strong />
+      {/* Two tiers, per spec §2. Gross belongs to a buying day and is charged
+          only the DIRECT costs of that catch; overheads belong to the month
+          and touch net alone. Showing one "profit" number hid which of the two
+          you were reading, and they answer different questions. */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+        <Stat label="Revenue" value={r.sale} cls="text-credit" />
+        <Stat label="Purchases" value={r.purchase} cls="text-debit" />
+        <Stat label="Direct expenses" value={r.directExpense} cls="text-debit" />
+        <Stat label="Gross profit" value={r.grossProfit} cls={pfCls} strong />
       </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <Stat label="Overheads" value={r.overheadExpense} cls="text-debit" />
+        <Stat
+          label="Reserve collected"
+          value={r.reserveCollected}
+          cls="text-credit"
+        />
+        <Stat
+          label="Net profit"
+          value={r.netProfit}
+          cls={
+            r.netProfit.greaterThan(0)
+              ? "text-credit"
+              : r.netProfit.lessThan(0)
+                ? "text-debit"
+                : ""
+          }
+          strong
+        />
+      </div>
+
+      <p className="text-muted text-[12px] mb-5 max-w-2xl">
+        <span className="font-semibold text-foreground">Gross</span> is revenue
+        less purchases and the direct costs of the catch — ice, loaders, ladies,
+        batha, canteen and vehicle rent. It is the figure that belongs to a
+        buying day.{" "}
+        <span className="font-semibold text-foreground">Net</span> takes off the
+        month&rsquo;s overheads and adds back reserve as it is collected. A
+        salary never moves the gross figure.
+      </p>
 
       <div className="grid sm:grid-cols-3 gap-3">
         <Breakdown

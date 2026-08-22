@@ -6,6 +6,7 @@ import type {
   PurchaseType,
 } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
+import { reserveCollectedBetween } from "@/lib/reserve";
 
 const ZERO = new Prisma.Decimal(0);
 
@@ -47,7 +48,9 @@ export type ProfitReport = {
   overheadExpense: Prisma.Decimal;
   /** sale − purchase − directExpense. The per-buying-day figure. */
   grossProfit: Prisma.Decimal;
-  /** grossProfit − overheadExpense. The per-month figure, before reserve. */
+  /** Reserve actually collected in the period — income in the net tier only. */
+  reserveCollected: Prisma.Decimal;
+  /** grossProfit − overheadExpense + reserveCollected. The monthly figure. */
   netProfit: Prisma.Decimal;
   purchaseByType: { type: PurchaseType; amount: Prisma.Decimal }[];
   expenseByCategory: ExpenseCategoryTotal[];
@@ -170,6 +173,17 @@ export async function computeProfit(
   // there makes the daily figure meaningless. Net is the monthly view.
   const grossProfit = sale.sub(purchase).sub(directExpense);
 
+  // Reserve is recognised as income when COLLECTED, not when withheld — it
+  // reduced profit at the time of the bill by staying inside the net, and
+  // comes back on the day the money actually arrives (spec §2). That day is
+  // not a buying day, which is why this is a separate query rather than
+  // something the sale aggregates could have carried.
+  const reserveCollected = await reserveCollectedBetween(
+    { companyId, centreId },
+    from,
+    to
+  );
+
   return {
     sale,
     purchase,
@@ -177,7 +191,8 @@ export async function computeProfit(
     directExpense,
     overheadExpense,
     grossProfit,
-    netProfit: grossProfit.sub(overheadExpense),
+    reserveCollected,
+    netProfit: grossProfit.sub(overheadExpense).add(reserveCollected),
     purchaseByType,
     expenseByCategory,
     saleByType,

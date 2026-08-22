@@ -149,6 +149,8 @@ async function main() {
 
   const society = await party("Society", "PURCHASE_GROUP");
   const marketA = await party("Kondatty", "MARKET_BUYER");
+  const marketB = await party("City Market", "MARKET_BUYER");
+  const marketC = await party("Malpe Market", "MARKET_BUYER");
   const factory = await party("West Coast Marine", "FACTORY");
   const mill = await party("Karavali Fishmeal", "FISH_MILL");
   const icePlant = await party("Malpe Ice Plant", "EXPENSE_VENDOR");
@@ -285,35 +287,71 @@ async function main() {
   //   total 180,000 − commission 3,600 − labour 2,000 − reserve 6,000
   //                 − rent 20,000 = net 148,400
   // Revenue recognised is net + rent = 168,400.
-  const marketSale = await prisma.sale.create({
-    data: {
-      ...scope,
-      type: "MARKET",
-      partyId: marketA,
-      billNo: "M-501",
-      date: BUYING_DAY,
-      saleDate: day("2026-08-18"),
-      deliveryNoteId: trips["market"],
-      amount: D(148_400),
-      totalBill: D(180_000),
-      commission: D(3_600),
-      commissionRate: D(2),
-      otherDeduction: D(2_000),
-      reserve: D(6_000),
-      carriesRent: true,
-      rentDeducted: D(20_000),
-      place: "Kondatty",
-    },
-    select: { id: true },
-  });
-  await postLedgerEntries(prisma, [
-    // The party owes the net bill for the fish.
-    { ...scope, partyId: marketA, type: "DEBIT", sourceType: "SALE", sourceId: marketSale.id, amount: D(148_400), date: BUYING_DAY },
-    // They paid the driver ₹15,000 of the rent on BFM's behalf: debit the
-    // transporter (settling his rent) and credit the party (not out of pocket).
-    { ...scope, partyId: transporters.market, type: "DEBIT", sourceType: "RENT_BY_PARTY", sourceId: marketSale.id, amount: D(15_000), date: BUYING_DAY },
-    { ...scope, partyId: marketA, type: "CREDIT", sourceType: "RENT_BY_PARTY", sourceId: marketSale.id, amount: D(15_000), date: BUYING_DAY },
-  ]);
+  // Three stops on the one market truck, which is how a market trip really
+  // works — and what makes the reserve balance a per-party question. Together:
+  //   total 180,000 − commission 3,600 − labour 2,000 − reserve 6,000
+  //                 − rent 20,000 = net 148,400
+  // Revenue recognised is net + rent = 168,400.
+  const marketBills = [
+    { party: marketA, billNo: "M-501", place: "Kondatty",     total: 80_000, comm: 1_600, labour: 900,  reserve: 2_500, boxes: 40, rent: 0 },
+    { party: marketB, billNo: "M-502", place: "City Market",  total: 55_000, comm: 1_100, labour: 600,  reserve: 2_000, boxes: 30, rent: 0 },
+    // The LAST stop pays the driver the rent balance on BFM's behalf.
+    { party: marketC, billNo: "M-503", place: "Malpe Market", total: 45_000, comm: 900,   labour: 500,  reserve: 1_500, boxes: 30, rent: 20_000 },
+  ];
+
+  for (const b of marketBills) {
+    const net = b.total - b.comm - b.labour - b.reserve - b.rent;
+    const sale = await prisma.sale.create({
+      data: {
+        ...scope,
+        type: "MARKET",
+        partyId: b.party,
+        billNo: b.billNo,
+        date: BUYING_DAY,
+        saleDate: day("2026-08-18"),
+        deliveryNoteId: trips["market"],
+        amount: D(net),
+        totalBill: D(b.total),
+        commission: D(b.comm),
+        commissionRate: D(2),
+        otherDeduction: D(b.labour),
+        reserve: D(b.reserve),
+        carriesRent: b.rent > 0,
+        rentDeducted: b.rent > 0 ? D(b.rent) : null,
+        place: b.place,
+        // Box counts are what the trip reconciliation tallies against the 100
+        // boxes dispatched.
+        lines: {
+          create: [
+            {
+              particular: "Mixed",
+              box: b.boxes,
+              qtyKg: D(30),
+              ratePerKg: D(net / (b.boxes * 30)),
+              total: D(net),
+            },
+          ],
+        },
+      },
+      select: { id: true },
+    });
+
+    await postLedgerEntries(prisma, [
+      // The party owes the net bill for the fish.
+      { ...scope, partyId: b.party, type: "DEBIT", sourceType: "SALE", sourceId: sale.id, amount: D(net), date: BUYING_DAY },
+    ]);
+
+    if (b.rent > 0) {
+      // They paid the driver the rent balance on BFM's behalf: debit the
+      // transporter (settling his rent) and credit the party (not out of
+      // pocket). The advance of 5,000 already went, so 15,000 remained.
+      const carried = b.rent - 5_000;
+      await postLedgerEntries(prisma, [
+        { ...scope, partyId: transporters.market, type: "DEBIT", sourceType: "RENT_BY_PARTY", sourceId: sale.id, amount: D(carried), date: BUYING_DAY },
+        { ...scope, partyId: b.party, type: "CREDIT", sourceType: "RENT_BY_PARTY", sourceId: sale.id, amount: D(carried), date: BUYING_DAY },
+      ]);
+    }
+  }
 
   // --- factory and mill bills, paid in full -------------------------------
   for (const [type, partyId, tripKey, amount, billNo] of [
@@ -363,7 +401,7 @@ async function main() {
   console.log("Seeded the 16 Aug 2026 worked example for BFM / Malpe.");
   console.log("  purchases 185,000 · direct 47,000 · revenue 263,400");
   console.log("  expected GROSS profit 31,400 (salary 40,000 excluded)");
-  console.log("  reserve outstanding 6,000 against Kondatty");
+  console.log("  reserve outstanding 6,000 across three market parties");
   console.log("Sign in as owner@bfm.test / password123");
 }
 

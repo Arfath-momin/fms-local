@@ -36,7 +36,12 @@ const ITEMS = [
     label: "Sales",
     desc: "Every buyer and what they owe us, grouped by sale category.",
   },
-  // The Commission & Reserve ledger was removed here (spec §3.7).
+  {
+    href: "/ledgers/reserve",
+    label: "Reserve",
+    desc: "What each market party withheld and still holds. Derived per party from their bills less what has been collected — never pooled.",
+  },
+  // The old Commission & Reserve ledger was removed here (spec §3.7).
   //
   // It was built on two standing house accounts that should never have
   // existed: commission is a cost the market charges BFM, not income to credit
