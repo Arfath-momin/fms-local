@@ -30,8 +30,35 @@ export const SALE_TYPE_ALLOWS_CARE_OF: Record<SaleType, boolean> = {
   LOCAL: false,
 };
 
-/** Market commission rate — 2% of Total Bill, shown for reference only. */
-export const MARKET_COMMISSION_RATE = 0.02;
+/**
+ * The commission rate offered by default on a new Market sale, as a percentage.
+ *
+ * A DEFAULT, not the rate. It used to be the only rate there was — a hardcoded
+ * 0.02 the action multiplied by — which meant a bill agreed at any other figure
+ * could not be recorded at all. The clerk now types the rate per bill and this
+ * only pre-fills the field, because 2% is still what most bills are struck at
+ * and retyping it every time would be its own kind of error.
+ *
+ * Expressed as a percentage (2.5 means 2.5%) rather than a fraction, so the
+ * number in the code, the number in the input and the number on the printed
+ * bill are all the same number.
+ */
+export const DEFAULT_MARKET_COMMISSION_RATE = 2;
+
+/** Rates outside this range are a typo — 200% commission, or a negative one. */
+export const MAX_COMMISSION_RATE = 100;
+
+/**
+ * Commission in rupees for a bill, at a given percentage rate.
+ *
+ * Shared by the form (which previews it live) and the action (which stores the
+ * result), so what the clerk is shown before saving and what lands in the
+ * database can never be computed two different ways.
+ */
+export function commissionAmount(totalBill: number, ratePercent: number): number {
+  if (!(totalBill > 0) || !(ratePercent > 0)) return 0;
+  return (totalBill * ratePercent) / 100;
+}
 
 /**
  * The weight one sale line actually represents.

@@ -13,12 +13,16 @@ import {
   type PostLedgerArgs,
 } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
-import { COMMISSION_PARTY_NAME } from "@/lib/settlement";
+import {
+  COMMISSION_PARTY_NAME,
+  RESERVE_PARTY_NAME,
+} from "@/lib/settlement";
 import {
   SALE_TYPES,
   SALE_BUYER_TYPE,
   SALE_TYPE_ALLOWS_CARE_OF,
-  MARKET_COMMISSION_RATE,
+  commissionAmount,
+  MAX_COMMISSION_RATE,
 } from "@/lib/sale";
 import { clearErrorFlag } from "@/lib/errorflag";
 import { resolveReviews } from "@/lib/review-db";
@@ -63,11 +67,17 @@ type Parsed = {
   place: string | null;
   totalBill: Prisma.Decimal | null;
   commission: Prisma.Decimal | null;
+  /** The percentage `commission` was struck at — 2.5 means 2.5%. */
+  commissionRate: Prisma.Decimal | null;
+  /** Withheld from a Market seller. Never netted against `amount`. */
+  reserve: Prisma.Decimal | null;
   weight: Prisma.Decimal | null;
   netWeight: Prisma.Decimal | null;
   vehicleNo: string | null;
   placeOfLoading: string | null;
   returnNote: string | null;
+  /** Free-form remark, on every sale type. */
+  notes: string | null;
   lines: ParsedLine[];
   file: unknown;
 };
@@ -182,11 +192,14 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     place: null as string | null,
     totalBill: null as Prisma.Decimal | null,
     commission: null as Prisma.Decimal | null,
+    commissionRate: null as Prisma.Decimal | null,
+    reserve: null as Prisma.Decimal | null,
     weight: null as Prisma.Decimal | null,
     netWeight: null as Prisma.Decimal | null,
     vehicleNo: null as string | null,
     placeOfLoading: null as string | null,
     returnNote: null as string | null,
+    notes: null as string | null,
     lines: [] as ParsedLine[],
     file,
   };
@@ -210,10 +223,52 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
           `(${totalBill.toFixed(2)}) — net is the gross less the seller's ` +
           `profit and expenses.`,
       };
+    // The rate is per-bill now. Blank means no commission on this sale, which
+    // is a real case — not every Market bill carries one — so it is allowed
+    // rather than defaulted, and 0 stores nothing rather than a zero entry.
+    const rateRaw = clean(formData.get("commissionRate"));
+    let commissionRate: Prisma.Decimal | null = null;
+    if (rateRaw) {
+      const parsed = parseMoney(rateRaw);
+      if (!parsed || parsed.lt(0) || parsed.gt(MAX_COMMISSION_RATE))
+        return {
+          error: `Commission rate must be between 0 and ${MAX_COMMISSION_RATE}%.`,
+        };
+      commissionRate = parsed;
+    }
+
+    // Withheld from the seller and held on their behalf. Deliberately NOT
+    // subtracted from `amount`: the net bill is what the seller owes for the
+    // fish, and netting a retention against it would misstate both the debt
+    // and the day's revenue.
+    const reserveRaw = clean(formData.get("reserve"));
+    let reserve: Prisma.Decimal | null = null;
+    if (reserveRaw) {
+      const parsed = parseMoney(reserveRaw);
+      if (!parsed || parsed.lt(0))
+        return { error: "Reserve cannot be negative." };
+      if (parsed.gt(totalBill))
+        return {
+          error:
+            `Reserve (${parsed.toFixed(2)}) cannot be more than Total Bill ` +
+            `(${totalBill.toFixed(2)}).`,
+        };
+      reserve = parsed.gt(0) ? parsed : null;
+    }
+
     base.place = clean(formData.get("place")) || null;
     base.vehicleNo = clean(formData.get("vehicleNo")) || null;
     base.totalBill = totalBill;
-    base.commission = totalBill.mul(MARKET_COMMISSION_RATE);
+    base.commissionRate = commissionRate;
+    // Computed through the same helper the form previews with, so the figure
+    // the clerk approved and the figure stored are never two calculations.
+    base.commission =
+      commissionRate && commissionRate.gt(0)
+        ? new Prisma.Decimal(
+            commissionAmount(totalBill.toNumber(), commissionRate.toNumber())
+          ).toDecimalPlaces(2)
+        : null;
+    base.reserve = reserve;
     amount = netBill; // Net Bill is what the seller owes us = the sale revenue
   } else if (type === "FACTORY") {
     const billAmount = parseMoney(clean(formData.get("amount")));
@@ -241,6 +296,10 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     amount = parsedLines.lines.reduce((a, l) => a.add(l.total), ZERO);
   }
 
+  // Every sale type carries a remark. Read once here rather than in each
+  // branch, because it is the one field that means the same thing on all four.
+  base.notes = clean(formData.get("notes")) || null;
+
   return { data: { ...base, amount } };
 }
 
@@ -252,9 +311,13 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
  * party, so the balance this leaves standing is the real amount outstanding
  * until one is entered.
  *
- * A Market sale additionally credits the house's own 2% commission account,
- * which is what turns the commission from a number printed on the bill into a
- * ledger with a running balance.
+ * A Market sale additionally posts the two amounts withheld from that bill:
+ * the house's commission, and the seller's reserve. Both become ledgers with
+ * running balances rather than numbers printed once and forgotten.
+ *
+ * They are separate accounts on purpose. Commission is the house's income;
+ * reserve is the seller's own money held back. Neither is netted against
+ * `amount`, which stays what the seller owes for the fish.
  */
 async function postSaleLedger(
   tx: Prisma.TransactionClient,
@@ -265,6 +328,7 @@ async function postSaleLedger(
     id: string;
     amount: Prisma.Decimal;
     commission: Prisma.Decimal | null;
+    reserve: Prisma.Decimal | null;
     date: Date;
   }
 ) {
@@ -301,6 +365,28 @@ async function postSaleLedger(
     });
   }
 
+  if (s.reserve && s.reserve.gt(0)) {
+    const reservePartyId = await findOrCreateParty(
+      tx,
+      RESERVE_PARTY_NAME,
+      "RESERVE"
+    );
+    // CREDIT, opposite to commission, and the sign is the whole point: money
+    // held back is money we owe the seller, not income we earned. Posting it
+    // DEBIT like commission would read as the house being owed its own
+    // retention, and the two accounts would then sum to something meaningless.
+    entries.push({
+      companyId: s.companyId,
+      centreId: s.centreId,
+      partyId: reservePartyId,
+      type: "CREDIT" as const,
+      sourceType: "RESERVE" as const,
+      sourceId: s.id,
+      amount: s.reserve,
+      date: s.date,
+    });
+  }
+
   await postLedgerEntries(tx, entries);
 }
 
@@ -316,6 +402,9 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
     place: d.place,
     totalBill: d.totalBill,
     commission: d.commission,
+    commissionRate: d.commissionRate,
+    reserve: d.reserve,
+    notes: d.notes,
     weight: d.weight,
     netWeight: d.netWeight,
     vehicleNo: d.vehicleNo,
@@ -371,6 +460,7 @@ export async function createSale(
         id: sale.id,
         amount: d.amount,
         commission: d.commission,
+        reserve: d.reserve,
         date: d.date,
       });
       await linkStagedAttachment(tx, staged, {
@@ -487,6 +577,7 @@ export async function updateSale(
         id: saleId,
         amount: d.amount,
         commission: d.commission,
+        reserve: d.reserve,
         date: d.date,
       });
       // A newly chosen image replaces the old bill rather than piling up

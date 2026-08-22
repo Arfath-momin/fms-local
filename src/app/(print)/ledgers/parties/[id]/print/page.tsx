@@ -20,6 +20,7 @@ const SOURCE_LABELS: Record<LedgerSourceType, string> = {
   PAYMENT: "Payment",
   RECEIPT: "Receipt",
   COMMISSION: "Commission",
+  RESERVE: "Reserve",
 };
 
 /**

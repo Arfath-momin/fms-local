@@ -11,7 +11,8 @@ import { ScopeFields } from "../scope-fields";
 import { DateField } from "../../date-field";
 import { PartyCombobox } from "../../masters/party-combobox";
 import {
-  MARKET_COMMISSION_RATE,
+  commissionAmount,
+  DEFAULT_MARKET_COMMISSION_RATE,
   SALE_BUYER_TYPE,
   SALE_TYPE_LABELS,
   saleLineTotalKg,
@@ -33,6 +34,8 @@ export type SaleLineInit = {
 };
 
 export type SaleInit = {
+  /** Free-form remark, on every voucher type. */
+  notes: string;
   billNo: string;
   /** The purchase day this sale counts against. */
   date: string;
@@ -43,6 +46,8 @@ export type SaleInit = {
   place: string;
   totalBill: string;
   netBill: string;
+  commissionRate: string;
+  reserve: string;
   amount: string; // factory bill amount total
   weight: string;
   vehicleNo: string;
@@ -91,6 +96,12 @@ export function SaleForm({
   );
   const [totalBill, setTotalBill] = useState(initial?.totalBill ?? "");
   const [netBill, setNetBill] = useState(initial?.netBill ?? "");
+  // Pre-filled rather than fixed: most bills are still 2%, but the clerk can
+  // type whatever this one was agreed at. An existing sale keeps its own rate.
+  const [commissionRate, setCommissionRate] = useState(
+    initial?.commissionRate ?? String(DEFAULT_MARKET_COMMISSION_RATE)
+  );
+  const [reserve, setReserve] = useState(initial?.reserve ?? "");
   const [factoryAmount, setFactoryAmount] = useState(initial?.amount ?? "");
 
   const setLine = (i: number, patch: Partial<SaleLineInit>) =>
@@ -119,8 +130,10 @@ export function SaleForm({
       : type === "FACTORY"
         ? n(factoryAmount)
         : lineTotal;
+  // Same helper the action stores with, so the figure approved on screen and
+  // the figure written to the database are never two calculations.
   const commission =
-    type === "MARKET" ? n(totalBill) * MARKET_COMMISSION_RATE : 0;
+    type === "MARKET" ? commissionAmount(n(totalBill), n(commissionRate)) : 0;
   const netOverTotal = n(netBill) > 0 && n(netBill) > n(totalBill);
 
   return (
@@ -275,9 +288,49 @@ export function SaleForm({
               )}
             </div>
           </div>
-          <div className="border border-line bg-surface px-4 py-2 text-[13px] flex justify-between">
-            <span className="text-muted">Commission (2% of Total Bill)</span>
-            <span className="num">{fmtMoney(commission)}</span>
+          {/* Commission and reserve are the two amounts withheld from this
+              bill. Neither touches Net Bill: the seller still owes the net for
+              the fish, and netting a retention against it would misstate both
+              the debt and the day's revenue. They post to two standing
+              accounts — commission is the house's income, reserve is the
+              seller's own money held back — shown together under Ledgers. */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="commissionRate" className={labelCls}>
+                Commission %
+              </label>
+              <input
+                id="commissionRate"
+                name="commissionRate"
+                inputMode="decimal"
+                value={commissionRate}
+                onChange={(e) => setCommissionRate(e.target.value)}
+                className={inputCls + " num text-right"}
+                placeholder="2"
+              />
+              <p className="text-muted text-[12px] mt-1">
+                {n(commissionRate) > 0 && n(totalBill) > 0
+                  ? `${commissionRate}% of ${fmtMoney(n(totalBill))} = ${fmtMoney(commission)}`
+                  : "Leave blank for no commission on this bill."}
+              </p>
+            </div>
+            <div>
+              <label htmlFor="reserve" className={labelCls}>
+                Reserve
+              </label>
+              <input
+                id="reserve"
+                name="reserve"
+                inputMode="decimal"
+                value={reserve}
+                onChange={(e) => setReserve(e.target.value)}
+                className={inputCls + " num text-right"}
+                placeholder="0.00"
+              />
+              <p className="text-muted text-[12px] mt-1">
+                Held back from the seller. Not deducted from Net Bill.
+              </p>
+            </div>
           </div>
         </>
       )}
@@ -458,6 +511,21 @@ export function SaleForm({
         >
           New Receipt
         </Link>
+      </div>
+
+      {/* Free-form remark, on every voucher type. Read by no ledger, no
+          balance and no report — it is what the entering clerk wanted the next
+          person to know, and it prints on the document. */}
+      <div>
+        <label htmlFor="notes" className={labelCls}>
+          Notes (optional)
+        </label>
+        <input
+          id="notes"
+          name="notes"
+          defaultValue={initial?.notes ?? ""}
+          className={inputCls}
+        />
       </div>
 
       {allowBillUpload && (

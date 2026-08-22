@@ -220,6 +220,15 @@ export default async function PurchasePrintPage({
           </div>
         </div>
 
+        {purchase.notes && (
+          <div className="border-t border-line mt-3 pt-2">
+            <div className="text-[11px] uppercase tracking-wide text-muted font-semibold">
+              Notes
+            </div>
+            <div className="text-[12px] whitespace-pre-line">{purchase.notes}</div>
+          </div>
+        )}
+
         <div className="bill-sign">
           <div>Received by</div>
           <div>For {purchase.company.legalName ?? purchase.company.name}</div>

@@ -160,6 +160,15 @@ export default async function DeliveryNotePrintPage({
           ledger and is not a bill.
         </p>
 
+        {note.notes && (
+          <div className="border-t border-line mt-3 pt-2">
+            <div className="text-[11px] uppercase tracking-wide text-muted font-semibold">
+              Notes
+            </div>
+            <div className="text-[12px] whitespace-pre-line">{note.notes}</div>
+          </div>
+        )}
+
         <div className="bill-sign">
           <div>Dispatched by</div>
           <div>Driver</div>

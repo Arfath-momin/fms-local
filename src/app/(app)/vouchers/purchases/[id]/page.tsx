@@ -196,6 +196,7 @@ export default async function PurchaseDetailPage({
     billNo: purchase.billNo ?? "",
     partyName: purchase.party.name,
     date: toInputDate(purchase.date),
+    notes: purchase.notes ?? "",
     lines: purchase.lines.map((l) => ({
       // A bill entered before boats moved onto the line has its vessel in the
       // header; carrying it onto the first row keeps the name rather than

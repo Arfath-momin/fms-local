@@ -38,8 +38,8 @@ const ITEMS = [
   },
   {
     href: "/ledgers/commission",
-    label: "Commission",
-    desc: "The 2% earned on every Market sale, with a running balance.",
+    label: "Commission & Reserve",
+    desc: "What is withheld from a Market sale — the house's commission and the seller's reserve, each with its own running balance.",
   },
 ];
 

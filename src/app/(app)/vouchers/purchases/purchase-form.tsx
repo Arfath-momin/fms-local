@@ -39,6 +39,8 @@ export type PurchaseLineInit = {
 };
 
 export type PurchaseInit = {
+  /** Free-form remark, on every voucher type. */
+  notes: string;
   type: PurchaseType;
   /** "No." on a Society/KFDC bill, "Invoice No." on a Private/Local one. */
   billNo: string;
@@ -329,6 +331,21 @@ export function PurchaseForm({
         >
           + Add item
         </button>
+      </div>
+
+      {/* Free-form remark, on every voucher type. Read by no ledger, no
+          balance and no report — it is what the entering clerk wanted the next
+          person to know, and it prints on the document. */}
+      <div>
+        <label htmlFor="notes" className={labelCls}>
+          Notes (optional)
+        </label>
+        <input
+          id="notes"
+          name="notes"
+          defaultValue={initial?.notes ?? ""}
+          className={inputCls}
+        />
       </div>
 
       {allowBillUpload && (

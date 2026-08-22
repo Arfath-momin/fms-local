@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Prisma } from "@/generated/prisma/client";
 import { requireReports } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
@@ -85,6 +86,17 @@ export default async function ProfitReportPage({
             Show
           </button>
         </form>
+      </div>
+
+      {/* Same period, on paper — the browser's print dialog is also where
+          Save as PDF lives. Carries the dates that are on screen. */}
+      <div className="mb-4">
+        <Link
+          href={`/reports/profit/print?from=${toInputDate(from)}&to=${toInputDate(to)}`}
+          className="border border-line-strong bg-surface px-3 py-1 text-[12px] font-semibold hover:border-accent"
+        >
+          Print / Save as PDF
+        </Link>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">

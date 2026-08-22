@@ -66,6 +66,13 @@ export default async function SaleBillPage({
   const isFishMill = sale.type === "FISH_MILL";
   const hasLines = sale.lines.length > 0;
 
+  // Summed from the same helper each row prints, so the column and its total
+  // can never be two different calculations.
+  const totalKg = sale.lines.reduce(
+    (a, l) => a + saleLineTotalKg({ qtyKg: Number(l.qtyKg), box: l.box }),
+    0
+  );
+
   return (
     // data-company resolves --company for the band; the print layout has no
     // company of its own to set it from.
@@ -123,6 +130,12 @@ export default async function SaleBillPage({
             )}
           </div>
           <div className="text-[12px] grid gap-0.5">
+            {/* Which of the two businesses is selling. Obvious on screen from
+                the company band; on a Fish Mill bill leaving the building it
+                has to be stated, because BFM and B2B bill the same mills. */}
+            {isFishMill && (
+              <Detail label="Supplier" value={sale.company.name} />
+            )}
             {sale.place && <Detail label="Place" value={sale.place} />}
             {sale.vehicleNo && (
               <Detail label="Vehicle No." value={sale.vehicleNo} />
@@ -146,16 +159,22 @@ export default async function SaleBillPage({
         {hasLines ? (
           <table className="bill-table">
             <thead>
+              {/* The Fish Mill bill is deliberately narrower than the entry
+                  screen. Box and kgs-per-box are how the load was WEIGHED —
+                  working the clerk needs and the mill does not — so the
+                  document states the outcome: what it was, how much of it,
+                  at what rate, for how much. */}
               <tr>
                 <th className="r" style={{ width: "3rem" }}>
-                  Sl
+                  Sr No
                 </th>
-                {isFishMill && <th className="r">Box</th>}
-                <th>{isFishMill ? "Variety" : "Particular"}</th>
-                <th className="r">{isFishMill ? "Kgs / box" : "Kgs"}</th>
-                {isFishMill && <th className="r">Total Kg</th>}
+                <th>{isFishMill ? "Particulars" : "Particular"}</th>
+                {isFishMill ? (
+                  <th className="r">Count / Kg</th>
+                ) : (
+                  <th className="r">Kgs</th>
+                )}
                 <th className="r">Rate/kg</th>
-                {isFishMill && <th className="r">Count</th>}
                 <th className="r">Amount</th>
               </tr>
             </thead>
@@ -163,32 +182,35 @@ export default async function SaleBillPage({
               {sale.lines.map((l, i) => (
                 <tr key={l.id}>
                   <td className="r num text-muted">{i + 1}</td>
-                  {isFishMill && <td className="r num">{l.box ?? "—"}</td>}
                   <td className="font-medium">{l.particular}</td>
-                  <td className="r num">{fmtKg(l.qtyKg)}</td>
-                  {/* Kgs is the weight of ONE box, so what was actually sold —
-                      and what the rate is charged on — is box × kgs. */}
-                  {isFishMill && (
-                    <td className="r num">
-                      {fmtKg(
-                        saleLineTotalKg({
-                          qtyKg: Number(l.qtyKg),
-                          box: l.box,
-                        })
-                      )}
-                    </td>
-                  )}
+                  <td className="r num">
+                    {/* Kgs is the weight of ONE box, so what was actually sold
+                        — and what the rate is charged on — is box × kgs. The
+                        count prefixes it where the mill recorded one, since
+                        "180 / 45.500 kg" is how the trade reads a line. */}
+                    {isFishMill && l.count ? `${l.count} / ` : ""}
+                    {fmtKg(
+                      saleLineTotalKg({
+                        qtyKg: Number(l.qtyKg),
+                        box: l.box,
+                      })
+                    )}
+                  </td>
                   <td className="r num">{fmtMoney(l.ratePerKg)}</td>
-                  {isFishMill && <td className="r num">{l.count ?? "—"}</td>}
                   <td className="r num">{fmtMoney(l.total)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={isFishMill ? 7 : 4} className="r">
+                <td colSpan={2} className="r">
                   Total
                 </td>
+                {/* Kg total sits under the column it totals, so the mill can
+                    check the weight it received against the money charged
+                    without reading across the sheet. */}
+                <td className="r num">{fmtKg(totalKg)}</td>
+                <td></td>
                 <td className="r num">{fmtMoney(sale.amount)}</td>
               </tr>
             </tfoot>
@@ -206,25 +228,48 @@ export default async function SaleBillPage({
           </table>
         )}
 
-        {/* Market sales are billed gross, less the 2% commission — the buyer
-            expects to see all three figures, not just the net. */}
+        {/* Market sales are billed gross and the seller expects to see every
+            figure, not just the net.
+
+            Commission and reserve are listed BELOW the net, not subtracted
+            from it, because that is what they are: the net bill is what the
+            seller owes for the fish, and both of these are held separately
+            against their own accounts. Showing them as deductions would imply
+            a net that no ledger anywhere agrees with. */}
         {sale.totalBill && (
-          <table className="bill-table mt-3" style={{ maxWidth: "20rem", marginLeft: "auto" }}>
+          <table className="bill-table mt-3" style={{ maxWidth: "22rem", marginLeft: "auto" }}>
             <tbody>
               <tr>
                 <td>Total bill</td>
                 <td className="r num">{fmtMoney(sale.totalBill)}</td>
               </tr>
-              {sale.commission && (
-                <tr>
-                  <td>Less commission (2%)</td>
-                  <td className="r num">{fmtMoney(sale.commission)}</td>
-                </tr>
-              )}
               <tr>
                 <td className="font-semibold">Net bill</td>
                 <td className="r num font-semibold">{fmtMoney(sale.amount)}</td>
               </tr>
+              {sale.commission && (
+                <tr>
+                  <td>
+                    Commission
+                    {sale.commissionRate && (
+                      <span className="text-muted">
+                        {" "}
+                        ({sale.commissionRate.toString()}% of total)
+                      </span>
+                    )}
+                  </td>
+                  <td className="r num">{fmtMoney(sale.commission)}</td>
+                </tr>
+              )}
+              {sale.reserve && (
+                <tr>
+                  <td>
+                    Reserve
+                    <span className="text-muted"> (held)</span>
+                  </td>
+                  <td className="r num">{fmtMoney(sale.reserve)}</td>
+                </tr>
+              )}
             </tbody>
           </table>
         )}
@@ -247,6 +292,15 @@ export default async function SaleBillPage({
             </span>
             <span className="num font-semibold">{fmtMoney(outstanding)}</span>
           </p>
+        )}
+
+        {sale.notes && (
+          <div className="border-t border-line mt-3 pt-2">
+            <div className="text-[11px] uppercase tracking-wide text-muted font-semibold">
+              Notes
+            </div>
+            <div className="text-[12px] whitespace-pre-line">{sale.notes}</div>
+          </div>
         )}
 
         {/* Signatures */}

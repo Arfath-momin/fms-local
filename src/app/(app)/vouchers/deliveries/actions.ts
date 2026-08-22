@@ -39,6 +39,8 @@ type Parsed = {
   advancePaid: Prisma.Decimal | null;
   driverName: string | null;
   mobileNo: string | null;
+  /** Free-form remark. Posts to nothing; prints on the note. */
+  notes: string | null;
   lines: ParsedLine[];
   file: unknown;
 };
@@ -54,6 +56,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const advanceRaw = clean(formData.get("advancePaid"));
   const driverName = clean(formData.get("driverName"));
   const mobileNo = clean(formData.get("mobileNo"));
+  const notes = clean(formData.get("notes"));
   const file = formData.get("bill");
 
   if (!billNo) return { error: "Enter the bill number." };
@@ -127,6 +130,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
       advancePaid,
       driverName: driverName || null,
       mobileNo: mobileNo || null,
+      notes: notes || null,
       lines,
       file,
     },
@@ -162,6 +166,7 @@ export async function createDelivery(
           advancePaid: d.advancePaid,
           driverName: d.driverName,
           mobileNo: d.mobileNo,
+          notes: d.notes,
           createdById: session.userId,
           lines: {
             create: d.lines.map((l) => ({
@@ -270,6 +275,7 @@ export async function updateDelivery(
           advancePaid: d.advancePaid,
           driverName: d.driverName,
           mobileNo: d.mobileNo,
+          notes: d.notes,
           updatedById: session.userId,
           updatedAt: new Date(),
           lines: {

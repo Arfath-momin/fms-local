@@ -196,9 +196,16 @@ enum PartyType {
   // of their own so payments settle against the right person. The individual
   // boat is recorded on the line, never as a ledger. See src/lib/party.ts
   // (FIXED_PURCHASE_PARTY).
-  COMMISSION // the house's own 2% commission account — one per company/centre,
-  // credited by every Market sale. Modelled as a party so the commission
-  // ledger is an ordinary statement rather than a parallel reporting table.
+  COMMISSION // the house's own commission account — one per company/centre,
+  // credited by every Market sale at whatever rate that bill was struck at.
+  // Modelled as a party so the commission ledger is an ordinary statement
+  // rather than a parallel reporting table.
+  RESERVE // money held back from a Market seller. The mirror of COMMISSION and
+  // modelled the same way, but it is emphatically NOT income: commission is
+  // what the house earned, reserve is the seller's own money being retained.
+  // Kept in its own account so the two never sum into a single misleading
+  // figure, and shown alongside commission on the same screen because they are
+  // the two things withheld from the same bill.
 }
 
 model Party {
@@ -270,6 +277,10 @@ model Purchase {
   type        PurchaseType
   amount      Decimal      @db.Decimal(14, 2)
   date        DateTime     @db.Date
+  /// Free-form remark carried by every voucher type. Never read by a ledger,
+  /// a balance or a report — it is what the entering clerk wanted the next
+  /// person to know, and it prints on the document.
+  notes       String?
   createdAt   DateTime     @default(now()) @map("created_at")
   // Null updatedAt means "never edited" — that is why this is not @updatedAt,
   // which would also fire on insert.
@@ -381,6 +392,8 @@ model DeliveryNote {
   advancePaid Decimal?  @map("advance_paid") @db.Decimal(14, 2)
   driverName  String?   @map("driver_name")
   mobileNo    String?   @map("mobile_no")
+  /// Free-form remark — see the note on Purchase.notes.
+  notes       String?
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime? @map("updated_at")
   createdById String?   @map("created_by_id")
@@ -458,9 +471,29 @@ model Sale {
 
   amount Decimal @db.Decimal(14, 2)
 
-  // Market-only (recorded/displayed, not posted):
+  // Market-only:
   totalBill  Decimal? @map("total_bill") @db.Decimal(14, 2) // gross incl. seller profit + expenses
-  commission Decimal? @db.Decimal(14, 2) // 2% of totalBill, reference only
+  /// The commission amount actually earned on this sale, in rupees.
+  ///
+  /// Stored rather than derived on read: the rate is now per-sale, so a bill
+  /// entered at 2% must keep reading as 2% for ever, even after the house
+  /// changes what it charges. Recomputing from a live rate would silently
+  /// restate every historic bill.
+  commission Decimal? @db.Decimal(14, 2)
+  /// The percentage `commission` was calculated at — 2.5 means 2.5%.
+  ///
+  /// Kept alongside the amount so a bill can show its own working ("2.5% of
+  /// ₹1,20,000") rather than an unexplained figure. Null on rows entered
+  /// before the rate became variable, which were all at the old fixed 2%.
+  commissionRate Decimal? @map("commission_rate") @db.Decimal(5, 2)
+  /// Money held back from the seller on a Market sale — their own reserve,
+  /// not the house's income.
+  ///
+  /// Like commission it is posted to a standing account of its own and is
+  /// deliberately NOT part of `amount`: the net bill is what the seller owes
+  /// us for the fish, and folding a retention into it would misstate both the
+  /// debt and the day's revenue.
+  reserve    Decimal? @db.Decimal(14, 2)
   place      String? // Market "Place"
 
   // Fish Mill-only:
@@ -471,6 +504,9 @@ model Sale {
 
   // Factory-only:
   returnNote String? @map("return_note")
+
+  /// Free-form remark — see the note on Purchase.notes.
+  notes      String?
 
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime? @map("updated_at")
@@ -576,7 +612,8 @@ enum LedgerSourceType {
   EXPENSE
   PAYMENT // money out — settles what we owe a supplier
   RECEIPT // money in — settles what a customer owes us
-  COMMISSION // 2% agent commission earned on a Market sale
+  COMMISSION // agent commission earned on a Market sale
+  RESERVE // money withheld from a Market seller and held on their behalf
 }
 
 // One generic ledger table powers every party statement — no per-party-type

@@ -24,6 +24,8 @@ export type DeliveryLineInit = {
 };
 
 export type DeliveryInit = {
+  /** Free-form remark, on every voucher type. */
+  notes: string;
   billNo: string;
   date: string;
   recipient: string;
@@ -321,6 +323,21 @@ export function DeliveryForm({
             kg × 10 boxes shows 250 kg.
           </p>
         </div>
+      </div>
+
+      {/* Free-form remark, on every voucher type. Read by no ledger, no
+          balance and no report — it is what the entering clerk wanted the next
+          person to know, and it prints on the document. */}
+      <div>
+        <label htmlFor="notes" className={labelCls}>
+          Notes (optional)
+        </label>
+        <input
+          id="notes"
+          name="notes"
+          defaultValue={initial?.notes ?? ""}
+          className={inputCls}
+        />
       </div>
 
       {allowBillUpload && (

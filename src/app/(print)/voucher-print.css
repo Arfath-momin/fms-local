@@ -19,7 +19,11 @@
 }
 
 .bill-paper {
-  background: var(--surface);
+  /* Light grey body. Deliberately a flat literal rather than var(--surface):
+     this sheet has to look the same whatever theme the app is in, and a
+     document whose background follows the viewer's UI is not a document. */
+  background: #f2f2f2;
+  color: #1a1a1a;
   border: 1px solid var(--line-strong);
   padding: 1.75rem;
 }
@@ -27,14 +31,20 @@
 /* ---------------------------------------------------------------------------
  * Company band
  *
- * The one piece of colour on the page, in the same per-company variable the app
- * itself is themed with (--company, set on [data-company] in globals.css). BFM
- * blue and B2B amber-brown make two businesses' paperwork tellable apart across
- * a desk, which is the whole job — it is not decoration.
+ * White, against the light grey body below it. The band used to be filled with
+ * the per-company colour (--company); it is now the lightest thing on the page
+ * so the logo sits on white — a mark printed over a colour field reproduces
+ * badly, and on a mono printer the fill turned into grey that fought the logo.
+ * The company is still tellable at a glance from the mark itself.
+ *
+ * The colour has not been deleted, only moved: --company still draws the rule
+ * under the band, which is enough to tell two businesses' paperwork apart
+ * across a desk without flooding a printer with ink.
  * ------------------------------------------------------------------------ */
 .bill-band {
-  background: var(--company);
-  color: var(--company-ink);
+  background: #ffffff;
+  color: #1a1a1a;
+  border-bottom: 3px solid var(--company);
   padding: 0.75rem 1rem;
   margin: -1.75rem -1.75rem 1.25rem;
   /* Three columns rather than flex space-between, so the company mark is
@@ -144,13 +154,19 @@
  * sheet and the preview alike.
  * ------------------------------------------------------------------------ */
 body.print-plain .bill-band {
-  background: none;
-  color: inherit;
+  /* The band is already white; plain mode only has to take the last of the
+     colour out of it — the company rule underneath — and drop the bleed so the
+     header sits flush with the text below. */
   border-bottom: 2px solid var(--line-strong);
   padding-left: 0;
   padding-right: 0;
   margin-left: 0;
   margin-right: 0;
+}
+/* Plain means plain: the grey body goes too, leaving black on white. This is
+   the setting for a merchant printing fifty notes a day. */
+body.print-plain .bill-paper {
+  background: #fff;
 }
 body.print-plain .bill-table tbody tr:nth-child(even) {
   background: none;
@@ -163,11 +179,13 @@ body.print-plain .bill-table tbody tr:nth-child(even) {
     background: #fff;
   }
 
-  /* Browsers strip backgrounds by default to save ink. The band and the row
-     tint are carrying meaning here — which company, and which row — so they are
-     opted back in explicitly. Plain mode removes them at the source above, so
-     this never forces colour on someone who asked for none. */
+  /* Browsers strip backgrounds by default to save ink. The grey body, the
+     company rule and the row tint are carrying meaning here — which document,
+     which company, which row — so they are opted back in explicitly. Plain
+     mode removes them at the source above, so this never forces colour on
+     someone who asked for none. */
   .bill-band,
+  .bill-paper,
   .bill-table tbody tr {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;

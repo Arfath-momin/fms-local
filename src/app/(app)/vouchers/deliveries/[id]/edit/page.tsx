@@ -54,6 +54,7 @@ export default async function EditDeliveryPage({
           advancePaid: note.advancePaid?.toString() ?? "",
           driverName: note.driverName ?? "",
           mobileNo: note.mobileNo ?? "",
+          notes: note.notes ?? "",
           lines: note.lines.map((l) => ({
             particulars: l.particulars,
             kg: l.kg.toString(),

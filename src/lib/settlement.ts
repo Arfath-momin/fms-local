@@ -83,8 +83,23 @@ export function isSettlementKind(v: unknown): v is SettlementKind {
 }
 
 /**
- * The single house account every Market sale's 2% commission is posted to.
- * The rate itself lives in src/lib/sale.ts as MARKET_COMMISSION_RATE, which
- * stays the one place it is defined.
+ * The single house account every Market sale's commission is posted to.
+ *
+ * No longer named for a rate. The rate is per-sale now (see the Sale model's
+ * commissionRate), so "Commission (2%)" would have been a standing account
+ * lying about every bill struck at anything else. The migration
+ * 20260818000000_notes_commission_rate_reserve renames the existing row in
+ * place, so the historic ledger follows rather than being orphaned.
  */
-export const COMMISSION_PARTY_NAME = "Commission (2%)";
+export const COMMISSION_PARTY_NAME = "Commission";
+
+/**
+ * The house account a Market sale's reserve is held in.
+ *
+ * Deliberately a second account rather than a second column on the commission
+ * one. Commission is the house's income; reserve is the seller's own money
+ * being held back. Summing them would produce a figure that means nothing —
+ * so they are two statements, shown side by side because they are the two
+ * things withheld from the same bill.
+ */
+export const RESERVE_PARTY_NAME = "Reserve";

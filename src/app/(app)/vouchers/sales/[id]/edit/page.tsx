@@ -53,11 +53,17 @@ export default async function EditSalePage({
         action={updateSale.bind(null, sale.id)}
         initial={{
           billNo: sale.billNo,
+          notes: sale.notes ?? "",
           date: toInputDate(sale.date),
           saleDate: toInputDate(sale.saleDate ?? sale.date),
           buyerName: sale.party.name,
           careOfName: sale.careOfParty?.name ?? "",
           place: sale.place ?? "",
+          // The rate this bill was actually struck at, not the current default
+          // — a historic 2% bill must keep editing as 2% after the house
+          // changes its terms.
+          commissionRate: sale.commissionRate?.toString() ?? "",
+          reserve: sale.reserve?.toString() ?? "",
           totalBill: sale.totalBill?.toString() ?? "",
           netBill: sale.type === "MARKET" ? sale.amount.toString() : "",
           amount: sale.type === "FACTORY" ? sale.amount.toString() : "",

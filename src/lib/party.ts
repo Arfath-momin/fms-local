@@ -11,6 +11,7 @@ export const PARTY_TYPE_LABELS: Record<PartyType, string> = {
   CARE_OF: "CareOf",
   PURCHASE_GROUP: "Purchase Party",
   COMMISSION: "Commission",
+  RESERVE: "Reserve",
 };
 
 export const PARTY_TYPE_PLURALS: Record<PartyType, string> = {
@@ -24,6 +25,7 @@ export const PARTY_TYPE_PLURALS: Record<PartyType, string> = {
   CARE_OF: "CareOf Agents",
   PURCHASE_GROUP: "Purchase Parties",
   COMMISSION: "Commission Account",
+  RESERVE: "Reserve Account",
 };
 
 export const PARTY_TYPES = Object.keys(PARTY_TYPE_LABELS) as PartyType[];

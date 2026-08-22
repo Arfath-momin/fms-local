@@ -38,6 +38,8 @@ type Parsed = {
   /** The ledger this purchase settles against. */
   partyName: string;
   billNo: string | null;
+  /** Free-form remark. Posts to nothing; prints on the voucher. */
+  notes: string | null;
   amount: Prisma.Decimal;
   date: Date;
   lines: ParsedLine[];
@@ -79,6 +81,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   if (badFile) return { error: badFile };
 
   const billNo = clean(formData.get("billNo")) || null;
+  const notes = clean(formData.get("notes")) || null;
   const date = new Date(dateRaw);
   // Only Society / KFDC rows carry a boat, so on the other two the field is not
   // rendered at all and getAll() returns an empty list that indexes to "".
@@ -124,7 +127,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   if (amount.lessThanOrEqualTo(0))
     return { error: "The bill total must be more than zero." };
 
-  return { data: { type, partyName, billNo, amount, date, lines, file } };
+  return { data: { type, partyName, billNo, notes, amount, date, lines, file } };
 }
 
 /**
@@ -232,6 +235,7 @@ export async function createPurchase(
           centreId: centre.id,
           partyId,
           billNo: d.billNo,
+          notes: d.notes,
           type: d.type,
           amount: d.amount,
           date: d.date,
@@ -356,6 +360,7 @@ export async function updatePurchase(
           // printing a vessel name the lines no longer agree with.
           boatId: null,
           billNo: d.billNo,
+          notes: d.notes,
           type: d.type,
           amount: d.amount,
           date: d.date,
