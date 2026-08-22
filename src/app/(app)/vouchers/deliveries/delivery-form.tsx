@@ -31,8 +31,7 @@ export type DeliveryInit = {
   recipient: string;
   /** Which channel this trip went to — decides how its rent settles. */
   channel: string;
-  vehicleNo: string;
-  transporterName: string;
+  vehicleId: string;
   /** Total rent agreed for the trip. Expensed once, on the buying day. */
   rentAmount: string;
   /** MARKET only — paid to the driver before departure. */
@@ -53,8 +52,16 @@ const BLANK_LINE: DeliveryLineInit = {
 
 const num = (v: string) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+/** A vehicle as the trip form needs it — id to post, number and owner to read. */
+export type VehicleOption = {
+  id: string;
+  number: string;
+  transporterName: string;
+};
+
 export function DeliveryForm({
   action,
+  vehicles,
   initial,
   submitLabel,
   existingAttachments = 0,
@@ -65,6 +72,8 @@ export function DeliveryForm({
     prev: DeliveryFormState,
     formData: FormData
   ) => Promise<DeliveryFormState>;
+  /** Live vehicles for the active company, in number order. */
+  vehicles: VehicleOption[];
   initial?: DeliveryInit;
   submitLabel: string;
   existingAttachments?: number;
@@ -79,6 +88,9 @@ export function DeliveryForm({
   const [lines, setLines] = useState<DeliveryLineInit[]>(
     initial?.lines?.length ? initial.lines : [BLANK_LINE]
   );
+  // Controlled: the advance field exists only on a market trip, because on
+  // every other channel the driver is paid in full on his return.
+  const [channel, setChannel] = useState(initial?.channel ?? "MARKET");
   const today = businessToday();
 
   // Same rule as lineTotalKg() on the server: kg is the weight of one box, so
@@ -158,11 +170,14 @@ export function DeliveryForm({
           <label htmlFor="channel" className={labelCls}>
             Channel
           </label>
+          {/* Controlled, because the advance field below appears only for
+              MARKET — the rent settles differently on every other channel. */}
           <select
             id="channel"
             name="channel"
             required
-            defaultValue={initial?.channel ?? "MARKET"}
+            value={channel}
+            onChange={(e) => setChannel(e.target.value)}
             className={inputCls}
           >
             <option value="MARKET">Market</option>
@@ -178,32 +193,40 @@ export function DeliveryForm({
 
       <div className="grid grid-cols-3 gap-4">
         <div>
-          <label htmlFor="vehicleNo" className={labelCls}>
-            Vehicle No.
+          <label htmlFor="vehicleId" className={labelCls}>
+            Vehicle
           </label>
-          <input
-            id="vehicleNo"
-            name="vehicleNo"
+          {/* A picker, not free text. The same truck typed three ways used to
+              be three trucks, none of which pointed at anyone to owe rent to.
+              New trucks are added under Masters → Vehicles. */}
+          <select
+            id="vehicleId"
+            name="vehicleId"
             required
-            defaultValue={initial?.vehicleNo ?? ""}
+            defaultValue={initial?.vehicleId ?? ""}
             className={inputCls}
-          />
-        </div>
-        <div>
-          <label htmlFor="transporterName" className={labelCls}>
-            Transporter
-          </label>
-          <input
-            id="transporterName"
-            name="transporterName"
-            required
-            defaultValue={initial?.transporterName ?? ""}
-            placeholder="Who owns the truck"
-            className={inputCls}
-          />
-          <p className="text-muted text-[12px] mt-1">
-            The rent is owed to them.
-          </p>
+          >
+            <option value="" disabled>
+              Choose a vehicle…
+            </option>
+            {vehicles.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.number} — {v.transporterName}
+              </option>
+            ))}
+          </select>
+          {vehicles.length === 0 && (
+            <p className="text-debit text-[12px] mt-1">
+              No vehicles yet.{" "}
+              <Link
+                href="/masters/vehicles"
+                className="underline underline-offset-2"
+              >
+                Add one under Masters
+              </Link>{" "}
+              before entering a trip.
+            </p>
+          )}
         </div>
         <div>
           <label htmlFor="rentAmount" className={labelCls}>
@@ -220,21 +243,34 @@ export function DeliveryForm({
             Charged once, to this buying day.
           </p>
         </div>
+        {/* Only a market trip takes an advance. On every other channel BFM
+            pays the driver in full on his return, so the field is not merely
+            ignored there — the action rejects it. */}
+        {channel === "MARKET" ? (
+          <div>
+            <label htmlFor="advancePaid" className={labelCls}>
+              Advance Paid (₹)
+            </label>
+            <input
+              id="advancePaid"
+              name="advancePaid"
+              inputMode="decimal"
+              defaultValue={initial?.advancePaid ?? ""}
+              className={inputCls + " num text-right"}
+            />
+            <p className="text-muted text-[12px] mt-1">
+              Handed to the driver at departure.
+            </p>
+          </div>
+        ) : (
+          <div className="text-muted text-[12px] self-end pb-2">
+            No advance on a {channel === "FISH_MILL" ? "fish mill" : channel.toLowerCase()}{" "}
+            trip — the driver is paid in full on his return.
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <div>
-          <label htmlFor="advancePaid" className={labelCls}>
-            Advance Paid (₹)
-          </label>
-          <input
-            id="advancePaid"
-            name="advancePaid"
-            inputMode="decimal"
-            defaultValue={initial?.advancePaid ?? ""}
-            className={inputCls + " num text-right"}
-          />
-        </div>
         <div>
           <label htmlFor="driverName" className={labelCls}>
             Driver Name

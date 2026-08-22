@@ -5,16 +5,16 @@ import { PARTY_TYPES, PARTY_TYPE_PLURALS } from "@/lib/party";
 
 const TYPE_DESCRIPTIONS: Record<string, string> = {
   BOAT: "Boat names for the rows of a Society / KFDC bill. A name list only — no ledger.",
-  LOCAL_SELLER: "Retired. Local sellers now carry their own ledger under Purchase Parties; these are the names from before that change.",
   MARKET_BUYER: "Market buyers.",
   FACTORY: "Factories buying by delivery note.",
   FISH_MILL: "Fish mills buying by delivery note.",
   LOCAL_BUYER: "Local buyers.",
   EXPENSE_VENDOR: "Ice plants, landlords and other expense vendors.",
-  CARE_OF: "Commission agents who pay immediately; Fish Mill/Factory sales can post to a CareOf ledger.",
+  CARE_OF: "Agents who pay immediately; Fish Mill/Factory sales can post to a CareOf ledger.",
   PURCHASE_GROUP:
     "Who purchases are owed to — Society, KFDC, and every private and local seller individually.",
-  COMMISSION: "The house's own 2% account, credited by every Market sale.",
+  TRANSPORTER:
+    "Who the trucks belong to. Each trip's rent is credited here and settled by the advance and by whatever a market party paid the driver.",
 };
 
 export default async function MastersPage() {
@@ -36,15 +36,28 @@ export default async function MastersPage() {
         balances kept per centre.
       </p>
 
-      <Link
-        href="/masters/centres"
-        className="block max-w-md border border-line bg-surface px-4 py-3 mb-4 hover:bg-background"
-      >
-        <div className="font-semibold text-[14px]">Centres</div>
-        <div className="text-muted text-[12px]">
-          Isolated transaction/ledger scopes inside the active company.
-        </div>
-      </Link>
+      <div className="max-w-md border border-line bg-surface mb-4">
+        <Link
+          href="/masters/centres"
+          className="block px-4 py-3 hover:bg-background border-b border-line"
+        >
+          <div className="font-semibold text-[14px]">Centres</div>
+          <div className="text-muted text-[12px]">
+            Isolated transaction/ledger scopes inside the active company.
+          </div>
+        </Link>
+        {/* Company-scoped like centres, not shared like parties: BFM and B2B
+            may use the same truck, but each keeps its own row. */}
+        <Link
+          href="/masters/vehicles"
+          className="block px-4 py-3 hover:bg-background"
+        >
+          <div className="font-semibold text-[14px]">Vehicles</div>
+          <div className="text-muted text-[12px]">
+            The trucks trips go out on, and who each one belongs to.
+          </div>
+        </Link>
+      </div>
 
       <div className="max-w-md border border-line bg-surface">
         {PARTY_TYPES.map((t) => (

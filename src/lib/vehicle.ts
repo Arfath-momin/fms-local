@@ -1,5 +1,6 @@
 import "server-only";
 import type { Prisma } from "@/generated/prisma/client";
+import { prisma } from "@/lib/db";
 import { findOrCreateParty } from "@/lib/party-db";
 
 /**
@@ -64,4 +65,28 @@ export async function findOrCreateVehicle(
     select: { id: true, transporterId: true },
   });
   return created;
+}
+
+/**
+ * The vehicles a new trip may be entered against, for the active company.
+ *
+ * Archived trucks are excluded deliberately: retiring one is how a merchant
+ * says "stop using this", and offering it anyway would make the archive
+ * decorative. An existing trip keeps pointing at its vehicle either way.
+ */
+export async function liveVehicles(companyId: string) {
+  const rows = await prisma.vehicle.findMany({
+    where: { companyId, archivedAt: null },
+    orderBy: { number: "asc" },
+    select: {
+      id: true,
+      number: true,
+      transporter: { select: { name: true } },
+    },
+  });
+  return rows.map((v) => ({
+    id: v.id,
+    number: v.number,
+    transporterName: v.transporter.name,
+  }));
 }

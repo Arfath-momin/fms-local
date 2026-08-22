@@ -101,8 +101,17 @@ export default async function ExpenseDetailPage({
 
   // Categories are data now, so the form is handed the live list rather than
   // importing a constant. Archived ones drop out; ordering is the merchant's.
+  // RENT is excluded on purpose. Vehicle rent is expensed exactly once, from
+  // the trip, dated to the buying day (spec §2, invariant 2) — the advance and
+  // whatever a market party paid the driver are settlements against it, never
+  // further expenses. A hand-entered rent voucher would be the second one, and
+  // the day would carry the cost twice.
   const categories = await prisma.expenseCategory.findMany({
-    where: { companyId: company.id, archivedAt: null },
+    where: {
+      companyId: company.id,
+      archivedAt: null,
+      code: { not: "RENT" },
+    },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     select: { id: true, code: true, name: true, allowsLines: true },
   });
