@@ -16,6 +16,7 @@ import type { PartyType } from "../src/generated/prisma/enums";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { postLedgerEntries } from "../src/lib/ledger";
 import { DIRECT_CODES, OVERHEAD_CODES } from "../src/lib/expense";
+import { refreshTripStatus } from "../src/lib/trip";
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -243,6 +244,8 @@ async function main() {
         vehicleId: vehicle,
         rentAmount: D(rent),
         advancePaid: advance === null ? null : D(advance),
+        // Recomputed below once the bills are in — DISPATCHED is only the
+        // state a trip is created in.
         status: "DISPATCHED",
         lines: {
           create: [{ particulars: "Mixed", kg: D(300), box: 100, bigBox: 0, loose: 0, pcs: 0 }],
@@ -350,6 +353,12 @@ async function main() {
       notes: "Monthly salaries — OVERHEAD, must not touch this day's gross.",
     },
   });
+
+  // Statuses are derived from the bills, exactly as the sale action derives
+  // them — so the seeded data reads the same as data entered through the app.
+  for (const tripId of Object.values(trips)) {
+    await refreshTripStatus(prisma, tripId);
+  }
 
   console.log("Seeded the 16 Aug 2026 worked example for BFM / Malpe.");
   console.log("  purchases 185,000 · direct 47,000 · revenue 263,400");

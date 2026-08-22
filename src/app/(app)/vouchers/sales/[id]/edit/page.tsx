@@ -4,6 +4,7 @@ import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { toInputDate } from "@/lib/format";
+import { openTripsForChannel } from "@/lib/trip";
 import { updateSale } from "../../actions";
 import { ReviewPanel } from "../../../review-panel";
 import { SaleForm } from "../../sale-form";
@@ -38,6 +39,22 @@ export default async function EditSalePage({
     where: { linkedType: "SALE", linkedId: sale.id },
   });
 
+  // The trip this bill already points at is included even if that trip has
+  // since closed — billing the last box is what closes it, and an edit must
+  // still find it.
+  const trips =
+    sale.type === "LOCAL"
+      ? []
+      : await openTripsForChannel(
+          { companyId: company.id, centreId: centre.id },
+          sale.type === "MARKET"
+            ? "MARKET"
+            : sale.type === "FACTORY"
+              ? "FACTORY"
+              : "FISH_MILL",
+          sale.deliveryNoteId
+        );
+
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-4">
@@ -50,6 +67,7 @@ export default async function EditSalePage({
       </div>
       <SaleForm
         type={sale.type}
+        trips={trips}
         action={updateSale.bind(null, sale.id)}
         initial={{
           billNo: sale.billNo,
@@ -65,7 +83,12 @@ export default async function EditSalePage({
           commissionRate: sale.commissionRate?.toString() ?? "",
           reserve: sale.reserve?.toString() ?? "",
           totalBill: sale.totalBill?.toString() ?? "",
-          netBill: sale.type === "MARKET" ? sale.amount.toString() : "",
+          // Net is not carried back — it is derived from the deductions, so a
+          // stored value would only be a second answer that could disagree.
+          otherDeduction: sale.otherDeduction?.toString() ?? "",
+          deliveryNoteId: sale.deliveryNoteId ?? "",
+          carriesRent: sale.carriesRent,
+          rentDeducted: sale.rentDeducted?.toString() ?? "",
           amount: sale.type === "FACTORY" ? sale.amount.toString() : "",
           weight: sale.weight?.toString() ?? "",
           vehicleNo: sale.vehicleNo ?? "",

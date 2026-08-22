@@ -4,7 +4,12 @@ import { prisma } from "@/lib/db";
 import { getActiveScope } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import {
+  tallyTrip,
+  TRIP_CHANNEL_LABELS,
+  TRIP_STATUS_LABELS,
+} from "@/lib/trip";
+import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
@@ -46,6 +51,20 @@ export default async function DeliveryNotePage({
       company: { select: { name: true } },
       centre: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
+      // The bills that came back off this trip — what the reconciliation
+      // tallies against what went out.
+      sales: {
+        orderBy: [{ date: "asc" }, { billNo: "asc" }],
+        select: {
+          id: true,
+          billNo: true,
+          amount: true,
+          rentDeducted: true,
+          carriesRent: true,
+          party: { select: { name: true } },
+          lines: { select: { qtyKg: true, box: true } },
+        },
+      },
       createdBy: { select: { name: true } },
       updatedBy: { select: { name: true } },
     },
@@ -53,6 +72,7 @@ export default async function DeliveryNotePage({
   if (!note) notFound();
 
   const totals = sumDeliveryLines(note.lines);
+  const tally = tallyTrip(note);
   const attachments = await getAttachments("DELIVERY_NOTE", note.id);
 
   return (
@@ -96,7 +116,12 @@ export default async function DeliveryNotePage({
         <Field label="Bill No." value={note.billNo} />
         <Field label="Date" value={fmtDate(note.date)} />
         <Field label="To" value={note.recipient ?? "—"} />
-        <Field label="Channel" value={note.channel} />
+        <Field label="Channel" value={TRIP_CHANNEL_LABELS[note.channel]} />
+        <Field label="Status" value={TRIP_STATUS_LABELS[note.status]} />
+        <Field
+          label="Rent"
+          value={note.rentAmount ? fmtMoney(note.rentAmount) : "—"}
+        />
         <Field label="Vehicle No." value={note.vehicle.number} />
         <Field label="Transporter" value={note.vehicle.transporter.name} />
         <Field
@@ -105,6 +130,121 @@ export default async function DeliveryNotePage({
         />
         <Field label="Driver Name" value={note.driverName ?? "—"} />
         <Field label="Mobile No." value={note.mobileNo ?? "—"} />
+      </div>
+
+      {/* Trip reconciliation — one panel serving both tallies, because the
+          question differs by channel:
+            MARKET   a truck visits several markets, so bills arrive piecemeal
+                     and the BOXES have to add up.
+            FACTORY  the whole load goes to one buyer who reweighs on arrival
+                     and pays for less, so the KILO gap is the rejection.
+          Both are shown against what actually went out on this trip. */}
+      <div className="border border-line-strong bg-surface px-4 py-3 mb-4">
+        <div className="flex items-baseline justify-between mb-2">
+          <h2 className="heading text-[15px] font-semibold">Reconciliation</h2>
+          <span className="text-muted text-[12px]">
+            {tally.billCount === 0
+              ? "No bills back yet"
+              : `${tally.billCount} bill${tally.billCount === 1 ? "" : "s"} · ${fmtMoney(tally.billedAmount)}`}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[13px]">
+          {note.channel === "MARKET" ? (
+            <>
+              <Field
+                label="Boxes out"
+                value={String(tally.boxesDispatched)}
+              />
+              <Field label="Boxes billed" value={String(tally.boxesBilled)} />
+              <Field
+                label="Unbilled"
+                value={String(
+                  Math.max(0, tally.boxesDispatched - tally.boxesBilled)
+                )}
+              />
+              <Field
+                label="Crates back"
+                value={
+                  note.cratesReturned == null
+                    ? "—"
+                    : String(note.cratesReturned)
+                }
+              />
+            </>
+          ) : (
+            <>
+              <Field label="Kg out" value={fmtKg(tally.kgDispatched)} />
+              <Field label="Kg accepted" value={fmtKg(tally.kgBilled)} />
+              <Field label="Rejected" value={fmtKg(tally.kgGap)} />
+              {/* Valued at what the accepted fish actually fetched — a
+                  rejection is worth what the rest of the load sold for. */}
+              <Field label="Gap value" value={fmtMoney(tally.gapValue)} />
+            </>
+          )}
+        </div>
+
+        {tally.rentUnsettled.gt(0) && (
+          <p className="text-[12px] text-muted mt-2">
+            Rent still unsettled with {note.vehicle.transporter.name}:{" "}
+            <span className="num font-semibold">
+              {fmtMoney(tally.rentUnsettled)}
+            </span>
+            . A balance that does not close at zero means something is genuinely
+            unpaid.
+          </p>
+        )}
+
+        {note.sales.length > 0 && (
+          <table className="ledger-table mt-3">
+            <thead>
+              <tr>
+                <th>Bill</th>
+                <th>Party</th>
+                <th className="num-col">
+                  {note.channel === "MARKET" ? "Boxes" : "Kg"}
+                </th>
+                <th className="num-col">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {note.sales.map((sale) => (
+                <tr key={sale.id}>
+                  <td>
+                    <Link
+                      href={`/vouchers/sales/${sale.id}`}
+                      className="text-accent underline underline-offset-2"
+                    >
+                      {sale.billNo}
+                    </Link>
+                    {sale.carriesRent && (
+                      <span className="text-muted text-[12px]">
+                        {" "}
+                        · carried rent {fmtMoney(sale.rentDeducted ?? 0)}
+                      </span>
+                    )}
+                  </td>
+                  <td>{sale.party.name}</td>
+                  <td className="num-col num">
+                    {note.channel === "MARKET"
+                      ? sale.lines.reduce((a, l) => a + (l.box ?? 0), 0)
+                      : fmtKg(
+                          sale.lines.reduce(
+                            (a, l) =>
+                              a +
+                              (l.box && l.box > 0
+                                ? Number(l.qtyKg) * l.box
+                                : Number(l.qtyKg)),
+                            0
+                          )
+                        )}
+                  </td>
+                  <td className="num-col num">{fmtMoney(sale.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="border border-line-strong bg-surface overflow-x-auto">
