@@ -5,7 +5,6 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { TripChannel } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { findOrCreateVehicle } from "@/lib/vehicle";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
@@ -50,6 +49,7 @@ async function postTripRent(
     rentAmount: Prisma.Decimal | null;
     advancePaid: Prisma.Decimal | null;
     date: Date;
+    billNo: string;
   }
 ) {
   if (!t.rentAmount || t.rentAmount.lte(0)) return;
@@ -75,6 +75,58 @@ async function postTripRent(
         ]
       : []),
   ]);
+
+  // The rent is also a DIRECT cost of the buying day, and this is the ONLY
+  // place it is expensed (spec §2, invariant 2). There is deliberately no rent
+  // expense voucher: one would be the second charge for the same journey, and
+  // the day would carry the cost twice.
+  //
+  // The expense carries no ledger entry of its own — the transporter is
+  // already credited above, and posting again would double what he is owed.
+  // Profit reads the expense table, not the ledger, so the cost still counts.
+  const rentCategory = await tx.expenseCategory.findUnique({
+    where: { companyId_code: { companyId: t.companyId, code: RENT_CATEGORY_CODE } },
+    select: { id: true },
+  });
+  if (!rentCategory) {
+    throw new Error(
+      `No "${RENT_CATEGORY_CODE}" expense category exists for this company — ` +
+        `add one under Masters before entering a trip with rent.`
+    );
+  }
+
+  await tx.expense.create({
+    data: {
+      companyId: t.companyId,
+      centreId: t.centreId,
+      categoryId: rentCategory.id,
+      partyId: t.transporterId,
+      amount: t.rentAmount,
+      date: t.date,
+      spentOn: t.date,
+      notes: `Vehicle rent for trip ${t.billNo}`,
+      // Stamped so removeTripRent can find exactly this row again.
+      details: { tripId: t.id },
+    },
+  });
+}
+
+/** The category code a trip's rent is filed under. */
+const RENT_CATEGORY_CODE = "RENT";
+
+/**
+ * Remove a trip's rent expense, for the edit and delete paths.
+ *
+ * Matched on the tripId stamped into `details` rather than on amount + date,
+ * which would also catch a hand-entered expense that happened to agree.
+ */
+async function removeTripRentExpense(
+  tx: Prisma.TransactionClient,
+  tripId: string
+) {
+  await tx.expense.deleteMany({
+    where: { details: { path: ["tripId"], equals: tripId } },
+  });
 }
 
 const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
@@ -95,8 +147,7 @@ type Parsed = {
   date: Date;
   recipient: string;
   channel: TripChannel;
-  vehicleNo: string;
-  transporterName: string;
+  vehicleId: string;
   rentAmount: Prisma.Decimal | null;
   advancePaid: Prisma.Decimal | null;
   driverName: string | null;
@@ -115,8 +166,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const dateRaw = String(formData.get("date") ?? "");
   const recipient = clean(formData.get("recipient"));
   const channelRaw = clean(formData.get("channel"));
-  const vehicleNo = clean(formData.get("vehicleNo"));
-  const transporterName = clean(formData.get("transporterName"));
+  const vehicleId = clean(formData.get("vehicleId"));
   const rentRaw = clean(formData.get("rentAmount"));
   const advanceRaw = clean(formData.get("advancePaid"));
   const driverName = clean(formData.get("driverName"));
@@ -127,9 +177,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   if (!billNo) return { error: "Enter the bill number." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
   if (!recipient) return { error: "Enter the recipient (To)." };
-  if (!vehicleNo) return { error: "Enter the vehicle number." };
-  if (!transporterName)
-    return { error: "Enter the transporter — the rent is owed to them." };
+  if (!vehicleId) return { error: "Choose a vehicle." };
   if (!TRIP_CHANNELS.includes(channelRaw as TripChannel))
     return { error: "Choose a channel." };
   const channel = channelRaw as TripChannel;
@@ -216,8 +264,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
       date: new Date(dateRaw),
       recipient,
       channel,
-      vehicleNo,
-      transporterName,
+      vehicleId,
       rentAmount,
       advancePaid,
       driverName: driverName || null,
@@ -247,11 +294,14 @@ export async function createDelivery(
     // leaving a delivery note with no bill against it.
     const staged = await stageAttachmentFile(d.file);
     noteId = await prisma.$transaction(async (tx) => {
-      const vehicle = await findOrCreateVehicle(tx, {
-        companyId: company.id,
-        number: d.vehicleNo,
-        transporterName: d.transporterName,
+      // Scoped to the company and required live: a tampered form must not be
+      // able to point this trip at another company's truck, or at one that was
+      // archived precisely so it would stop being used.
+      const vehicle = await tx.vehicle.findFirst({
+        where: { id: d.vehicleId, companyId: company.id, archivedAt: null },
+        select: { id: true, transporterId: true },
       });
+      if (!vehicle) throw new Error("That vehicle is not available.");
       const note = await tx.deliveryNote.create({
         data: {
           companyId: company.id,
@@ -287,6 +337,7 @@ export async function createDelivery(
         rentAmount: d.rentAmount,
         advancePaid: d.advancePaid,
         date: d.date,
+        billNo: d.billNo,
       });
 
       await linkStagedAttachment(tx, staged, {
@@ -338,6 +389,7 @@ export async function deleteDelivery(
         sourceId: deliveryNoteId,
         sourceType: ["RENT", "PAYMENT"],
       });
+      await removeTripRentExpense(tx, deliveryNoteId);
       await unlinkAttachments(tx, "DELIVERY_NOTE", deliveryNoteId);
       // Removing the voucher answers any request against it. The request rows
       // themselves survive — they record that a correction was asked for.
@@ -375,15 +427,23 @@ export async function updateDelivery(
         // Scoped: an admin may only change or remove a voucher that belongs to
         // the company and centre they are currently working in.
         where: { id: deliveryNoteId, companyId: company.id, centreId: centre.id },
-        select: { companyId: true, centreId: true },
+        select: { companyId: true, centreId: true, vehicleId: true },
       });
       if (!existing) throw new Error("Delivery note not found.");
 
-      const updVehicle = await findOrCreateVehicle(tx, {
-        companyId: company.id,
-        number: d.vehicleNo,
-        transporterName: d.transporterName,
+      // Live vehicles, plus whichever one this trip already uses. Archiving a
+      // truck means "stop choosing this on new trips", not "this trip can
+      // never be corrected again" — and refusing here would leave an edit with
+      // no valid option to pick.
+      const updVehicle = await tx.vehicle.findFirst({
+        where: {
+          id: d.vehicleId,
+          companyId: company.id,
+          OR: [{ archivedAt: null }, { id: existing.vehicleId }],
+        },
+        select: { id: true, transporterId: true },
       });
+      if (!updVehicle) throw new Error("That vehicle is not available.");
 
       // The rent chain is rebuilt, not patched: editing a trip can change the
       // rent, the advance or the truck, and each of those moves a different
@@ -393,6 +453,9 @@ export async function updateDelivery(
         sourceId: deliveryNoteId,
         sourceType: ["RENT", "PAYMENT"],
       });
+      // ...and the rent expense it raised, or an edit that lowers the rent
+      // would leave the day charged the old figure as well as the new one.
+      await removeTripRentExpense(tx, deliveryNoteId);
 
       await tx.deliveryNoteLine.deleteMany({ where: { deliveryNoteId } });
       await tx.deliveryNote.update({
@@ -430,6 +493,7 @@ export async function updateDelivery(
         rentAmount: d.rentAmount,
         advancePaid: d.advancePaid,
         date: d.date,
+        billNo: d.billNo,
       });
 
       // A newly chosen image replaces the old bill rather than piling up

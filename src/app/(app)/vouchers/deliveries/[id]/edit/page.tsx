@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, requireSession } from "@/lib/session";
 import { toInputDate } from "@/lib/format";
+import { liveVehicles } from "@/lib/vehicle";
 import { updateDelivery } from "../../actions";
 import { DeliveryForm } from "../../delivery-form";
 import { ReviewPanel } from "../../../review-panel";
@@ -32,6 +33,20 @@ export default async function EditDeliveryPage({
     where: { linkedType: "DELIVERY_NOTE", linkedId: note.id },
   });
 
+  // The trip's own vehicle is added back if it has since been archived, so an
+  // edit always has its current truck to select.
+  const live = await liveVehicles(company.id);
+  const vehicles = live.some((v) => v.id === note.vehicleId)
+    ? live
+    : [
+        {
+          id: note.vehicleId,
+          number: `${note.vehicle.number} (archived)`,
+          transporterName: note.vehicle.transporter.name,
+        },
+        ...live,
+      ];
+
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-4">Edit Delivery Note</h1>
@@ -46,6 +61,7 @@ export default async function EditDeliveryPage({
       </div>
       <DeliveryForm
         action={updateDelivery.bind(null, note.id)}
+        vehicles={vehicles}
         initial={{
           billNo: note.billNo,
           date: toInputDate(note.date),
@@ -53,8 +69,7 @@ export default async function EditDeliveryPage({
           // back at this trip, not from a typed name (spec §3.2).
           recipient: note.recipient ?? "",
           channel: note.channel,
-          vehicleNo: note.vehicle.number,
-          transporterName: note.vehicle.transporter.name,
+          vehicleId: note.vehicleId,
           rentAmount: note.rentAmount?.toString() ?? "",
           advancePaid: note.advancePaid?.toString() ?? "",
           driverName: note.driverName ?? "",

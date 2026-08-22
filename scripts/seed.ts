@@ -270,7 +270,10 @@ async function main() {
         amount: D(rent),
         date: BUYING_DAY,
         spentOn: BUYING_DAY,
-        notes: `Rent for trip ${billNo}`,
+        notes: `Vehicle rent for trip ${billNo}`,
+        // Same stamp the delivery action writes, so removing a trip removes
+        // its rent expense whether the row came from here or from the app.
+        details: { tripId: trip.id },
       },
     });
   }
