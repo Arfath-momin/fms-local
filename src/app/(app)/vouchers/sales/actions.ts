@@ -13,6 +13,7 @@ import {
   type PostLedgerArgs,
 } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
+import { refreshTripStatus } from "@/lib/trip";
 import {
   SALE_TYPES,
   SALE_BUYER_TYPE,
@@ -66,6 +67,13 @@ type Parsed = {
   commissionRate: Prisma.Decimal | null;
   /** Withheld from a Market seller. Never netted against `amount`. */
   reserve: Prisma.Decimal | null;
+  /** Labour and sundry deductions on a market bill. */
+  otherDeduction: Prisma.Decimal | null;
+  /** The trip this bill came off. Required for MARKET/FACTORY/FISH_MILL. */
+  deliveryNoteId: string | null;
+  /** This bill carried the trip's rent — the last market stop. */
+  carriesRent: boolean;
+  rentDeducted: Prisma.Decimal | null;
   weight: Prisma.Decimal | null;
   netWeight: Prisma.Decimal | null;
   vehicleNo: string | null;
@@ -139,7 +147,14 @@ function parseLines(
   return { lines };
 }
 
-function parse(formData: FormData): { error: string } | { data: Parsed } {
+// Async: the trip has to be read to validate against it — its date, its
+// channel, its rent and whether another bill already claimed that rent.
+async function parse(
+  formData: FormData,
+  scope: { companyId: string; centreId: string },
+  /** Set when editing, so this sale does not collide with itself. */
+  editingSaleId?: string
+): Promise<{ error: string } | { data: Parsed }> {
   const type = String(formData.get("type") ?? "") as SaleType;
   if (!SALE_TYPES.includes(type)) return { error: "Choose a sale type." };
 
@@ -189,6 +204,10 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     commission: null as Prisma.Decimal | null,
     commissionRate: null as Prisma.Decimal | null,
     reserve: null as Prisma.Decimal | null,
+    otherDeduction: null as Prisma.Decimal | null,
+    deliveryNoteId: null as string | null,
+    carriesRent: false,
+    rentDeducted: null as Prisma.Decimal | null,
     weight: null as Prisma.Decimal | null,
     netWeight: null as Prisma.Decimal | null,
     vehicleNo: null as string | null,
@@ -203,24 +222,12 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
 
   if (type === "MARKET") {
     const totalBill = parseMoney(clean(formData.get("totalBill")));
-    const netBill = parseMoney(clean(formData.get("netBill")));
     if (!totalBill || totalBill.lte(0))
       return { error: "Total Bill must be a positive number." };
-    if (!netBill || netBill.lte(0))
-      return { error: "Net Bill must be a positive number." };
-    // Net is Total less the seller's profit and expenses, so it is a part of
-    // the gross and can never exceed it. Net is also what posts to the ledger,
-    // so an inverted pair silently overstates what the seller owes us.
-    if (netBill.greaterThan(totalBill))
-      return {
-        error:
-          `Net Bill (${netBill.toFixed(2)}) cannot be more than Total Bill ` +
-          `(${totalBill.toFixed(2)}) — net is the gross less the seller's ` +
-          `profit and expenses.`,
-      };
-    // The rate is per-bill now. Blank means no commission on this sale, which
-    // is a real case — not every Market bill carries one — so it is allowed
-    // rather than defaulted, and 0 stores nothing rather than a zero entry.
+
+    // The rate is per-bill. Blank means no commission on this sale, which is a
+    // real case — not every market bill carries one — so it is allowed rather
+    // than defaulted, and 0 stores nothing rather than a zero entry.
     const rateRaw = clean(formData.get("commissionRate"));
     let commissionRate: Prisma.Decimal | null = null;
     if (rateRaw) {
@@ -231,40 +238,68 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
         };
       commissionRate = parsed;
     }
-
-    // Withheld from the seller and held on their behalf. Deliberately NOT
-    // subtracted from `amount`: the net bill is what the seller owes for the
-    // fish, and netting a retention against it would misstate both the debt
-    // and the day's revenue.
-    const reserveRaw = clean(formData.get("reserve"));
-    let reserve: Prisma.Decimal | null = null;
-    if (reserveRaw) {
-      const parsed = parseMoney(reserveRaw);
-      if (!parsed || parsed.lt(0))
-        return { error: "Reserve cannot be negative." };
-      if (parsed.gt(totalBill))
-        return {
-          error:
-            `Reserve (${parsed.toFixed(2)}) cannot be more than Total Bill ` +
-            `(${totalBill.toFixed(2)}).`,
-        };
-      reserve = parsed.gt(0) ? parsed : null;
-    }
-
-    base.place = clean(formData.get("place")) || null;
-    base.vehicleNo = clean(formData.get("vehicleNo")) || null;
-    base.totalBill = totalBill;
-    base.commissionRate = commissionRate;
     // Computed through the same helper the form previews with, so the figure
     // the clerk approved and the figure stored are never two calculations.
-    base.commission =
+    const commission =
       commissionRate && commissionRate.gt(0)
         ? new Prisma.Decimal(
             commissionAmount(totalBill.toNumber(), commissionRate.toNumber())
           ).toDecimalPlaces(2)
         : null;
-    base.reserve = reserve;
-    amount = netBill; // Net Bill is what the seller owes us = the sale revenue
+
+    const otherDeduction = parseMoney(clean(formData.get("otherDeduction")));
+    if (otherDeduction && otherDeduction.lt(0))
+      return { error: "Labour / other cannot be negative." };
+
+    const reserve = parseMoney(clean(formData.get("reserve")));
+    if (reserve && reserve.lt(0)) return { error: "Reserve cannot be negative." };
+
+    // Rent is deducted on exactly ONE bill per trip — the last market stop,
+    // which paid the driver the balance on BFM's behalf. Both fields travel
+    // together: a figure without the flag is a typo, and the flag without a
+    // figure deducts nothing while claiming the trip is settled.
+    const carriesRent = clean(formData.get("carriesRent")) === "on";
+    const rentDeducted = parseMoney(clean(formData.get("rentDeducted")));
+    if (!carriesRent && rentDeducted && rentDeducted.gt(0))
+      return {
+        error:
+          "Rent is entered but this bill is not marked as carrying the " +
+          "trip's rent. Tick that, or clear the rent.",
+      };
+    if (carriesRent && (!rentDeducted || rentDeducted.lte(0)))
+      return {
+        error: "Enter the rent this bill carried, or untick the box.",
+      };
+
+    // Net is DERIVED, not typed. The bill reads
+    //     total − commission − labour − reserve − rent = net
+    // and deriving it is what stops a net that disagrees with its own working
+    // — which the ledger would then post as the seller's debt.
+    const deductions = (commission ?? ZERO)
+      .add(otherDeduction ?? ZERO)
+      .add(reserve ?? ZERO)
+      .add(rentDeducted ?? ZERO);
+    const netBill = totalBill.sub(deductions);
+    if (netBill.lt(0))
+      return {
+        error:
+          `The deductions come to ${deductions.toFixed(2)}, more than the ` +
+          `Total Bill of ${totalBill.toFixed(2)}. Check the figures.`,
+      };
+
+    base.place = clean(formData.get("place")) || null;
+    base.totalBill = totalBill;
+    base.commissionRate = commissionRate;
+    base.commission = commission;
+    base.otherDeduction =
+      otherDeduction && otherDeduction.gt(0) ? otherDeduction : null;
+    base.reserve = reserve && reserve.gt(0) ? reserve : null;
+    base.carriesRent = carriesRent;
+    base.rentDeducted = carriesRent ? rentDeducted : null;
+    // Net Bill is what the seller owes us for the fish. Commission, labour and
+    // reserve stay netted inside it and are never posted separately; only the
+    // rent is grossed back up at report time (see saleRevenue in lib/sale).
+    amount = netBill;
   } else if (type === "FACTORY") {
     const billAmount = parseMoney(clean(formData.get("amount")));
     if (!billAmount || billAmount.lte(0))
@@ -295,6 +330,88 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   // branch, because it is the one field that means the same thing on all four.
   base.notes = clean(formData.get("notes")) || null;
 
+  // --- the trip this bill came off (spec §4) ------------------------------
+  //
+  // LOCAL is the exception: a local buyer collects, so there is no trip.
+  const needsTrip = type === "MARKET" || type === "FACTORY" || type === "FISH_MILL";
+  const deliveryNoteId = clean(formData.get("deliveryNoteId")) || null;
+
+  if (needsTrip && !deliveryNoteId)
+    return {
+      error:
+        "Choose the trip this bill came off. Matching on date and vehicle " +
+        "text was never reliable, which is why the link is required.",
+    };
+
+  if (deliveryNoteId) {
+    const trip = await prisma.deliveryNote.findFirst({
+      where: { id: deliveryNoteId, ...scope },
+      select: {
+        id: true,
+        billNo: true,
+        date: true,
+        channel: true,
+        rentAmount: true,
+        advancePaid: true,
+      },
+    });
+    if (!trip)
+      return { error: "That trip does not belong to this company and centre." };
+
+    // The channel is what the truck went out as; a factory bill cannot have
+    // come off a market trip.
+    const wanted =
+      type === "MARKET" ? "MARKET" : type === "FACTORY" ? "FACTORY" : "FISH_MILL";
+    if (trip.channel !== wanted)
+      return {
+        error: `Trip ${trip.billNo} went out as ${trip.channel.toLowerCase().replace("_", " ")}, so it cannot carry a ${wanted.toLowerCase().replace("_", " ")} bill.`,
+      };
+
+    // One trip, one buying day. The sale's date is the trip's, full stop —
+    // a bill arriving three days later still belongs to the day the fish was
+    // bought, and that day is recorded on the trip.
+    if (trip.date.getTime() !== base.date.getTime())
+      return {
+        error:
+          `Trip ${trip.billNo} is for ${trip.date.toISOString().slice(0, 10)}, ` +
+          `but this bill is dated ${base.date.toISOString().slice(0, 10)}. ` +
+          `A bill takes its buying day from its trip.`,
+      };
+
+    if (base.carriesRent) {
+      // At most one bill per trip may carry the rent.
+      const alreadyCarrying = await prisma.sale.findFirst({
+        where: {
+          deliveryNoteId,
+          carriesRent: true,
+          ...(editingSaleId ? { id: { not: editingSaleId } } : {}),
+        },
+        select: { billNo: true },
+      });
+      if (alreadyCarrying)
+        return {
+          error:
+            `Bill ${alreadyCarrying.billNo} already carries the rent for trip ` +
+            `${trip.billNo}. Only the last stop does.`,
+        };
+
+      // ...and never more than the rent still unsettled on that trip. The
+      // advance already went to the driver, so what a market party can have
+      // paid him is the remainder.
+      const unsettled = (trip.rentAmount ?? ZERO).sub(trip.advancePaid ?? ZERO);
+      if (base.rentDeducted && base.rentDeducted.gt(unsettled))
+        return {
+          error:
+            `Trip ${trip.billNo} has ${unsettled.toFixed(2)} of rent still ` +
+            `unsettled (${(trip.rentAmount ?? ZERO).toFixed(2)} less an advance ` +
+            `of ${(trip.advancePaid ?? ZERO).toFixed(2)}), so this bill cannot ` +
+            `deduct ${base.rentDeducted.toFixed(2)}.`,
+        };
+    }
+
+    base.deliveryNoteId = trip.id;
+  }
+
   return { data: { ...base, amount } };
 }
 
@@ -314,6 +431,24 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
  * reserve is the seller's own money held back. Neither is netted against
  * `amount`, which stays what the seller owes for the fish.
  */
+/**
+ * The transporter a trip's truck belongs to — who the rent is owed to.
+ *
+ * Read from the trip rather than passed in, so the sale action never has to
+ * carry a transporter around that only one branch uses.
+ */
+async function tripTransporterId(
+  tx: Prisma.TransactionClient,
+  deliveryNoteId: string | null
+): Promise<string | null> {
+  if (!deliveryNoteId) return null;
+  const trip = await tx.deliveryNote.findUnique({
+    where: { id: deliveryNoteId },
+    select: { vehicle: { select: { transporterId: true } } },
+  });
+  return trip?.vehicle.transporterId ?? null;
+}
+
 async function postSaleLedger(
   tx: Prisma.TransactionClient,
   s: {
@@ -324,6 +459,10 @@ async function postSaleLedger(
     amount: Prisma.Decimal;
     commission: Prisma.Decimal | null;
     reserve: Prisma.Decimal | null;
+    /** Set only on the one market bill that carried the trip's rent. */
+    rentDeducted: Prisma.Decimal | null;
+    /** The trip's transporter, resolved by the caller. Null off-trip. */
+    transporterId: string | null;
     date: Date;
   }
 ) {
@@ -354,6 +493,30 @@ async function postSaleLedger(
   // party as SUM(sales.reserve) − SUM(reserve collections), which is what
   // keeps it per-party instead of pooled into one meaningless figure.
 
+  // The last market stop paid the driver the rent balance on BFM's behalf.
+  // Two entries, and both are needed (spec §2):
+  //
+  //   DEBIT  the transporter  — his rent is settled by that much
+  //   CREDIT the market party — they are not out of pocket for it
+  //
+  // The party's DEBIT above is the net bill, so after this credit they owe the
+  // net and nothing more, while the transporter's balance closes at zero. Post
+  // only one side and one of those two accounts is permanently wrong.
+  if (s.rentDeducted && s.rentDeducted.gt(0) && s.transporterId) {
+    const common = {
+      companyId: s.companyId,
+      centreId: s.centreId,
+      sourceType: "RENT_BY_PARTY" as const,
+      sourceId: s.id,
+      amount: s.rentDeducted,
+      date: s.date,
+    };
+    entries.push(
+      { ...common, partyId: s.transporterId, type: "DEBIT" as const },
+      { ...common, partyId: s.ledgerPartyId, type: "CREDIT" as const }
+    );
+  }
+
   await postLedgerEntries(tx, entries);
 }
 
@@ -371,6 +534,10 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
     commission: d.commission,
     commissionRate: d.commissionRate,
     reserve: d.reserve,
+    otherDeduction: d.otherDeduction,
+    deliveryNoteId: d.deliveryNoteId,
+    carriesRent: d.carriesRent,
+    rentDeducted: d.rentDeducted,
     notes: d.notes,
     weight: d.weight,
     netWeight: d.netWeight,
@@ -395,12 +562,17 @@ export async function createSale(
   formData: FormData
 ): Promise<SaleFormState> {
   const session = await requireEntry();
-  const parsed = parse(formData);
-  if ("error" in parsed) return { error: parsed.error };
-  const d = parsed.data;
+  // Scope first: parse validates the trip against this company and centre, so
+  // the scope has to be known before parsing rather than after.
   const scoped = await requireSubmittedScope(formData);
   if ("error" in scoped) return { error: scoped.error };
   const { company, centre } = scoped.scope;
+  const parsed = await parse(formData, {
+    companyId: company.id,
+    centreId: centre.id,
+  });
+  if ("error" in parsed) return { error: parsed.error };
+  const d = parsed.data;
 
   let saleId: string;
   try {
@@ -428,8 +600,14 @@ export async function createSale(
         amount: d.amount,
         commission: d.commission,
         reserve: d.reserve,
+        rentDeducted: d.rentDeducted,
+        transporterId: await tripTransporterId(tx, d.deliveryNoteId),
         date: d.date,
       });
+      // The trip moves DISPATCHED → PART_BILLED → CLOSED as its bills land.
+      // Derived from the boxes actually billed, not set by hand — a status
+      // somebody has to remember to change is one that goes stale.
+      await refreshTripStatus(tx, d.deliveryNoteId);
       await linkStagedAttachment(tx, staged, {
         companyId: company.id,
         centreId: centre.id,
@@ -451,7 +629,7 @@ export async function createSale(
  * Delete a sale outright.
  *
  * A Market sale posts to two ledgers — the buyer (or the CareOf agent) and the
- * house commission account — and removeLedgerEntries repairs both, because it
+ * the transporter's rent chain — and removeLedgerEntries repairs both, because it
  * collects the affected scopes from the entries themselves rather than from
  * the sale record. Ledger entries go before the row for the reason spelled out
  * on deletePurchase; the sale's lines cascade with it.
@@ -471,7 +649,7 @@ export async function deleteSale(
         // Scoped: an admin may only change or remove a voucher that belongs to
         // the company and centre they are currently working in.
         where: { id: saleId, companyId: company.id, centreId: centre.id },
-        select: { id: true },
+        select: { id: true, deliveryNoteId: true },
       });
       if (!existing) throw new Error("Sale not found.");
 
@@ -481,6 +659,11 @@ export async function deleteSale(
       // themselves survive — they record that a correction was asked for.
       await resolveReviews(tx, "SALE", saleId, session.userId);
       await tx.sale.delete({ where: { id: saleId } });
+      // After the delete, not before: the tally counts the trip's remaining
+      // bills, and this one has to be gone before that reads correctly. A trip
+      // whose only bill is removed goes back to DISPATCHED and reappears on
+      // the open-trips list, which is exactly right — it is out again.
+      await refreshTripStatus(tx, existing.deliveryNoteId);
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not delete sale." };
@@ -498,12 +681,18 @@ export async function updateSale(
   formData: FormData
 ): Promise<SaleFormState> {
   const session = await requireAdmin();
-  const parsed = parse(formData);
-  if ("error" in parsed) return { error: parsed.error };
-  const d = parsed.data;
-
   const { company, centre } = await getActiveScope();
   if (!centre) return { error: "No centre is selected." };
+
+  const parsed = await parse(
+    formData,
+    { companyId: company.id, centreId: centre.id },
+    // Editing: this sale must not be treated as another bill already claiming
+    // the trip's rent.
+    saleId
+  );
+  if ("error" in parsed) return { error: parsed.error };
+  const d = parsed.data;
 
   try {
     const staged = await stageAttachmentFile(d.file);
@@ -512,15 +701,26 @@ export async function updateSale(
         // Scoped: an admin may only change or remove a voucher that belongs to
         // the company and centre they are currently working in.
         where: { id: saleId, companyId: company.id, centreId: centre.id },
-        select: { companyId: true, centreId: true, date: true },
+        select: {
+          companyId: true,
+          centreId: true,
+          date: true,
+          // Needed so an edit that moves the bill to another trip can refresh
+          // the one it left as well as the one it joined.
+          deliveryNoteId: true,
+        },
       });
       if (!existing) throw new Error("Sale not found.");
 
       // Rebuilds the old ledger party's statement too, in case this edit
       // reassigns the buyer or routes the sale via a different CareOf agent.
+      // RENT_BY_PARTY is in the list because a market bill can post it against
+      // BOTH the market party and the transporter. Leaving those behind on an
+      // edit would keep the transporter's rent looking settled by a figure the
+      // bill no longer carries.
       await removeLedgerEntries(tx, {
         sourceId: saleId,
-        sourceType: ["SALE", "PAYMENT", "RECEIPT", "COMMISSION"],
+        sourceType: ["SALE", "PAYMENT", "RECEIPT", "RENT_BY_PARTY"],
       });
       await tx.saleLine.deleteMany({ where: { saleId } });
 
@@ -544,8 +744,15 @@ export async function updateSale(
         amount: d.amount,
         commission: d.commission,
         reserve: d.reserve,
+        rentDeducted: d.rentDeducted,
+        transporterId: await tripTransporterId(tx, d.deliveryNoteId),
         date: d.date,
       });
+      // Both trips, because an edit can move a bill from one to another: the
+      // trip it left may fall back to PART_BILLED, and the one it joined may
+      // now close.
+      await refreshTripStatus(tx, existing.deliveryNoteId);
+      await refreshTripStatus(tx, d.deliveryNoteId);
       // A newly chosen image replaces the old bill rather than piling up
       // beside it; leaving the field empty keeps whatever is attached.
       await replaceStagedAttachment(tx, staged, {

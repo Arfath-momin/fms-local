@@ -45,9 +45,13 @@ export type SaleInit = {
   careOfName: string;
   place: string;
   totalBill: string;
-  netBill: string;
   commissionRate: string;
   reserve: string;
+  otherDeduction: string;
+  /** The trip this bill came off. Required on MARKET/FACTORY/FISH_MILL. */
+  deliveryNoteId: string;
+  carriesRent: boolean;
+  rentDeducted: string;
   amount: string; // factory bill amount total
   weight: string;
   vehicleNo: string;
@@ -67,9 +71,22 @@ const BLANK_LINE: SaleLineInit = {
 
 const n = (v: string) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+/** A trip as the sale form needs it, already filtered to the right channel. */
+export type TripOption = {
+  id: string;
+  billNo: string;
+  /** Buying day, "YYYY-MM-DD" — the sale copies it rather than typing one. */
+  date: string;
+  vehicleNumber: string;
+  boxesDispatched: number;
+  /** Rent still to settle. Zero means no bill may carry rent for this trip. */
+  rentUnsettled: number;
+};
+
 export function SaleForm({
   type,
   action,
+  trips,
   initial,
   submitLabel,
   existingAttachments = 0,
@@ -78,6 +95,8 @@ export function SaleForm({
 }: {
   type: SaleType;
   action: (prev: SaleFormState, formData: FormData) => Promise<SaleFormState>;
+  /** Open trips for this company, centre and channel. Empty for LOCAL. */
+  trips: TripOption[];
   initial?: SaleInit;
   submitLabel: string;
   existingAttachments?: number;
@@ -95,7 +114,18 @@ export function SaleForm({
     initial?.lines?.length ? initial.lines : [BLANK_LINE]
   );
   const [totalBill, setTotalBill] = useState(initial?.totalBill ?? "");
-  const [netBill, setNetBill] = useState(initial?.netBill ?? "");
+  const [otherDeduction, setOtherDeduction] = useState(
+    initial?.otherDeduction ?? ""
+  );
+  const [carriesRent, setCarriesRent] = useState(initial?.carriesRent ?? false);
+  const [tripId, setTripId] = useState(initial?.deliveryNoteId ?? "");
+  // LOCAL is the one channel with no truck behind it — a local buyer collects.
+  const needsTrip = type !== "LOCAL";
+  // The buying day is the trip's, copied rather than typed. A bill arriving
+  // three days late still belongs to the day the fish was bought.
+  const tripDate =
+    trips.find((t) => t.id === tripId)?.date ?? initial?.date ?? today;
+  const [rentDeducted, setRentDeducted] = useState(initial?.rentDeducted ?? "");
   // Pre-filled rather than fixed: most bills are still 2%, but the clerk can
   // type whatever this one was agreed at. An existing sale keeps its own rate.
   const [commissionRate, setCommissionRate] = useState(
@@ -123,18 +153,26 @@ export function SaleForm({
   );
   const kgTotal = useMemo(() => lines.reduce((s, l) => s + rowKg(l), 0), [lines]);
 
-  // The sale amount (what posts to the ledger) depends on the type.
-  const amount =
-    type === "MARKET"
-      ? n(netBill)
-      : type === "FACTORY"
-        ? n(factoryAmount)
-        : lineTotal;
   // Same helper the action stores with, so the figure approved on screen and
   // the figure written to the database are never two calculations.
   const commission =
     type === "MARKET" ? commissionAmount(n(totalBill), n(commissionRate)) : 0;
-  const netOverTotal = n(netBill) > 0 && n(netBill) > n(totalBill);
+
+  // Net is DERIVED, never typed — see the summary block in the market section.
+  const netBill =
+    n(totalBill) -
+    commission -
+    n(otherDeduction) -
+    n(reserve) -
+    (carriesRent ? n(rentDeducted) : 0);
+
+  // The sale amount (what posts to the ledger) depends on the type.
+  const amount =
+    type === "MARKET"
+      ? netBill
+      : type === "FACTORY"
+        ? n(factoryAmount)
+        : lineTotal;
 
   return (
     <form action={formAction} className="max-w-3xl space-y-4">
@@ -171,25 +209,71 @@ export function SaleForm({
         </div>
       </div>
 
-      {/* The field that decides where the money lands. Fish bought on the 16th
-          and sold on the 18th belongs to the 16th, so that is the day whose
-          profit it counts toward — and the day this must name. */}
-      <div className="max-w-xs">
-        <label htmlFor="date" className={labelCls}>
-          Purchase Date
-        </label>
-        <DateField
-          id="date"
-          name="date"
-          required
-          defaultValue={initial?.date ?? today}
-          className={inputCls}
-        />
-        <p className="text-muted text-[12px] mt-1">
-          Which day&apos;s fish this is. The ledger, the Day Book and every
-          report use this date — not the sale date above.
-        </p>
-      </div>
+      {/* The trip this bill came off. Matching a bill to its truck on date and
+          vehicle text was never reliable, so the link is explicit and required
+          on every channel that goes out on a truck. */}
+      {needsTrip ? (
+        <div className="max-w-lg">
+          <label htmlFor="deliveryNoteId" className={labelCls}>
+            Trip
+          </label>
+          <select
+            id="deliveryNoteId"
+            name="deliveryNoteId"
+            required
+            value={tripId}
+            onChange={(e) => setTripId(e.target.value)}
+            className={inputCls}
+          >
+            <option value="" disabled>
+              Choose the trip this bill came off…
+            </option>
+            {trips.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.date} · {t.billNo} · {t.vehicleNumber}
+                {t.boxesDispatched > 0 ? ` · ${t.boxesDispatched} boxes` : ""}
+              </option>
+            ))}
+          </select>
+          {trips.length === 0 ? (
+            <p className="text-debit text-[12px] mt-1">
+              No open {SALE_TYPE_LABELS[type].toLowerCase()} trips.{" "}
+              <Link
+                href="/vouchers/deliveries/new"
+                className="underline underline-offset-2"
+              >
+                Enter the delivery note first
+              </Link>
+              .
+            </p>
+          ) : (
+            <p className="text-muted text-[12px] mt-1">
+              The buying day comes from the trip — one trip, one buying day.
+            </p>
+          )}
+        </div>
+      ) : (
+        // LOCAL has no trip: the buyer collects, so the buying day is typed.
+        <div className="max-w-xs">
+          <label htmlFor="date" className={labelCls}>
+            Purchase Date
+          </label>
+          <DateField
+            id="date"
+            name="date"
+            required
+            defaultValue={initial?.date ?? today}
+            className={inputCls}
+          />
+          <p className="text-muted text-[12px] mt-1">
+            Which day&apos;s fish this is. The ledger, the Day Book and every
+            report use this date — not the sale date above.
+          </p>
+        </div>
+      )}
+      {/* Posted, but never typed on a trip-linked bill: the action refuses a
+          date that disagrees with the trip's. */}
+      {needsTrip && <input type="hidden" name="date" value={tripDate} />}
 
 
       <div className="grid grid-cols-2 gap-4">
@@ -227,19 +311,6 @@ export function SaleForm({
               />
             </div>
             <div>
-              <label htmlFor="vehicleNo" className={labelCls}>
-                Vehicle No.
-              </label>
-              <input
-                id="vehicleNo"
-                name="vehicleNo"
-                defaultValue={initial?.vehicleNo ?? ""}
-                className={inputCls}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
               <label htmlFor="totalBill" className={labelCls}>
                 Total Bill (₹)
               </label>
@@ -253,48 +324,17 @@ export function SaleForm({
                 className={inputCls + " num text-right"}
               />
               <p className="text-muted text-[12px] mt-1">
-                Gross — includes seller profit + expenses.
+                Gross, before any deduction.
               </p>
             </div>
-            <div>
-              <label htmlFor="netBill" className={labelCls}>
-                Net Bill (₹)
-              </label>
-              <input
-                id="netBill"
-                name="netBill"
-                inputMode="decimal"
-                required
-                value={netBill}
-                onChange={(e) => setNetBill(e.target.value)}
-                aria-invalid={netOverTotal || undefined}
-                className={
-                  inputCls +
-                  " num text-right" +
-                  (netOverTotal ? " border-debit" : "")
-                }
-              />
-              {/* Caught here as well as on the server: net is what posts to
-                  the ledger, so an inverted pair overstates the debt, and
-                  finding that out only on submit wastes the whole form. */}
-              {netOverTotal ? (
-                <p className="text-debit text-[12px] mt-1">
-                  Net Bill cannot be more than Total Bill ({fmtMoney(n(totalBill))}).
-                </p>
-              ) : (
-                <p className="text-muted text-[12px] mt-1">
-                  What the seller pays us — posts to the ledger.
-                </p>
-              )}
-            </div>
           </div>
-          {/* Commission and reserve are the two amounts withheld from this
-              bill. Neither touches Net Bill: the seller still owes the net for
-              the fish, and netting a retention against it would misstate both
-              the debt and the day's revenue. They post to two standing
-              accounts — commission is the house's income, reserve is the
-              seller's own money held back — shown together under Ledgers. */}
-          <div className="grid grid-cols-2 gap-4">
+
+          {/* The market's deductions. Net Bill is DERIVED from these rather
+              than typed, because the bill reads
+                  total − commission − labour − reserve − rent = net
+              and a typed net can disagree with its own working — which the
+              ledger would then post as the seller's debt. */}
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label htmlFor="commissionRate" className={labelCls}>
                 Commission %
@@ -310,13 +350,27 @@ export function SaleForm({
               />
               <p className="text-muted text-[12px] mt-1">
                 {n(commissionRate) > 0 && n(totalBill) > 0
-                  ? `${commissionRate}% of ${fmtMoney(n(totalBill))} = ${fmtMoney(commission)}`
-                  : "Leave blank for no commission on this bill."}
+                  ? `${commissionRate}% = ${fmtMoney(commission)}`
+                  : "A cost the market charges us."}
               </p>
             </div>
             <div>
+              <label htmlFor="otherDeduction" className={labelCls}>
+                Labour / other (₹)
+              </label>
+              <input
+                id="otherDeduction"
+                name="otherDeduction"
+                inputMode="decimal"
+                value={otherDeduction}
+                onChange={(e) => setOtherDeduction(e.target.value)}
+                className={inputCls + " num text-right"}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
               <label htmlFor="reserve" className={labelCls}>
-                Reserve
+                Reserve (₹)
               </label>
               <input
                 id="reserve"
@@ -328,9 +382,69 @@ export function SaleForm({
                 placeholder="0.00"
               />
               <p className="text-muted text-[12px] mt-1">
-                Held back from the seller. Not deducted from Net Bill.
+                Withheld; collected at year end.
               </p>
             </div>
+          </div>
+
+          {/* Rent comes off exactly ONE bill per trip — the last stop, which
+              paid the driver the balance on BFM's behalf. */}
+          <div className="border border-line bg-surface px-4 py-3">
+            <label className="flex items-center gap-2 text-[13px]">
+              <input
+                type="checkbox"
+                name="carriesRent"
+                checked={carriesRent}
+                onChange={(e) => setCarriesRent(e.target.checked)}
+              />
+              This bill carried the trip&rsquo;s vehicle rent
+            </label>
+            {carriesRent && (
+              <div className="mt-2 max-w-xs">
+                <label htmlFor="rentDeducted" className={labelCls}>
+                  Rent deducted (₹)
+                </label>
+                <input
+                  id="rentDeducted"
+                  name="rentDeducted"
+                  inputMode="decimal"
+                  value={rentDeducted}
+                  onChange={(e) => setRentDeducted(e.target.value)}
+                  className={inputCls + " num text-right"}
+                />
+                <p className="text-muted text-[12px] mt-1">
+                  Settles that much of the transporter&rsquo;s rent. Counted as
+                  revenue, because the money did leave the business.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* The derived net, shown as the bill reads so the clerk can check
+              it against the paper in front of them. */}
+          <div className="border border-line-strong bg-surface px-4 py-3 text-[13px]">
+            <Row label="Total bill" value={n(totalBill)} />
+            <Row label="Less commission" value={-commission} />
+            <Row label="Less labour / other" value={-n(otherDeduction)} />
+            <Row label="Less reserve" value={-n(reserve)} />
+            {carriesRent && (
+              <Row label="Less vehicle rent" value={-n(rentDeducted)} />
+            )}
+            <div
+              className={
+                "flex justify-between border-t border-line-strong mt-1 pt-1 font-semibold " +
+                (netBill < 0 ? "text-debit" : "")
+              }
+            >
+              <span>Net bill — what the seller pays us</span>
+              <span className="num">{fmtMoney(netBill)}</span>
+            </div>
+            {netBill < 0 && (
+              <p className="text-debit text-[12px] mt-1">
+                The deductions come to more than the total bill. Check the
+                figures.
+              </p>
+            )}
           </div>
         </>
       )}
@@ -547,5 +661,16 @@ export function SaleForm({
         </Link>
       </div>
     </form>
+  );
+}
+
+/** One line of the market bill's working. Negative values read as deductions. */
+function Row({ label, value }: { label: string; value: number }) {
+  if (!value) return null;
+  return (
+    <div className="flex justify-between">
+      <span className="text-muted">{label}</span>
+      <span className="num">{fmtMoney(Math.abs(value))}</span>
+    </div>
   );
 }

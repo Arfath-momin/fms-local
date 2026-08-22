@@ -4,6 +4,7 @@ import type { SaleType } from "@/generated/prisma/enums";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { SALE_TYPES, SALE_TYPE_LABELS } from "@/lib/sale";
+import { openTripsForChannel } from "@/lib/trip";
 import { createSale } from "../actions";
 import { SaleForm } from "../sale-form";
 import { NoCentreNotice } from "../../../no-centre";
@@ -54,6 +55,15 @@ export default async function NewSalePage({
     );
   }
 
+  // LOCAL has no truck behind it, so no trip to offer.
+  const trips =
+    type === "LOCAL"
+      ? []
+      : await openTripsForChannel(
+          { companyId: company.id, centreId: centre.id },
+          type === "MARKET" ? "MARKET" : type === "FACTORY" ? "FACTORY" : "FISH_MILL"
+        );
+
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-1">
@@ -71,6 +81,7 @@ export default async function NewSalePage({
       <SaleForm
         type={type}
         action={createSale}
+        trips={trips}
         submitLabel="Save Sale"
         scope={scopeFieldValues({ company, centre })}
       />
