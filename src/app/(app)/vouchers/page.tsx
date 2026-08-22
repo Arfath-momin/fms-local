@@ -53,8 +53,18 @@ export default function VouchersPage() {
         >
           <div className="font-semibold text-[14px]">Delivery Note</div>
           <div className="text-muted text-[12px]">
-            Dispatch record only — bill no, vehicle, driver and item table. No
-            ledger or settlement.
+            The trip: one truck, one buying day, one channel. Its rent is
+            charged to that day once and credited to the transporter.
+          </div>
+        </Link>
+        <Link
+          href="/vouchers/reserve-collections/new"
+          className="block px-4 py-3 hover:bg-background border-b border-line"
+        >
+          <div className="font-semibold text-[14px]">Collect Reserve</div>
+          <div className="text-muted text-[12px]">
+            Money a market party withheld and is now paying back. Clears what
+            they hold; recognised as income on the day it arrived.
           </div>
         </Link>
         <Link
@@ -63,7 +73,8 @@ export default function VouchersPage() {
         >
           <div className="font-semibold text-[14px]">Expense</div>
           <div className="text-muted text-[12px]">
-            Ice, loaders, ladies, batha, canteen, rent.
+            Ice, loaders, ladies, batha, canteen and overheads. Vehicle
+            rent is not here — it comes off the trip.
           </div>
         </Link>
         {COMING.map((c) => (

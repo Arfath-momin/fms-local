@@ -16,6 +16,7 @@ import { findOrCreateParty } from "@/lib/party-db";
 import { refreshTripStatus } from "@/lib/trip";
 import {
   SALE_TYPES,
+  SALE_TYPE_LABELS,
   SALE_BUYER_TYPE,
   SALE_TYPE_ALLOWS_CARE_OF,
   commissionAmount,
@@ -324,6 +325,30 @@ async function parse(
     if (parsedLines.lines.length === 0) return { error: "Add at least one line item." };
     base.lines = parsedLines.lines;
     amount = parsedLines.lines.reduce((a, l) => a.add(l.total), ZERO);
+  }
+
+  // Deductions are MARKET-only (spec §4). Factory, fish mill and local buyers
+  // pay the bill in full — there is no commission to charge, nothing withheld,
+  // and BFM pays those drivers itself, so no rent comes off their bills.
+  //
+  // Checked here rather than trusted from the form, which merely hides the
+  // fields. A submitted deduction on one of those channels is either a
+  // tampered form or a bug, and silently ignoring it would understate what the
+  // buyer owes.
+  if (type !== "MARKET") {
+    const stray = (
+      ["commissionRate", "otherDeduction", "reserve", "rentDeducted"] as const
+    ).filter((f) => {
+      const v = parseMoney(clean(formData.get(f)));
+      return v !== null && v.gt(0);
+    });
+    if (clean(formData.get("carriesRent")) === "on") stray.push("carriesRent" as never);
+    if (stray.length > 0)
+      return {
+        error:
+          `A ${SALE_TYPE_LABELS[type].toLowerCase()} bill is paid in full — ` +
+          `it carries no ${stray.join(", ")}.`,
+      };
   }
 
   // Every sale type carries a remark. Read once here rather than in each

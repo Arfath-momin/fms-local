@@ -131,8 +131,11 @@ export default async function ProfitPrintPage({
               <td className="r num">{fmtMoney(r.purchase)}</td>
             </tr>
             <tr>
-              <td>Less expenses</td>
-              <td className="r num">{fmtMoney(r.expense)}</td>
+              {/* DIRECT costs only. This statement foots to gross, and gross
+                  is never charged an overhead — a salary is not a cost of this
+                  catch. Overheads appear in the net statement below. */}
+              <td>Less direct expenses</td>
+              <td className="r num">{fmtMoney(r.directExpense)}</td>
             </tr>
           </tbody>
           <tfoot>
@@ -142,6 +145,35 @@ export default async function ProfitPrintPage({
               </td>
               <td className="r num font-semibold">
                 {fmtMoney(r.grossProfit.abs())}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+
+        {/* The second tier. Overheads belong to the month, not to a catch, so
+            they never touch the gross figure above. */}
+        <table className="bill-table mt-4">
+          <tbody>
+            <tr>
+              <td>Gross profit</td>
+              <td className="r num">{fmtMoney(r.grossProfit)}</td>
+            </tr>
+            <tr>
+              <td>Less overheads</td>
+              <td className="r num">{fmtMoney(r.overheadExpense)}</td>
+            </tr>
+            <tr>
+              <td>Add reserve collected</td>
+              <td className="r num">{fmtMoney(r.reserveCollected)}</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td className="font-semibold">
+                {r.netProfit.greaterThanOrEqualTo(0) ? "Net profit" : "Net loss"}
+              </td>
+              <td className="r num font-semibold">
+                {fmtMoney(r.netProfit.abs())}
               </td>
             </tr>
           </tfoot>
