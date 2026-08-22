@@ -32,6 +32,7 @@ export default async function ExpenseDetailPage({
     include: {
       party: { select: { name: true } },
       category: { select: { id: true, code: true, name: true } },
+      lines: { orderBy: { id: "asc" } },
       createdBy: { select: { name: true } },
       updatedBy: { select: { name: true } },
     },
@@ -89,6 +90,10 @@ export default async function ExpenseDetailPage({
           {Object.entries(details).map(([k, v]) => (
             <Row key={k} label={k} value={String(v)} />
           ))}
+          {/* An itemised expense: the rows that sum into the total above. */}
+          {expense.lines.map((l) => (
+            <Row key={l.id} label={l.description} value={fmtMoney(l.amount)} />
+          ))}
           {expense.notes && <Row label="Notes" value={expense.notes} />}
         </dl>
         {meta}
@@ -118,6 +123,10 @@ export default async function ExpenseDetailPage({
 
   const initial = {
     categoryId: expense.categoryId,
+    lines: expense.lines.map((l) => ({
+      description: l.description,
+      amount: l.amount.toString(),
+    })),
     amount: expense.amount.toString(),
     date: toInputDate(expense.date),
     spentOn: toInputDate(expense.spentOn ?? expense.date),

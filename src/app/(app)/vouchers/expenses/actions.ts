@@ -24,8 +24,12 @@ import {
 
 export type ExpenseFormState = { error: string } | null;
 
+type ParsedLine = { description: string; amount: Prisma.Decimal };
+
 type Parsed = {
   categoryId: string;
+  /** Rows for an itemised category. Empty for every other kind. */
+  lines: ParsedLine[];
   /** The category's stable code — picks the entry spec in lib/expense. */
   categoryCode: string;
   categoryName: string;
@@ -61,7 +65,7 @@ async function parse(
   const category = categoryId
     ? await prisma.expenseCategory.findFirst({
         where: { id: categoryId, companyId, archivedAt: null },
-        select: { id: true, code: true, name: true },
+        select: { id: true, code: true, name: true, allowsLines: true },
       })
     : null;
   if (!category) return { error: "Choose a category." };
@@ -95,8 +99,32 @@ async function parse(
     if (raw) details[f.name] = raw;
   }
 
+  // An itemised category sums its rows into `amount` — the single figure every
+  // report reads. The detail is additive, so no report has to know whether a
+  // voucher was itemised.
+  const lines: ParsedLine[] = [];
+  if (category.allowsLines) {
+    const descriptions = formData.getAll("lineDescription").map(String);
+    const amounts = formData.getAll("lineAmount").map(String);
+    for (let i = 0; i < descriptions.length; i++) {
+      const description = descriptions[i].trim().replace(/\s+/g, " ");
+      const raw = (amounts[i] ?? "").trim();
+      // A wholly blank row is the empty one at the bottom of the table, not an
+      // error — the merchant added it and did not use it.
+      if (!description && !raw) continue;
+      if (!description) return { error: `Row ${i + 1} has an amount but no description.` };
+      if (!DECIMAL2.test(raw) || Number(raw) <= 0)
+        return { error: `Row ${i + 1} needs a positive amount (up to 2 decimals).` };
+      lines.push({ description, amount: new Prisma.Decimal(raw) });
+    }
+    if (lines.length === 0)
+      return { error: "Add at least one item." };
+  }
+
   let amount: Prisma.Decimal;
-  if (spec.amountEntered) {
+  if (category.allowsLines) {
+    amount = lines.reduce((a, l) => a.add(l.amount), new Prisma.Decimal(0));
+  } else if (spec.amountEntered) {
     const amountRaw = String(formData.get("amount") ?? "").trim();
     if (!DECIMAL2.test(amountRaw) || Number(amountRaw) <= 0)
       return { error: "Total must be a positive number (up to 2 decimals)." };
@@ -124,6 +152,7 @@ async function parse(
   return {
     data: {
       categoryId: category.id,
+      lines,
       categoryCode: category.code,
       categoryName: category.name,
       amount,
@@ -216,6 +245,7 @@ export async function createExpense(
           notes: d.notes,
           details: d.details,
           createdById: session.userId,
+          lines: { create: d.lines },
         },
       });
       await postExpenseLedger(tx, { ...expense, ...d });
@@ -305,11 +335,17 @@ export async function updateExpense(
         sourceType: ["EXPENSE", "PAYMENT"],
       });
       const partyId = await findOrCreateParty(tx, d.vendorName, "EXPENSE_VENDOR");
+      // Replaced wholesale rather than diffed: the set is small, and an edit
+      // can change the category from itemised to flat, which leaves rows that
+      // no longer belong to anything.
+      await tx.expenseLine.deleteMany({ where: { expenseId } });
+
       const expense = await tx.expense.update({
         where: { id: expenseId },
         data: {
           partyId,
           categoryId: d.categoryId,
+          lines: { create: d.lines },
           amount: d.amount,
           date: d.date,
           spentOn: d.spentOn,
