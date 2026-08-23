@@ -232,33 +232,29 @@ export function DeliveryForm({
             </p>
           )}
         </div>
-        {/* Only a market trip takes an advance. On every other channel BFM
-            pays the driver in full on his return, so the field is not merely
-            ignored there — the action rejects it. */}
-        {channel === "MARKET" ? (
-          <div>
-            <label htmlFor="advancePaid" className={labelCls}>
-              Advance Paid (₹)
-            </label>
-            <input
-              id="advancePaid"
-              name="advancePaid"
-              inputMode="decimal"
-              defaultValue={initial?.advancePaid ?? ""}
-              className={inputCls + " num text-right"}
-            />
-            <p className="text-muted text-[12px] mt-1">
-              Handed to the driver at departure. The TOTAL rent is not known
-              until he reports the kilometres — it is entered on the last
-              market bill, which is also when the rent is expensed.
-            </p>
-          </div>
-        ) : (
-          <div className="text-muted text-[12px] self-end pb-2">
-            No advance on a {channel === "FISH_MILL" ? "fish mill" : channel.toLowerCase()}{" "}
-            trip — the driver is paid in full on his return.
-          </div>
-        )}
+        {/* An advance goes out on every channel. What differs is who settles
+            the balance: a market trip's last stop hands the driver the rest and
+            deducts it from their bill, while on a factory, mill or local trip
+            he collects it from BFM when he gets back. */}
+        <div>
+          <label htmlFor="advancePaid" className={labelCls}>
+            Advance Paid (₹)
+          </label>
+          <input
+            id="advancePaid"
+            name="advancePaid"
+            inputMode="decimal"
+            defaultValue={initial?.advancePaid ?? ""}
+            className={inputCls + " num text-right"}
+          />
+          <p className="text-muted text-[12px] mt-1">
+            Handed to the driver at departure. The TOTAL rent is not known
+            until he reports the kilometres —{" "}
+            {channel === "MARKET"
+              ? "it is entered on the last market bill."
+              : "record it on this trip when he returns."}
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-4">

@@ -241,8 +241,8 @@ async function main() {
   const tripBillNo: Record<string, string> = {};
   for (const [key, channel, vehicle, transporterId, _rent, advance] of [
     ["market", "MARKET", vehicles.market.id, transporters.market, 20_000, 5_000],
-    ["factory", "FACTORY", vehicles.factory.id, transporters.factory, 8_000, null],
-    ["mill", "FISH_MILL", vehicles.mill.id, transporters.mill, 4_000, null],
+    ["factory", "FACTORY", vehicles.factory.id, transporters.factory, 8_000, 2_000],
+    ["mill", "FISH_MILL", vehicles.mill.id, transporters.mill, 4_000, 1_000],
   ] as const) {
     // Issued from the same counter the app uses, so seeded notes are numbered
     // exactly as entered ones would be.
@@ -432,20 +432,23 @@ async function main() {
     // BFM pays these drivers in full on their return, so the bill records the
     // rent and the payment goes straight to the transporter — no market party
     // stands in between.
+    // The driver took an advance at departure and collects the balance from
+    // BFM when he gets back — nobody stands in between on these channels.
     const rent = tripKey === "factory" ? 8_000 : 4_000;
+    const advance = tripKey === "factory" ? 2_000 : 1_000;
     const transporterId =
       tripKey === "factory" ? transporters.factory : transporters.mill;
     await recordTripRent({
       tripId: trips[tripKey],
       transporterId,
       payerId: null,
-      saleId: sale.id,
+      saleId: trips[tripKey],
       rentTotal: rent,
-      advance: 0,
+      advance,
       billNo: tripBillNo[tripKey],
     });
     await postLedgerEntries(prisma, [
-      { ...scope, partyId: transporterId, type: "DEBIT", sourceType: "PAYMENT", sourceId: sale.id, amount: D(rent), date: BUYING_DAY },
+      { ...scope, partyId: transporterId, type: "DEBIT", sourceType: "PAYMENT", sourceId: trips[tripKey], amount: D(rent - advance), date: BUYING_DAY },
     ]);
   }
 

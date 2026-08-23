@@ -193,15 +193,11 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
 
   if (lines.length === 0) return { error: "Add at least one line item." };
 
-  // Spec §4: only a market trip takes an advance. On every other channel BFM
-  // pays the driver in full on his return, so an advance there is a data-entry
-  // mistake that would leave the transporter's balance not closing at zero.
-  if (advancePaid && advancePaid.gt(0) && channel !== "MARKET")
-    return {
-      error:
-        "An advance is only paid on a market trip — on other channels the " +
-        "driver is paid in full on his return.",
-    };
+  // An advance is given on EVERY channel — the spec said MARKET only, and the
+  // merchant says otherwise about his own business. What actually differs is
+  // who settles the balance: on a market trip the last stop hands the driver
+  // the rest and deducts it from their bill; on a factory, mill or local trip
+  // he collects it from BFM when he gets back.
   // No cap against the total here: the total rent is not known until the
   // driver reports his kilometres, which happens on the last market bill. The
   // cap is enforced there instead.

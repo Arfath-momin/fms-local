@@ -17,6 +17,7 @@ import { DeleteVoucher } from "../../delete-voucher";
 import { ReviewPanel } from "../../review-panel";
 import { VoucherMeta } from "../../voucher-meta";
 import { deleteDelivery } from "../actions";
+import { RecordRentForm } from "../record-rent-form";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -131,6 +132,17 @@ export default async function DeliveryNotePage({
         <Field label="Driver Name" value={note.driverName ?? "—"} />
         <Field label="Mobile No." value={note.mobileNo ?? "—"} />
       </div>
+
+      {/* A market trip's rent is recorded on the bill that carried it, so this
+          appears only where BFM settles with the driver directly. */}
+      {mayEnter && note.channel !== "MARKET" && (
+        <RecordRentForm
+          deliveryNoteId={note.id}
+          advancePaid={Number(note.advancePaid ?? 0)}
+          transporterName={note.vehicle.transporter.name}
+          existingRent={note.rentAmount ? Number(note.rentAmount) : null}
+        />
+      )}
 
       {/* Trip reconciliation — one panel serving both tallies, because the
           question differs by channel:
