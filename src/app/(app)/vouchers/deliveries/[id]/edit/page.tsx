@@ -70,7 +70,6 @@ export default async function EditDeliveryPage({
           recipient: note.recipient ?? "",
           channel: note.channel,
           vehicleId: note.vehicleId,
-          rentAmount: note.rentAmount?.toString() ?? "",
           advancePaid: note.advancePaid?.toString() ?? "",
           driverName: note.driverName ?? "",
           mobileNo: note.mobileNo ?? "",

@@ -230,9 +230,12 @@ async function main() {
     }
   }
 
-  // --- three trips, rent expensed once each on the buying day -------------
+  // --- three trips: dispatched with an advance only -----------------------
+  // The rent column stays null here. Its total depends on the kilometres the
+  // driver covers, so it is recorded by the bill that reports it — see
+  // recordTripRent below.
   const trips: Record<string, string> = {};
-  for (const [key, channel, vehicle, transporterId, rent, advance, billNo] of [
+  for (const [key, channel, vehicle, transporterId, _rent, advance, billNo] of [
     ["market", "MARKET", vehicles.market.id, transporters.market, 20_000, 5_000, "DN-201"],
     ["factory", "FACTORY", vehicles.factory.id, transporters.factory, 8_000, null, "DN-202"],
     ["mill", "FISH_MILL", vehicles.mill.id, transporters.mill, 4_000, null, "DN-203"],
@@ -244,7 +247,9 @@ async function main() {
         date: BUYING_DAY,
         channel,
         vehicleId: vehicle,
-        rentAmount: D(rent),
+        // Left null: the total rent is not known until the driver reports his
+        // kilometres, which happens on the last market bill.
+        rentAmount: null,
         advancePaid: advance === null ? null : D(advance),
         // Recomputed below once the bills are in — DISPATCHED is only the
         // state a trip is created in.
@@ -257,28 +262,60 @@ async function main() {
     });
     trips[key] = trip.id;
 
-    // RENT credit, then the advance debited straight back. Only the market
-    // trip takes an advance — the others are paid in full on return.
+    // Only the advance at dispatch. The rent itself is credited and expensed
+    // by the bill that reports it — see the market and factory sections below.
+    if (advance) {
+      await postLedgerEntries(prisma, [
+        { ...scope, partyId: transporterId, type: "DEBIT", sourceType: "PAYMENT", sourceId: trip.id, amount: D(advance), date: BUYING_DAY },
+      ]);
+    }
+  }
+
+  /**
+   * Record a trip's rent at the moment it becomes known — on the bill.
+   *
+   * Credits the transporter the whole rent, debits back what the paying party
+   * handed the driver, and expenses it once to the buying day. Mirrors
+   * postSaleLedger + postTripRentExpense in the sale action, so seeded data
+   * reads exactly like data entered through the app.
+   */
+  async function recordTripRent(args: {
+    tripId: string;
+    transporterId: string;
+    payerId: string | null;
+    saleId: string;
+    rentTotal: number;
+    advance: number;
+    billNo: string;
+  }) {
+    const carried = args.rentTotal - args.advance;
+    await prisma.deliveryNote.update({
+      where: { id: args.tripId },
+      data: { rentAmount: D(args.rentTotal) },
+    });
     await postLedgerEntries(prisma, [
-      { ...scope, partyId: transporterId, type: "CREDIT", sourceType: "RENT", sourceId: trip.id, amount: D(rent), date: BUYING_DAY },
-      ...(advance
-        ? [{ ...scope, partyId: transporterId, type: "DEBIT" as const, sourceType: "PAYMENT" as const, sourceId: trip.id, amount: D(advance), date: BUYING_DAY }]
+      { ...scope, partyId: args.transporterId, type: "CREDIT", sourceType: "RENT", sourceId: args.saleId, amount: D(args.rentTotal), date: BUYING_DAY },
+      // RENT_BY_PARTY only when somebody actually stood in between. On a
+      // factory or mill trip BFM pays the driver directly, so the settling
+      // debit is an ordinary PAYMENT posted by the caller — posting both would
+      // settle the same rent twice and leave him looking overpaid.
+      ...(carried > 0 && args.payerId
+        ? [
+            { ...scope, partyId: args.transporterId, type: "DEBIT" as const, sourceType: "RENT_BY_PARTY" as const, sourceId: args.saleId, amount: D(carried), date: BUYING_DAY },
+            { ...scope, partyId: args.payerId, type: "CREDIT" as const, sourceType: "RENT_BY_PARTY" as const, sourceId: args.saleId, amount: D(carried), date: BUYING_DAY },
+          ]
         : []),
     ]);
-
-    // Rent is a DIRECT expense of the buying day, posted once from the trip.
     await prisma.expense.create({
       data: {
         ...scope,
         categoryId: categoryId["RENT"],
-        partyId: transporterId,
-        amount: D(rent),
+        partyId: args.transporterId,
+        amount: D(args.rentTotal),
         date: BUYING_DAY,
         spentOn: BUYING_DAY,
-        notes: `Vehicle rent for trip ${billNo}`,
-        // Same stamp the delivery action writes, so removing a trip removes
-        // its rent expense whether the row came from here or from the app.
-        details: { tripId: trip.id },
+        notes: `Vehicle rent for trip ${args.billNo}`,
+        details: { tripId: args.tripId },
       },
     });
   }
@@ -342,14 +379,16 @@ async function main() {
     ]);
 
     if (b.rent > 0) {
-      // They paid the driver the rent balance on BFM's behalf: debit the
-      // transporter (settling his rent) and credit the party (not out of
-      // pocket). The advance of 5,000 already went, so 15,000 remained.
-      const carried = b.rent - 5_000;
-      await postLedgerEntries(prisma, [
-        { ...scope, partyId: transporters.market, type: "DEBIT", sourceType: "RENT_BY_PARTY", sourceId: sale.id, amount: D(carried), date: BUYING_DAY },
-        { ...scope, partyId: b.party, type: "CREDIT", sourceType: "RENT_BY_PARTY", sourceId: sale.id, amount: D(carried), date: BUYING_DAY },
-      ]);
+      // The last stop is where the driver reports the trip's total rent.
+      await recordTripRent({
+        tripId: trips["market"],
+        transporterId: transporters.market,
+        payerId: b.party,
+        saleId: sale.id,
+        rentTotal: b.rent,
+        advance: 5_000,
+        billNo: "DN-201",
+      });
     }
   }
 
@@ -374,9 +413,23 @@ async function main() {
     await postLedgerEntries(prisma, [
       { ...scope, partyId, type: "DEBIT", sourceType: "SALE", sourceId: sale.id, amount: D(amount), date: BUYING_DAY },
     ]);
-    // BFM pays these drivers in full on their return.
+    // BFM pays these drivers in full on their return, so the bill records the
+    // rent and the payment goes straight to the transporter — no market party
+    // stands in between.
+    const rent = tripKey === "factory" ? 8_000 : 4_000;
+    const transporterId =
+      tripKey === "factory" ? transporters.factory : transporters.mill;
+    await recordTripRent({
+      tripId: trips[tripKey],
+      transporterId,
+      payerId: null,
+      saleId: sale.id,
+      rentTotal: rent,
+      advance: 0,
+      billNo: tripKey === "factory" ? "DN-202" : "DN-203",
+    });
     await postLedgerEntries(prisma, [
-      { ...scope, partyId: tripKey === "factory" ? transporters.factory : transporters.mill, type: "DEBIT", sourceType: "PAYMENT", sourceId: trips[tripKey], amount: D(tripKey === "factory" ? 8_000 : 4_000), date: BUYING_DAY },
+      { ...scope, partyId: transporterId, type: "DEBIT", sourceType: "PAYMENT", sourceId: sale.id, amount: D(rent), date: BUYING_DAY },
     ]);
   }
 

@@ -32,8 +32,6 @@ export type DeliveryInit = {
   /** Which channel this trip went to — decides how its rent settles. */
   channel: string;
   vehicleId: string;
-  /** Total rent agreed for the trip. Expensed once, on the buying day. */
-  rentAmount: string;
   /** MARKET only — paid to the driver before departure. */
   advancePaid: string;
   driverName: string;
@@ -93,12 +91,13 @@ export function DeliveryForm({
   const [channel, setChannel] = useState(initial?.channel ?? "MARKET");
   const today = businessToday();
 
-  // Same rule as lineTotalKg() on the server: kg is the weight of one box, so
-  // the row is kg × boxes — and a row shipped loose, with no boxes, counts its
-  // kg once rather than being multiplied away to nothing.
-  const rowKg = (l: DeliveryLineInit) => {
+  // The line's TOTAL weight, as typed. At dispatch the merchant weighs the
+  // consignment, not a sample box, so the total is what is actually known —
+  // and the per-box average is what gets worked out from it.
+  const rowKg = (l: DeliveryLineInit) => num(l.kg);
+  const rowKgPerBox = (l: DeliveryLineInit) => {
     const boxes = num(l.box);
-    return boxes > 0 ? num(l.kg) * boxes : num(l.kg);
+    return boxes > 0 ? num(l.kg) / boxes : 0;
   };
 
   const totals = useMemo(
@@ -228,21 +227,6 @@ export function DeliveryForm({
             </p>
           )}
         </div>
-        <div>
-          <label htmlFor="rentAmount" className={labelCls}>
-            Rent (₹)
-          </label>
-          <input
-            id="rentAmount"
-            name="rentAmount"
-            inputMode="decimal"
-            defaultValue={initial?.rentAmount ?? ""}
-            className={inputCls + " num text-right"}
-          />
-          <p className="text-muted text-[12px] mt-1">
-            Charged once, to this buying day.
-          </p>
-        </div>
         {/* Only a market trip takes an advance. On every other channel BFM
             pays the driver in full on his return, so the field is not merely
             ignored there — the action rejects it. */}
@@ -259,7 +243,9 @@ export function DeliveryForm({
               className={inputCls + " num text-right"}
             />
             <p className="text-muted text-[12px] mt-1">
-              Handed to the driver at departure.
+              Handed to the driver at departure. The TOTAL rent is not known
+              until he reports the kilometres — it is entered on the last
+              market bill, which is also when the rent is expensed.
             </p>
           </div>
         ) : (
@@ -303,9 +289,9 @@ export function DeliveryForm({
             <thead>
               <tr className="text-muted text-[12px] uppercase tracking-wide">
                 <th className="text-left font-semibold px-3 py-2">Particulars</th>
-                <th className="text-right font-semibold px-2 py-2 w-24">Kg / Box</th>
-                <th className="text-right font-semibold px-2 py-2 w-20">Box</th>
                 <th className="text-right font-semibold px-2 py-2 w-24">Total Kg</th>
+                <th className="text-right font-semibold px-2 py-2 w-20">Box</th>
+                <th className="text-right font-semibold px-2 py-2 w-24">Kg / Box</th>
                 <th className="text-right font-semibold px-2 py-2 w-24">Big Box</th>
                 <th className="text-right font-semibold px-2 py-2 w-20">Loose</th>
                 <th className="text-right font-semibold px-2 py-2 w-20">Pcs</th>
@@ -342,10 +328,11 @@ export function DeliveryForm({
                       className={cell}
                     />
                   </td>
-                  {/* Derived, so it cannot be typed out of agreement with the
-                      two cells beside it. */}
+                  {/* Derived from the two cells beside it — total ÷ boxes —
+                      so the average can never be typed out of agreement with
+                      the weight actually dispatched. */}
                   <td className="px-2 py-1 num text-right text-muted">
-                    {rowKg(l) || ""}
+                    {rowKgPerBox(l) ? rowKgPerBox(l).toFixed(2) : ""}
                   </td>
                   <td className="px-1 py-1">
                     <input

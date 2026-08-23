@@ -74,6 +74,13 @@ type Parsed = {
   deliveryNoteId: string | null;
   /** This bill carried the trip's rent — the last market stop. */
   carriesRent: boolean;
+  /**
+   * The TRIP's whole rent, as the driver reported it here. Written back to the
+   * trip, because rent is a property of the trip (invariant 2) — it is merely
+   * not KNOWN until this bill.
+   */
+  rentTotal: Prisma.Decimal | null;
+  /** What this market actually handed the driver: total − advance. Derived. */
   rentDeducted: Prisma.Decimal | null;
   weight: Prisma.Decimal | null;
   netWeight: Prisma.Decimal | null;
@@ -114,7 +121,10 @@ function parseLines(
     if (!p) return { error: "Every line needs a particular." };
     if (!DECIMAL3.test(qtyRaw) || Number(qtyRaw) <= 0)
       return { error: `Qty for “${p}” must be a positive number.` };
-    if (!DECIMAL2.test(rateRaw))
+    // Rate may be blank on a MARKET line: a market bill's money is the net the
+    // market paid, not a rate × weight. The line is there to record what went
+    // to whom, in boxes.
+    if (rateRaw && !DECIMAL2.test(rateRaw))
       return { error: `Rate for “${p}” must be a number.` };
 
     let box: number | null = null;
@@ -131,7 +141,9 @@ function parseLines(
     }
 
     const qtyKg = new Prisma.Decimal(qtyRaw);
-    const ratePerKg = new Prisma.Decimal(rateRaw);
+    // Blank rate is zero — see the note above; a market line carries boxes,
+    // not a price per kilo.
+    const ratePerKg = rateRaw ? new Prisma.Decimal(rateRaw) : new Prisma.Decimal(0);
     // Rate is per kilo, so it applies to the weight actually sold — box × kgs
     // on a Fish Mill row, where kgs is the weight of one box. Charging the
     // per-box weight would bill ten boxes at the price of one.
@@ -208,6 +220,7 @@ async function parse(
     otherDeduction: null as Prisma.Decimal | null,
     deliveryNoteId: null as string | null,
     carriesRent: false,
+    rentTotal: null as Prisma.Decimal | null,
     rentDeducted: null as Prisma.Decimal | null,
     weight: null as Prisma.Decimal | null,
     netWeight: null as Prisma.Decimal | null,
@@ -248,55 +261,58 @@ async function parse(
           ).toDecimalPlaces(2)
         : null;
 
-    const otherDeduction = parseMoney(clean(formData.get("otherDeduction")));
-    if (otherDeduction && otherDeduction.lt(0))
-      return { error: "Labour / other cannot be negative." };
-
     const reserve = parseMoney(clean(formData.get("reserve")));
     if (reserve && reserve.lt(0)) return { error: "Reserve cannot be negative." };
 
-    // Rent is deducted on exactly ONE bill per trip — the last market stop,
-    // which paid the driver the balance on BFM's behalf. Both fields travel
-    // together: a figure without the flag is a typo, and the flag without a
-    // figure deducts nothing while claiming the trip is settled.
+    // Rent lands on exactly ONE bill per trip — the last market stop. What the
+    // driver reports here is the TRIP'S WHOLE RENT, because it depends on the
+    // kilometres he covered and nobody could know it at dispatch. What THIS
+    // market handed him is that total less the advance already paid, and it is
+    // derived rather than typed so the two can never disagree.
     const carriesRent = clean(formData.get("carriesRent")) === "on";
-    const rentDeducted = parseMoney(clean(formData.get("rentDeducted")));
-    if (!carriesRent && rentDeducted && rentDeducted.gt(0))
+    const rentTotal = parseMoney(clean(formData.get("rentTotal")));
+    if (!carriesRent && rentTotal && rentTotal.gt(0))
       return {
         error:
-          "Rent is entered but this bill is not marked as carrying the " +
-          "trip's rent. Tick that, or clear the rent.",
+          "A rent total is entered but this bill is not marked as the last " +
+          "stop. Tick that, or clear the rent.",
       };
-    if (carriesRent && (!rentDeducted || rentDeducted.lte(0)))
+    if (carriesRent && (!rentTotal || rentTotal.lte(0)))
       return {
-        error: "Enter the rent this bill carried, or untick the box.",
+        error: "Enter the trip's total rent, or untick the last-stop box.",
       };
 
-    // Net is DERIVED, not typed. The bill reads
-    //     total − commission − labour − reserve − rent = net
-    // and deriving it is what stops a net that disagrees with its own working
-    // — which the ledger would then post as the seller's debt.
-    const deductions = (commission ?? ZERO)
-      .add(otherDeduction ?? ZERO)
-      .add(reserve ?? ZERO)
-      .add(rentDeducted ?? ZERO);
-    const netBill = totalBill.sub(deductions);
-    if (netBill.lt(0))
+    // Net Bill is TYPED, from the paper the market handed over — it is the
+    // figure they actually paid. "Labour / other" is then the balancing item:
+    // the market lists two or three sundry charges nobody itemises, and what
+    // is left after the named deductions is exactly what they came to.
+    const netBill = parseMoney(clean(formData.get("netBill")));
+    if (!netBill || netBill.lte(0))
+      return { error: "Net Bill must be a positive number." };
+    if (netBill.gt(totalBill))
       return {
         error:
-          `The deductions come to ${deductions.toFixed(2)}, more than the ` +
-          `Total Bill of ${totalBill.toFixed(2)}. Check the figures.`,
+          `Net Bill (${netBill.toFixed(2)}) cannot be more than Total Bill ` +
+          `(${totalBill.toFixed(2)}).`,
       };
+
+    // Market bills are itemised in BOXES — this is what the trip reconciles
+    // against the boxes it dispatched, and how "which market took how much of
+    // the load" is answered at all. The money still comes from the net below;
+    // the lines are the box record, not the arithmetic.
+    const marketLines = parseLines(formData, true);
+    if ("error" in marketLines) return { error: marketLines.error };
+    base.lines = marketLines.lines;
 
     base.place = clean(formData.get("place")) || null;
     base.totalBill = totalBill;
     base.commissionRate = commissionRate;
     base.commission = commission;
-    base.otherDeduction =
-      otherDeduction && otherDeduction.gt(0) ? otherDeduction : null;
     base.reserve = reserve && reserve.gt(0) ? reserve : null;
     base.carriesRent = carriesRent;
-    base.rentDeducted = carriesRent ? rentDeducted : null;
+    base.rentTotal = carriesRent ? rentTotal : null;
+    // rentDeducted is filled in below, once the trip's advance is known — it
+    // is total − advance, and the trip has to be read to know the advance.
     // Net Bill is what the seller owes us for the fish. Commission, labour and
     // reserve stay netted inside it and are never posted separately; only the
     // rent is grossed back up at report time (see saleRevenue in lib/sale).
@@ -404,6 +420,18 @@ async function parse(
       };
 
     if (base.carriesRent) {
+      // What THIS market handed the driver: the trip's whole rent less the
+      // advance that already went to him at departure. Derived, never typed —
+      // the two figures cannot then disagree.
+      const advance = trip.advancePaid ?? ZERO;
+      if (base.rentTotal && base.rentTotal.lt(advance))
+        return {
+          error:
+            `Trip ${trip.billNo} was given an advance of ${advance.toFixed(2)}, ` +
+            `so its total rent cannot be ${base.rentTotal.toFixed(2)}.`,
+        };
+      base.rentDeducted = (base.rentTotal ?? ZERO).sub(advance);
+
       // At most one bill per trip may carry the rent.
       const alreadyCarrying = await prisma.sale.findFirst({
         where: {
@@ -420,21 +448,32 @@ async function parse(
             `${trip.billNo}. Only the last stop does.`,
         };
 
-      // ...and never more than the rent still unsettled on that trip. The
-      // advance already went to the driver, so what a market party can have
-      // paid him is the remainder.
-      const unsettled = (trip.rentAmount ?? ZERO).sub(trip.advancePaid ?? ZERO);
-      if (base.rentDeducted && base.rentDeducted.gt(unsettled))
-        return {
-          error:
-            `Trip ${trip.billNo} has ${unsettled.toFixed(2)} of rent still ` +
-            `unsettled (${(trip.rentAmount ?? ZERO).toFixed(2)} less an advance ` +
-            `of ${(trip.advancePaid ?? ZERO).toFixed(2)}), so this bill cannot ` +
-            `deduct ${base.rentDeducted.toFixed(2)}.`,
-        };
+      // No cap against a stored total: this bill IS where the total is
+      // recorded. The only cap that means anything is the advance, checked
+      // above.
     }
 
     base.deliveryNoteId = trip.id;
+  }
+
+  // "Labour / other" is the BALANCING item on a market bill, derived last
+  // because the rent it has to balance against is only known once the trip has
+  // been read. The market lists two or three sundry charges nobody itemises;
+  // what is left between the total, the named deductions and the net they
+  // actually paid is exactly what those came to.
+  if (type === "MARKET" && base.totalBill) {
+    const named = (base.commission ?? ZERO)
+      .add(base.reserve ?? ZERO)
+      .add(base.rentDeducted ?? ZERO);
+    const other = base.totalBill.sub(named).sub(amount);
+    if (other.lt(0))
+      return {
+        error:
+          `Commission, reserve, rent and the net bill come to ` +
+          `${named.add(amount).toFixed(2)}, more than the Total Bill of ` +
+          `${base.totalBill.toFixed(2)}. Check the figures.`,
+      };
+    base.otherDeduction = other.gt(0) ? other : null;
   }
 
   return { data: { ...base, amount } };
@@ -484,7 +523,9 @@ async function postSaleLedger(
     amount: Prisma.Decimal;
     commission: Prisma.Decimal | null;
     reserve: Prisma.Decimal | null;
-    /** Set only on the one market bill that carried the trip's rent. */
+    /** The trip's whole rent, reported on this bill. */
+    rentTotal: Prisma.Decimal | null;
+    /** What this market handed the driver: total − advance. */
     rentDeducted: Prisma.Decimal | null;
     /** The trip's transporter, resolved by the caller. Null off-trip. */
     transporterId: string | null;
@@ -518,31 +559,129 @@ async function postSaleLedger(
   // party as SUM(sales.reserve) − SUM(reserve collections), which is what
   // keeps it per-party instead of pooled into one meaningless figure.
 
-  // The last market stop paid the driver the rent balance on BFM's behalf.
-  // Two entries, and both are needed (spec §2):
+  // The last market stop is where the trip's rent finally becomes known, so
+  // three things happen here rather than at dispatch (spec §2, invariant 2):
   //
-  //   DEBIT  the transporter  — his rent is settled by that much
-  //   CREDIT the market party — they are not out of pocket for it
+  //   1. RENT           credit the transporter the WHOLE rent — we owe it now
+  //   2. RENT_BY_PARTY  debit him what this market handed the driver, and
+  //                     credit the market party, who is not out of pocket
+  //   3. the rent EXPENSE, once, dated to the buying day
   //
-  // The party's DEBIT above is the net bill, so after this credit they owe the
-  // net and nothing more, while the transporter's balance closes at zero. Post
-  // only one side and one of those two accounts is permanently wrong.
-  if (s.rentDeducted && s.rentDeducted.gt(0) && s.transporterId) {
+  // Together with the advance already debited at dispatch, the transporter
+  // closes at zero:  +advance − total + (total − advance) = 0.
+  //
+  // Posting the credit and the settling debit as one net figure would hide the
+  // rent itself, and the expense is what the day's gross profit is charged.
+  if (s.rentTotal && s.rentTotal.gt(0) && s.transporterId) {
     const common = {
       companyId: s.companyId,
       centreId: s.centreId,
-      sourceType: "RENT_BY_PARTY" as const,
       sourceId: s.id,
-      amount: s.rentDeducted,
       date: s.date,
     };
-    entries.push(
-      { ...common, partyId: s.transporterId, type: "DEBIT" as const },
-      { ...common, partyId: s.ledgerPartyId, type: "CREDIT" as const }
-    );
+    entries.push({
+      ...common,
+      partyId: s.transporterId,
+      type: "CREDIT" as const,
+      sourceType: "RENT" as const,
+      amount: s.rentTotal,
+    });
+
+    if (s.rentDeducted && s.rentDeducted.gt(0)) {
+      entries.push(
+        {
+          ...common,
+          partyId: s.transporterId,
+          type: "DEBIT" as const,
+          sourceType: "RENT_BY_PARTY" as const,
+          amount: s.rentDeducted,
+        },
+        {
+          ...common,
+          partyId: s.ledgerPartyId,
+          type: "CREDIT" as const,
+          sourceType: "RENT_BY_PARTY" as const,
+          amount: s.rentDeducted,
+        }
+      );
+    }
   }
 
   await postLedgerEntries(tx, entries);
+}
+
+/** The category a trip's rent is filed under. */
+const RENT_CATEGORY_CODE = "RENT";
+
+/**
+ * Record the trip's rent as a DIRECT expense of the buying day, and write the
+ * total back onto the trip.
+ *
+ * Both belong here because this bill is the first moment the total is known.
+ * The expense is dated to the trip's buying day, not to the bill, so the cost
+ * lands on the day the fish was bought — which is what every report reads.
+ *
+ * Exactly one expense per trip: it is stamped with the trip id and cleared
+ * before being rewritten, so an edit that changes the rent cannot leave the day
+ * charged the old figure as well as the new one.
+ */
+async function postTripRentExpense(
+  tx: Prisma.TransactionClient,
+  t: {
+    companyId: string;
+    centreId: string;
+    transporterId: string | null;
+    deliveryNoteId: string | null;
+    rentTotal: Prisma.Decimal | null;
+    date: Date;
+  }
+) {
+  if (!t.deliveryNoteId) return;
+
+  // Cleared unconditionally: unticking "last stop" on an edit has to take the
+  // expense away as surely as ticking it creates one.
+  await tx.expense.deleteMany({
+    where: { details: { path: ["tripId"], equals: t.deliveryNoteId } },
+  });
+  await tx.deliveryNote.update({
+    where: { id: t.deliveryNoteId },
+    data: { rentAmount: t.rentTotal },
+  });
+
+  if (!t.rentTotal || t.rentTotal.lte(0)) return;
+
+  const category = await tx.expenseCategory.findUnique({
+    where: {
+      companyId_code: { companyId: t.companyId, code: RENT_CATEGORY_CODE },
+    },
+    select: { id: true },
+  });
+  if (!category)
+    throw new Error(
+      `No "${RENT_CATEGORY_CODE}" expense category exists for this company — ` +
+        `add one under Masters before recording a trip's rent.`
+    );
+
+  const trip = await tx.deliveryNote.findUnique({
+    where: { id: t.deliveryNoteId },
+    select: { billNo: true, date: true },
+  });
+
+  await tx.expense.create({
+    data: {
+      companyId: t.companyId,
+      centreId: t.centreId,
+      categoryId: category.id,
+      partyId: t.transporterId,
+      amount: t.rentTotal,
+      // The TRIP's buying day, not this bill's date — the cost belongs to the
+      // day the fish was bought.
+      date: trip?.date ?? t.date,
+      spentOn: t.date,
+      notes: `Vehicle rent for trip ${trip?.billNo ?? ""}`.trim(),
+      details: { tripId: t.deliveryNoteId },
+    },
+  });
 }
 
 function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
@@ -625,8 +764,19 @@ export async function createSale(
         amount: d.amount,
         commission: d.commission,
         reserve: d.reserve,
+        rentTotal: d.rentTotal,
         rentDeducted: d.rentDeducted,
         transporterId: await tripTransporterId(tx, d.deliveryNoteId),
+        date: d.date,
+      });
+      // The rent expense and the write-back to the trip. Both live here
+      // because this bill is the first moment the total is known.
+      await postTripRentExpense(tx, {
+        companyId: company.id,
+        centreId: centre.id,
+        transporterId: await tripTransporterId(tx, d.deliveryNoteId),
+        deliveryNoteId: d.deliveryNoteId,
+        rentTotal: d.rentTotal,
         date: d.date,
       });
       // The trip moves DISPATCHED → PART_BILLED → CLOSED as its bills land.
@@ -679,6 +829,17 @@ export async function deleteSale(
       if (!existing) throw new Error("Sale not found.");
 
       await removeLedgerEntries(tx, { sourceId: saleId });
+      // If this was the bill that recorded the trip's rent, the rent goes with
+      // it: the expense is cleared and the trip's total returns to unknown,
+      // which is honest — nothing has reported the kilometres any more.
+      await postTripRentExpense(tx, {
+        companyId: company.id,
+        centreId: centre.id,
+        transporterId: null,
+        deliveryNoteId: existing.deliveryNoteId,
+        rentTotal: null,
+        date: new Date(),
+      });
       await unlinkAttachments(tx, "SALE", saleId);
       // Removing the voucher answers any request against it. The request rows
       // themselves survive — they record that a correction was asked for.
@@ -769,8 +930,19 @@ export async function updateSale(
         amount: d.amount,
         commission: d.commission,
         reserve: d.reserve,
+        rentTotal: d.rentTotal,
         rentDeducted: d.rentDeducted,
         transporterId: await tripTransporterId(tx, d.deliveryNoteId),
+        date: d.date,
+      });
+      // The rent expense and the write-back to the trip. Both live here
+      // because this bill is the first moment the total is known.
+      await postTripRentExpense(tx, {
+        companyId: company.id,
+        centreId: centre.id,
+        transporterId: await tripTransporterId(tx, d.deliveryNoteId),
+        deliveryNoteId: d.deliveryNoteId,
+        rentTotal: d.rentTotal,
         date: d.date,
       });
       // Both trips, because an edit can move a bill from one to another: the

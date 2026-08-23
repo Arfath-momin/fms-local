@@ -189,7 +189,9 @@ export async function refreshTripStatus(
 export async function openTripsForChannel(
   scope: { companyId: string; centreId: string },
   channel: TripChannel,
-  includeTripId?: string | null
+  includeTripId?: string | null,
+  /** The bill being edited — its own boxes count as still available. */
+  excludeSaleId?: string | null
 ) {
   const trips = await prisma.deliveryNote.findMany({
     where: {
@@ -210,12 +212,13 @@ export async function openTripsForChannel(
       rentAmount: true,
       advancePaid: true,
       vehicle: { select: { number: true } },
-      lines: { select: { kg: true, box: true } },
+      lines: { select: { particulars: true, kg: true, box: true } },
       sales: {
         select: {
+          id: true,
           amount: true,
           rentDeducted: true,
-          lines: { select: { qtyKg: true, box: true } },
+          lines: { select: { particular: true, qtyKg: true, box: true } },
         },
       },
     },
@@ -229,7 +232,63 @@ export async function openTripsForChannel(
       date: t.date.toISOString().slice(0, 10),
       vehicleNumber: t.vehicle.number,
       boxesDispatched: tally.boxesDispatched,
-      rentUnsettled: tally.rentUnsettled.toNumber(),
+      advancePaid: (t.advancePaid ?? ZERO).toNumber(),
+      rentAlreadyRecorded: t.rentAmount !== null,
+      // What is left to bill, by particular. This is what a market bill starts
+      // from: the trip went out with 100 bangdha and 50 prawns, an earlier
+      // market took 40 bangdha, and this one is offered the remaining 60 and
+      // 50. Pre-filling the FULL load instead would let three bills quietly
+      // add up to more than ever went out.
+      remaining: remainingByParticular(t, excludeSaleId),
     };
   });
+}
+
+/**
+ * Boxes and weight still unbilled on a trip, per particular.
+ *
+ * `excludeSaleId` leaves out the bill being edited, so re-opening a bill offers
+ * back the boxes it already claimed rather than showing them as taken.
+ */
+function remainingByParticular(
+  trip: {
+    lines: { particulars: string; kg: Prisma.Decimal; box: number }[];
+    sales: {
+      id: string;
+      lines: { particular: string; qtyKg: Prisma.Decimal; box: number | null }[];
+    }[];
+  },
+  excludeSaleId?: string | null
+) {
+  const out = new Map<string, { particular: string; box: number; kg: Prisma.Decimal }>();
+  for (const l of trip.lines) {
+    const key = l.particulars.trim().toLowerCase();
+    const hit = out.get(key);
+    if (hit) {
+      hit.box += l.box;
+      hit.kg = hit.kg.add(l.kg);
+    } else {
+      out.set(key, { particular: l.particulars, box: l.box, kg: l.kg });
+    }
+  }
+
+  for (const sale of trip.sales) {
+    if (excludeSaleId && sale.id === excludeSaleId) continue;
+    for (const l of sale.lines) {
+      const key = l.particular.trim().toLowerCase();
+      const hit = out.get(key);
+      if (!hit) continue;
+      hit.box -= l.box ?? 0;
+      hit.kg = hit.kg.sub(l.qtyKg);
+    }
+  }
+
+  return [...out.values()]
+    // A particular already fully billed drops off rather than showing zero.
+    .filter((r) => r.box > 0 || r.kg.gt(0))
+    .map((r) => ({
+      particular: r.particular,
+      box: Math.max(0, r.box),
+      kg: r.kg.gt(0) ? r.kg.toNumber() : 0,
+    }));
 }

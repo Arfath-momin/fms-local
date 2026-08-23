@@ -27,92 +27,48 @@ const TRIP_CHANNELS: TripChannel[] = [
 ];
 
 /**
- * The rent settlement chain for one trip (spec §2).
+ * What a trip posts at dispatch: the advance, and nothing else.
  *
- * Rent is a property of the TRIP, entered once and dated to the buying day.
- * It is credited to the transporter — we owe him — and the advance is debited
- * straight back, because that money has already left. What remains open is
- * exactly what is still unpaid, which is the signal the outstanding screen
- * exists to show. A market party paying the driver the balance closes the rest
- * later, through RENT_BY_PARTY on the sale that carries it.
+ * The total rent is NOT known here. It depends on the kilometres the driver
+ * actually covers, which he reports at the end of the run — so it is entered on
+ * the last market bill, and that is where the rent is expensed and the balance
+ * settled (see postSaleLedger).
  *
- * Deliberately NOT a separate rent expense voucher: that would be the second
- * rent expense, and the day would be charged twice.
+ * The advance is a settlement against a rent not yet recorded, so it leaves the
+ * transporter's balance POSITIVE — we have prepaid him. That is honest: until
+ * the rent lands, a prepayment is exactly what it is. It closes to zero when
+ * the total arrives.
+ *
+ * Deliberately no expense row here. Rent is expensed exactly once, and doing it
+ * twice — once for the advance, once for the total — is the mistake invariant 2
+ * exists to prevent.
  */
-async function postTripRent(
+async function postTripAdvance(
   tx: Prisma.TransactionClient,
   t: {
     companyId: string;
     centreId: string;
     transporterId: string;
     id: string;
-    rentAmount: Prisma.Decimal | null;
     advancePaid: Prisma.Decimal | null;
     date: Date;
-    billNo: string;
   }
 ) {
-  if (!t.rentAmount || t.rentAmount.lte(0)) return;
-
-  const common = {
-    companyId: t.companyId,
-    centreId: t.centreId,
-    partyId: t.transporterId,
-    sourceId: t.id,
-    date: t.date,
-  };
+  if (!t.advancePaid || t.advancePaid.lte(0)) return;
 
   await postLedgerEntries(tx, [
-    { ...common, type: "CREDIT" as const, sourceType: "RENT" as const, amount: t.rentAmount },
-    ...(t.advancePaid && t.advancePaid.gt(0)
-      ? [
-          {
-            ...common,
-            type: "DEBIT" as const,
-            sourceType: "PAYMENT" as const,
-            amount: t.advancePaid,
-          },
-        ]
-      : []),
-  ]);
-
-  // The rent is also a DIRECT cost of the buying day, and this is the ONLY
-  // place it is expensed (spec §2, invariant 2). There is deliberately no rent
-  // expense voucher: one would be the second charge for the same journey, and
-  // the day would carry the cost twice.
-  //
-  // The expense carries no ledger entry of its own — the transporter is
-  // already credited above, and posting again would double what he is owed.
-  // Profit reads the expense table, not the ledger, so the cost still counts.
-  const rentCategory = await tx.expenseCategory.findUnique({
-    where: { companyId_code: { companyId: t.companyId, code: RENT_CATEGORY_CODE } },
-    select: { id: true },
-  });
-  if (!rentCategory) {
-    throw new Error(
-      `No "${RENT_CATEGORY_CODE}" expense category exists for this company — ` +
-        `add one under Masters before entering a trip with rent.`
-    );
-  }
-
-  await tx.expense.create({
-    data: {
+    {
       companyId: t.companyId,
       centreId: t.centreId,
-      categoryId: rentCategory.id,
       partyId: t.transporterId,
-      amount: t.rentAmount,
+      type: "DEBIT" as const,
+      sourceType: "PAYMENT" as const,
+      sourceId: t.id,
+      amount: t.advancePaid,
       date: t.date,
-      spentOn: t.date,
-      notes: `Vehicle rent for trip ${t.billNo}`,
-      // Stamped so removeTripRent can find exactly this row again.
-      details: { tripId: t.id },
     },
-  });
+  ]);
 }
-
-/** The category code a trip's rent is filed under. */
-const RENT_CATEGORY_CODE = "RENT";
 
 /**
  * Remove a trip's rent expense, for the edit and delete paths.
@@ -148,7 +104,6 @@ type Parsed = {
   recipient: string;
   channel: TripChannel;
   vehicleId: string;
-  rentAmount: Prisma.Decimal | null;
   advancePaid: Prisma.Decimal | null;
   driverName: string | null;
   mobileNo: string | null;
@@ -167,7 +122,6 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const recipient = clean(formData.get("recipient"));
   const channelRaw = clean(formData.get("channel"));
   const vehicleId = clean(formData.get("vehicleId"));
-  const rentRaw = clean(formData.get("rentAmount"));
   const advanceRaw = clean(formData.get("advancePaid"));
   const driverName = clean(formData.get("driverName"));
   const mobileNo = clean(formData.get("mobileNo"));
@@ -182,12 +136,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     return { error: "Choose a channel." };
   const channel = channelRaw as TripChannel;
 
-  let rentAmount: Prisma.Decimal | null = null;
-  if (rentRaw) {
-    if (!DECIMAL2.test(rentRaw))
-      return { error: "Rent must be a number (up to 2 decimals)." };
-    rentAmount = new Prisma.Decimal(rentRaw);
-  }
+
 
   let advancePaid: Prisma.Decimal | null = null;
   if (advanceRaw) {
@@ -255,8 +204,9 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
         "An advance is only paid on a market trip — on other channels the " +
         "driver is paid in full on his return.",
     };
-  if (advancePaid && rentAmount && advancePaid.gt(rentAmount))
-    return { error: "The advance cannot be more than the rent." };
+  // No cap against the total here: the total rent is not known until the
+  // driver reports his kilometres, which happens on the last market bill. The
+  // cap is enforced there instead.
 
   return {
     data: {
@@ -265,7 +215,6 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
       recipient,
       channel,
       vehicleId,
-      rentAmount,
       advancePaid,
       driverName: driverName || null,
       mobileNo: mobileNo || null,
@@ -311,7 +260,9 @@ export async function createDelivery(
           recipient: d.recipient,
           channel: d.channel,
           vehicleId: vehicle.id,
-          rentAmount: d.rentAmount,
+          // Left null on purpose: the total rent is not known until the driver
+          // reports his kilometres, and the last market bill writes it back.
+          rentAmount: null,
           advancePaid: d.advancePaid,
           driverName: d.driverName,
           mobileNo: d.mobileNo,
@@ -329,15 +280,13 @@ export async function createDelivery(
           },
         },
       });
-      await postTripRent(tx, {
+      await postTripAdvance(tx, {
         companyId: company.id,
         centreId: centre.id,
         transporterId: vehicle.transporterId,
         id: note.id,
-        rentAmount: d.rentAmount,
         advancePaid: d.advancePaid,
         date: d.date,
-        billNo: d.billNo,
       });
 
       await linkStagedAttachment(tx, staged, {
@@ -466,7 +415,8 @@ export async function updateDelivery(
           recipient: d.recipient,
           channel: d.channel,
           vehicleId: updVehicle.id,
-          rentAmount: d.rentAmount,
+          // rentAmount is deliberately absent: it belongs to the market bill
+          // that recorded it, and editing the trip must not wipe it.
           advancePaid: d.advancePaid,
           driverName: d.driverName,
           mobileNo: d.mobileNo,
@@ -485,15 +435,13 @@ export async function updateDelivery(
           },
         },
       });
-      await postTripRent(tx, {
+      await postTripAdvance(tx, {
         companyId: company.id,
         centreId: centre.id,
         transporterId: updVehicle.transporterId,
         id: deliveryNoteId,
-        rentAmount: d.rentAmount,
         advancePaid: d.advancePaid,
         date: d.date,
-        billNo: d.billNo,
       });
 
       // A newly chosen image replaces the old bill rather than piling up

@@ -29,6 +29,8 @@ export default async function EditSalePage({
       party: { select: { name: true } },
       careOfParty: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
+      // The trip carries the rent total this bill recorded.
+      deliveryNote: { select: { rentAmount: true } },
     },
   });
   if (!sale) notFound();
@@ -52,7 +54,9 @@ export default async function EditSalePage({
             : sale.type === "FACTORY"
               ? "FACTORY"
               : "FISH_MILL",
-          sale.deliveryNoteId
+          sale.deliveryNoteId,
+          // This bill's own boxes count as still available when re-opening it.
+          sale.id
         );
 
   return (
@@ -83,12 +87,14 @@ export default async function EditSalePage({
           commissionRate: sale.commissionRate?.toString() ?? "",
           reserve: sale.reserve?.toString() ?? "",
           totalBill: sale.totalBill?.toString() ?? "",
-          // Net is not carried back — it is derived from the deductions, so a
-          // stored value would only be a second answer that could disagree.
-          otherDeduction: sale.otherDeduction?.toString() ?? "",
+          // Labour / other is not carried back — it is the balancing item,
+          // re-derived from the figures beside it, so a stored value would
+          // only be a second answer that could disagree.
+          netBill: sale.type === "MARKET" ? sale.amount.toString() : "",
           deliveryNoteId: sale.deliveryNoteId ?? "",
           carriesRent: sale.carriesRent,
-          rentDeducted: sale.rentDeducted?.toString() ?? "",
+          // The trip's stored total — this bill is what recorded it.
+          rentTotal: sale.deliveryNote?.rentAmount?.toString() ?? "",
           amount: sale.type === "FACTORY" ? sale.amount.toString() : "",
           weight: sale.weight?.toString() ?? "",
           vehicleNo: sale.vehicleNo ?? "",
