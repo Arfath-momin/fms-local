@@ -126,16 +126,13 @@ export function DeliveryForm({
       <ScopeFields scope={scope} />
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label htmlFor="billNo" className={labelCls}>
-            Bill No.
-          </label>
-          <input
-            id="billNo"
-            name="billNo"
-            required
-            defaultValue={initial?.billNo ?? ""}
-            className={inputCls}
-          />
+          <label className={labelCls}>Note No.</label>
+          {/* Issued by the system, not typed. A delivery note is BFM's own
+              document, so the number is ours — and two clerks entering at once
+              must not be able to produce the same one. */}
+          <div className="border border-line bg-background px-3 py-2 text-sm num text-muted">
+            {initial?.billNo || "Assigned on save (DN-…)"}
+          </div>
         </div>
         <div>
           <label htmlFor="date" className={labelCls}>

@@ -5,6 +5,10 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
+import {
+  nextDocumentNo,
+  purchaseSeriesPrefix,
+} from "@/lib/document-series";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { FIXED_PURCHASE_PARTY, purchaseHasLineBoats } from "@/lib/party";
@@ -154,6 +158,25 @@ async function resolveLineBoats(
   return out;
 }
 
+/**
+ * The number this purchase will carry.
+ *
+ * Issued inside the caller's transaction for Private and Local, so a failed
+ * save rolls the number back rather than leaving a gap. Society and KFDC keep
+ * the typed one — losing the society's own number would mean losing the
+ * reference they quote back when there is a query.
+ */
+async function resolvePurchaseBillNo(
+  tx: Prisma.TransactionClient,
+  companyId: string,
+  d: { type: PurchaseType; billNo: string | null }
+): Promise<string | null> {
+  const prefix = purchaseSeriesPrefix(d.type);
+  if (!prefix) return d.billNo;
+  // An edit keeps the number it was issued; only a new voucher takes one.
+  return d.billNo ?? (await nextDocumentNo(tx, companyId, prefix));
+}
+
 /** The line rows to write, with each boat already resolved to an id. */
 async function lineData(tx: Prisma.TransactionClient, lines: ParsedLine[]) {
   const boatIds = await resolveLineBoats(tx, lines);
@@ -236,7 +259,10 @@ export async function createPurchase(
           companyId: company.id,
           centreId: centre.id,
           partyId,
-          billNo: d.billNo,
+          // Private and Local purchases have no supplier bill to copy a number
+          // from, so BFM issues one. Society and KFDC bills arrive with the
+          // society's own number and keep whatever was typed.
+          billNo: await resolvePurchaseBillNo(tx, company.id, d),
           notes: d.notes,
           type: d.type,
           amount: d.amount,
@@ -356,10 +382,13 @@ export async function updatePurchase(
         where: { id: purchaseId },
         data: {
           partyId,
-          // Cleared, not carried over: this save rewrites the bill as rows, and
-          // the boat now lives on them. A leftover header boat would keep
-          // printing a vessel name the lines no longer agree with.
-          billNo: d.billNo,
+          // An issued number is fixed — it identifies this voucher on paper
+          // that may already have gone out. Only a Society or KFDC bill, whose
+          // number is the society's, can be corrected here.
+          billNo: await resolvePurchaseBillNo(tx, company.id, {
+            type: d.type,
+            billNo: d.billNo ?? existing.billNo,
+          }),
           notes: d.notes,
           type: d.type,
           amount: d.amount,

@@ -118,7 +118,7 @@ export default async function ExpenseDetailPage({
       code: { not: "RENT" },
     },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    select: { id: true, code: true, name: true, allowsLines: true },
+    select: { id: true, code: true, name: true, allowsLines: true, kind: true },
   });
 
   const initial = {

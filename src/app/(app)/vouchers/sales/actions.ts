@@ -13,6 +13,7 @@ import {
   type PostLedgerArgs,
 } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
+import { nextDocumentNo, saleSeriesPrefix } from "@/lib/document-series";
 import { refreshTripStatus } from "@/lib/trip";
 import {
   SALE_TYPES,
@@ -177,7 +178,9 @@ async function parse(
   const buyerName = clean(formData.get("buyerName"));
   const file = formData.get("bill");
 
-  if (!billNo) return { error: "Enter the bill number." };
+  // LOCAL is exempt: its number is issued on save, not typed.
+  if (!billNo && type !== "LOCAL")
+    return { error: "Enter the bill number." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw))
     return { error: "Pick the purchase date this sale came from." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDateRaw))
@@ -684,6 +687,25 @@ async function postTripRentExpense(
   });
 }
 
+/**
+ * The number this sale will carry.
+ *
+ * A LOCAL sale is BFM's own document — a local buyer collects and there is no
+ * bill to copy from — so the number is issued here. Market, factory and fish
+ * mill all bill BFM with their own number, which stays typed: it is the
+ * reference they will quote back when there is a query.
+ */
+async function resolveSaleBillNo(
+  tx: Prisma.TransactionClient,
+  companyId: string,
+  d: { type: SaleType; billNo: string }
+): Promise<string> {
+  const prefix = saleSeriesPrefix(d.type);
+  if (!prefix) return d.billNo;
+  // An edit keeps the number already issued; only a new voucher takes one.
+  return d.billNo || (await nextDocumentNo(tx, companyId, prefix));
+}
+
 function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
   return {
     type: d.type,
@@ -753,6 +775,9 @@ export async function createSale(
           companyId: company.id,
           centreId: centre.id,
           ...saleData(d, buyerId, careOfId),
+          // Issued inside the transaction for a LOCAL sale, so a failed save
+          // rolls the number back rather than leaving a gap in the series.
+          billNo: await resolveSaleBillNo(tx, company.id, d),
           createdById: session.userId,
         },
       });
@@ -891,6 +916,8 @@ export async function updateSale(
           companyId: true,
           centreId: true,
           date: true,
+          // An issued LOCAL number is kept rather than reissued on every edit.
+          billNo: true,
           // Needed so an edit that moves the bill to another trip can refresh
           // the one it left as well as the one it joined.
           deliveryNoteId: true,
@@ -918,6 +945,12 @@ export async function updateSale(
         where: { id: saleId },
         data: {
           ...saleData(d, buyerId, careOfId),
+          // An issued number is fixed. A market, factory or mill bill keeps
+          // whatever the counterparty's paper says, which stays editable.
+          billNo: await resolveSaleBillNo(tx, company.id, {
+            type: d.type,
+            billNo: d.billNo || existing.billNo,
+          }),
           updatedById: session.userId,
           updatedAt: new Date(),
         },

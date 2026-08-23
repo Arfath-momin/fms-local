@@ -105,6 +105,9 @@ export function PurchaseForm({
   const today = businessToday();
   const hasLineBoats = purchaseHasLineBoats(type);
   const asksForParty = purchasePartyIsTyped(type);
+  // Private and Local have no supplier bill behind them, so BFM issues the
+  // number. Society and KFDC carry the society's own.
+  const issuesOwnNumber = type === "PRIVATE" || type === "LOCAL";
   const fixedParty = FIXED_PURCHASE_PARTY[type];
 
   const grandTotal = useMemo(
@@ -146,15 +149,26 @@ export function PurchaseForm({
         </div>
         <div>
           <label htmlFor="billNo" className={labelCls}>
-            {asksForParty ? "Invoice No." : "No."}
+            {issuesOwnNumber ? "Voucher No." : "Invoice No."}
           </label>
-          <input
-            id="billNo"
-            name="billNo"
-            defaultValue={initial?.billNo ?? ""}
-            placeholder="Optional"
-            className={inputCls}
-          />
+          {/* A Private or Local purchase has no supplier bill to copy a number
+              from, so BFM issues one — PP-00001 / LP-00001. A Society or KFDC
+              bill arrives with the society's own number, which stays typed: it
+              is what they quote back when there is a query. */}
+          {issuesOwnNumber ? (
+            <div className="border border-line bg-background px-3 py-2 text-sm num text-muted">
+              {initial?.billNo ||
+                `Assigned on save (${type === "PRIVATE" ? "PP" : "LP"}-…)`}
+            </div>
+          ) : (
+            <input
+              id="billNo"
+              name="billNo"
+              defaultValue={initial?.billNo ?? ""}
+              placeholder="From the society's bill"
+              className={inputCls}
+            />
+          )}
         </div>
         <div>
           <label htmlFor="date" className={labelCls}>

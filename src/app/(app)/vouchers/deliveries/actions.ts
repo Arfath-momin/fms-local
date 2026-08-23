@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { TripChannel } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
+import { nextDocumentNo, SERIES_PREFIX } from "@/lib/document-series";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
@@ -99,7 +100,6 @@ type ParsedLine = {
 };
 
 type Parsed = {
-  billNo: string;
   date: Date;
   recipient: string;
   channel: TripChannel;
@@ -117,7 +117,6 @@ const clean = (v: FormDataEntryValue | null) =>
   String(v ?? "").trim().replace(/\s+/g, " ");
 
 function parse(formData: FormData): { error: string } | { data: Parsed } {
-  const billNo = clean(formData.get("billNo"));
   const dateRaw = String(formData.get("date") ?? "");
   const recipient = clean(formData.get("recipient"));
   const channelRaw = clean(formData.get("channel"));
@@ -128,7 +127,6 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const notes = clean(formData.get("notes"));
   const file = formData.get("bill");
 
-  if (!billNo) return { error: "Enter the bill number." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
   if (!recipient) return { error: "Enter the recipient (To)." };
   if (!vehicleId) return { error: "Choose a vehicle." };
@@ -210,7 +208,6 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
 
   return {
     data: {
-      billNo,
       date: new Date(dateRaw),
       recipient,
       channel,
@@ -255,7 +252,13 @@ export async function createDelivery(
         data: {
           companyId: company.id,
           centreId: centre.id,
-          billNo: d.billNo,
+          // Issued here, inside the transaction, so a failed save rolls the
+          // number back rather than leaving a gap in the series.
+          billNo: await nextDocumentNo(
+            tx,
+            company.id,
+            SERIES_PREFIX.DELIVERY_NOTE
+          ),
           date: d.date,
           recipient: d.recipient,
           channel: d.channel,
@@ -410,7 +413,8 @@ export async function updateDelivery(
       await tx.deliveryNote.update({
         where: { id: deliveryNoteId },
         data: {
-          billNo: d.billNo,
+          // billNo is deliberately absent: once issued it identifies this note
+          // on paper that has already left the building.
           date: d.date,
           recipient: d.recipient,
           channel: d.channel,

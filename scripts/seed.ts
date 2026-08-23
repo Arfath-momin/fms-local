@@ -17,6 +17,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { postLedgerEntries } from "../src/lib/ledger";
 import { DIRECT_CODES, OVERHEAD_CODES } from "../src/lib/expense";
 import { refreshTripStatus } from "../src/lib/trip";
+import { nextDocumentNo, SERIES_PREFIX } from "../src/lib/document-series";
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -56,6 +57,8 @@ async function main() {
   await prisma.expenseLine.deleteMany();
   await prisma.expense.deleteMany();
   await prisma.attachment.deleteMany();
+  // Counters reset with the data they numbered, so a reseed starts at 1.
+  await prisma.documentSeries.deleteMany();
   await prisma.vehicle.deleteMany();
   await prisma.expenseCategory.deleteMany();
   await prisma.centre.deleteMany();
@@ -235,11 +238,16 @@ async function main() {
   // driver covers, so it is recorded by the bill that reports it — see
   // recordTripRent below.
   const trips: Record<string, string> = {};
-  for (const [key, channel, vehicle, transporterId, _rent, advance, billNo] of [
-    ["market", "MARKET", vehicles.market.id, transporters.market, 20_000, 5_000, "DN-201"],
-    ["factory", "FACTORY", vehicles.factory.id, transporters.factory, 8_000, null, "DN-202"],
-    ["mill", "FISH_MILL", vehicles.mill.id, transporters.mill, 4_000, null, "DN-203"],
+  const tripBillNo: Record<string, string> = {};
+  for (const [key, channel, vehicle, transporterId, _rent, advance] of [
+    ["market", "MARKET", vehicles.market.id, transporters.market, 20_000, 5_000],
+    ["factory", "FACTORY", vehicles.factory.id, transporters.factory, 8_000, null],
+    ["mill", "FISH_MILL", vehicles.mill.id, transporters.mill, 4_000, null],
   ] as const) {
+    // Issued from the same counter the app uses, so seeded notes are numbered
+    // exactly as entered ones would be.
+    const billNo = await nextDocumentNo(prisma, BFM, SERIES_PREFIX.DELIVERY_NOTE);
+    tripBillNo[key] = billNo;
     const trip = await prisma.deliveryNote.create({
       data: {
         ...scope,
@@ -387,7 +395,7 @@ async function main() {
         saleId: sale.id,
         rentTotal: b.rent,
         advance: 5_000,
-        billNo: "DN-201",
+        billNo: tripBillNo["market"],
       });
     }
   }
@@ -426,7 +434,7 @@ async function main() {
       saleId: sale.id,
       rentTotal: rent,
       advance: 0,
-      billNo: tripKey === "factory" ? "DN-202" : "DN-203",
+      billNo: tripBillNo[tripKey],
     });
     await postLedgerEntries(prisma, [
       { ...scope, partyId: transporterId, type: "DEBIT", sourceType: "PAYMENT", sourceId: sale.id, amount: D(rent), date: BUYING_DAY },

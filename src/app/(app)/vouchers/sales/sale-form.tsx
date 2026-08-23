@@ -220,13 +220,23 @@ export function SaleForm({
           <label htmlFor="billNo" className={labelCls}>
             Bill No.
           </label>
-          <input
-            id="billNo"
-            name="billNo"
-            required
-            defaultValue={initial?.billNo ?? ""}
-            className={inputCls}
-          />
+          {/* A LOCAL sale is BFM's own document — the buyer collects and there
+              is no bill to copy from — so the number is issued. Market, factory
+              and fish mill each bill BFM with their own number, which is the
+              reference they will quote back when there is a query. */}
+          {type === "LOCAL" ? (
+            <div className="border border-line bg-background px-3 py-2 text-sm num text-muted">
+              {initial?.billNo || "Assigned on save (LS-…)"}
+            </div>
+          ) : (
+            <input
+              id="billNo"
+              name="billNo"
+              required
+              defaultValue={initial?.billNo ?? ""}
+              className={inputCls}
+            />
+          )}
         </div>
         <div>
           <label htmlFor="saleDate" className={labelCls}>

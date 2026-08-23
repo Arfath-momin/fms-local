@@ -134,6 +134,7 @@ model Company {
   settlements    Settlement[]
   reviewRequests ReviewRequest[]
   vehicles       Vehicle[]
+  documentSeries DocumentSeries[]
   expenseCategories ExpenseCategory[]
   reserveCollections ReserveCollection[]
 
@@ -956,6 +957,32 @@ model ReviewRequest {
   // The voucher read: does this voucher have an open request against it?
   @@index([linkedType, linkedId, status])
   @@map("review_requests")
+}
+
+/// The next number in one of BFM's own document series.
+///
+/// Only for documents BFM ORIGINATES: a delivery note, a private or local
+/// purchase (there is no supplier bill to copy a number from), and a local
+/// sale. A Society or KFDC bill, and a factory, market or fish-mill sale, all
+/// arrive with a number already on them — those stay typed, because inventing
+/// our own would lose the one the counterparty will quote back at us.
+///
+/// A counter row rather than max(bill_no) + 1: two clerks saving at the same
+/// moment would both read the same maximum and both write the same number.
+/// Incrementing this row inside the voucher's own transaction serialises them,
+/// and the unique index below is the backstop if anything ever slips past.
+model DocumentSeries {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+  /// DN, PP, LP, LS.
+  prefix    String
+  /// The number the NEXT document will take.
+  next      Int    @default(1)
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, prefix])
+  @@map("document_series")
 }
 
 // ---------- Corrections ----------

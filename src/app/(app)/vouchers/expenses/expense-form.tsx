@@ -27,6 +27,8 @@ export type ExpenseCategoryOption = {
   code: string;
   name: string;
   allowsLines: boolean;
+  /** DIRECT costs belong to a buying day; OVERHEADs belong to a month. */
+  kind: "DIRECT" | "OVERHEAD";
 };
 
 /** One row of an itemised expense. */
@@ -89,6 +91,7 @@ export function ExpenseForm({
     0
   );
 
+
   // A category with no entry spec — anything the merchant added from Masters —
   // falls back to a plain amount field. That fallback is what lets a new
   // category work without a deploy.
@@ -105,6 +108,16 @@ export function ExpenseForm({
     [category]
   );
   const today = businessToday();
+
+  // Overheads are entered at month end against the whole month's P/L, so they
+  // default to the last day of the current month rather than to today.
+  const isOverhead = category?.kind === "OVERHEAD";
+  const monthEnd = (() => {
+    const [y, m] = today.split("-").map(Number);
+    return `${y}-${String(m).padStart(2, "0")}-${String(
+      new Date(Date.UTC(y, m, 0)).getUTCDate()
+    ).padStart(2, "0")}`;
+  })();
 
   const computedTotal = useMemo(() => {
     if (spec.amountEntered) return null;
@@ -163,22 +176,37 @@ export function ExpenseForm({
         </div>
       </div>
 
-      {/* Ice bought on the 17th for the 16th's catch belongs to the 16th —
-          that is the day whose profit it has to come out of. */}
+      {/* The label depends on the tier, because the question genuinely differs.
+          A DIRECT cost belongs to a catch — ice bought on the 17th for the
+          16th's fish belongs to the 16th. An OVERHEAD belongs to no catch at
+          all: a salary is a cost of the month, entered at month end, and
+          asking "which day's fish was this for" would invite a wrong answer to
+          a question that has none. */}
       <div className="max-w-xs">
         <label htmlFor="date" className={labelCls}>
-          Purchase Date
+          {isOverhead ? "Month" : "Purchase Date"}
         </label>
         <DateField
           id="date"
           name="date"
           required
-          defaultValue={initial?.date ?? today}
+          defaultValue={initial?.date ?? (isOverhead ? monthEnd : today)}
           className={inputCls}
         />
         <p className="text-muted text-[12px] mt-1">
-          Which day&apos;s fish this cost was for. The ledger, the Day Book and
-          every report use this date.
+          {isOverhead ? (
+            <>
+              Any day in the month this belongs to — it lands in that
+              month&apos;s <span className="font-semibold">net</span> profit.
+              An overhead never touches a buying day&apos;s gross figure, so
+              this date cannot move a day&apos;s profit.
+            </>
+          ) : (
+            <>
+              Which day&apos;s fish this cost was for. The ledger, the Day Book
+              and every report use this date.
+            </>
+          )}
         </p>
       </div>
 
