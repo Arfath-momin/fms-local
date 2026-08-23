@@ -64,6 +64,9 @@ export default async function SaleBillPage({
   const outstanding = latest?.runningBalance ?? new Prisma.Decimal(0);
 
   const isFishMill = sale.type === "FISH_MILL";
+  // A market line is a BOX record: which market took how many of the load.
+  const isMarket = sale.type === "MARKET";
+  const totalBoxes = sale.lines.reduce((a, l) => a + (l.box ?? 0), 0);
   const hasLines = sale.lines.length > 0;
 
   // Summed from the same helper each row prints, so the column and its total
@@ -159,23 +162,32 @@ export default async function SaleBillPage({
         {hasLines ? (
           <table className="bill-table">
             <thead>
-              {/* The Fish Mill bill is deliberately narrower than the entry
-                  screen. Box and kgs-per-box are how the load was WEIGHED —
-                  working the clerk needs and the mill does not — so the
-                  document states the outcome: what it was, how much of it,
-                  at what rate, for how much. */}
+              {/* Each bill prints what its channel actually means.
+                    MARKET    boxes. The money is the net the market paid, not
+                              a rate times a weight, so a Kgs and Rate column
+                              would print zeros and invite the reader to
+                              multiply them.
+                    FISH MILL what it was, how much, at what rate, for how
+                              much. Box and kgs-per-box are how the load was
+                              weighed — working the clerk needs, not the mill. */}
               <tr>
                 <th className="r" style={{ width: "3rem" }}>
                   Sr No
                 </th>
-                <th>{isFishMill ? "Particulars" : "Particular"}</th>
-                {isFishMill ? (
-                  <th className="r">Count / Kg</th>
+                <th>{isMarket ? "Particulars" : isFishMill ? "Particulars" : "Particular"}</th>
+                {isMarket ? (
+                  <th className="r">Boxes</th>
                 ) : (
-                  <th className="r">Kgs</th>
+                  <>
+                    {isFishMill ? (
+                      <th className="r">Count / Kg</th>
+                    ) : (
+                      <th className="r">Kgs</th>
+                    )}
+                    <th className="r">Rate/kg</th>
+                    <th className="r">Amount</th>
+                  </>
                 )}
-                <th className="r">Rate/kg</th>
-                <th className="r">Amount</th>
               </tr>
             </thead>
             <tbody>
@@ -183,21 +195,28 @@ export default async function SaleBillPage({
                 <tr key={l.id}>
                   <td className="r num text-muted">{i + 1}</td>
                   <td className="font-medium">{l.particular}</td>
-                  <td className="r num">
-                    {/* Kgs is the weight of ONE box, so what was actually sold
-                        — and what the rate is charged on — is box × kgs. The
-                        count prefixes it where the mill recorded one, since
-                        "180 / 45.500 kg" is how the trade reads a line. */}
-                    {isFishMill && l.count ? `${l.count} / ` : ""}
-                    {fmtKg(
-                      saleLineTotalKg({
-                        qtyKg: Number(l.qtyKg),
-                        box: l.box,
-                      })
-                    )}
-                  </td>
-                  <td className="r num">{fmtMoney(l.ratePerKg)}</td>
-                  <td className="r num">{fmtMoney(l.total)}</td>
+                  {isMarket ? (
+                    <td className="r num">{l.box ?? "—"}</td>
+                  ) : (
+                    <>
+                      <td className="r num">
+                        {/* Kgs is the weight of ONE box, so what was actually
+                            sold — and what the rate is charged on — is
+                            box × kgs. The count prefixes it where the mill
+                            recorded one, since "180 / 45.500 kg" is how the
+                            trade reads a line. */}
+                        {isFishMill && l.count ? `${l.count} / ` : ""}
+                        {fmtKg(
+                          saleLineTotalKg({
+                            qtyKg: Number(l.qtyKg),
+                            box: l.box,
+                          })
+                        )}
+                      </td>
+                      <td className="r num">{fmtMoney(l.ratePerKg)}</td>
+                      <td className="r num">{fmtMoney(l.total)}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -206,12 +225,18 @@ export default async function SaleBillPage({
                 <td colSpan={2} className="r">
                   Total
                 </td>
-                {/* Kg total sits under the column it totals, so the mill can
-                    check the weight it received against the money charged
-                    without reading across the sheet. */}
-                <td className="r num">{fmtKg(totalKg)}</td>
-                <td></td>
-                <td className="r num">{fmtMoney(sale.amount)}</td>
+                {isMarket ? (
+                  <td className="r num">{totalBoxes || "—"}</td>
+                ) : (
+                  <>
+                    {/* Kg total sits under the column it totals, so the mill
+                        can check the weight it received against the money
+                        charged without reading across the sheet. */}
+                    <td className="r num">{fmtKg(totalKg)}</td>
+                    <td></td>
+                    <td className="r num">{fmtMoney(sale.amount)}</td>
+                  </>
+                )}
               </tr>
             </tfoot>
           </table>

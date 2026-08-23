@@ -586,7 +586,8 @@ export async function getTransactionRegister(
   const dateRange = { gte: from, lte: to };
   const centreWhere = centreId ? { centreId } : {};
 
-  const [purchases, sales, expenses, settlements] = await Promise.all([
+  const [purchases, sales, expenses, settlements, advances] =
+    await Promise.all([
     prisma.purchase.findMany({
       where: {
         companyId,
@@ -623,6 +624,31 @@ export async function getTransactionRegister(
     prisma.settlement.findMany({
       where: { companyId, ...centreWhere, date: dateRange },
       include: { centre: { select: { name: true } }, party: { select: { name: true } } },
+    }),
+    // Trips that carried an advance. The advance is money that LEFT the
+    // business — it is a payment to the transporter — but it is a property of
+    // the trip rather than a Settlement voucher, so reading only the settlement
+    // table left it out of the register entirely. It is the one payment a
+    // merchant makes before any bill exists, which makes its absence the
+    // easiest to miss.
+    prisma.deliveryNote.findMany({
+      where: {
+        companyId,
+        ...centreWhere,
+        date: dateRange,
+        advancePaid: { gt: 0 },
+      },
+      select: {
+        id: true,
+        billNo: true,
+        date: true,
+        createdAt: true,
+        advancePaid: true,
+        centre: { select: { name: true } },
+        vehicle: {
+          select: { number: true, transporter: { select: { name: true } } },
+        },
+      },
     }),
   ]);
 
@@ -664,6 +690,36 @@ export async function getTransactionRegister(
       partyName: e.party?.name ?? e.category.name,
       amount: e.amount,
       href: `/vouchers/expenses/${e.id}`,
+    })),
+    // The rent a market party settled on BFM's behalf. Like the advance it is
+    // money that left the business against the trip's rent, and like the
+    // advance it is not a Settlement voucher — it is netted inside the market
+    // bill. Naming the payer keeps it honest: BFM did not hand this over, the
+    // market did, which is why it appears against their name and not as cash
+    // going out of the till.
+    ...sales
+      .filter((sale) => sale.rentDeducted && sale.rentDeducted.greaterThan(0))
+      .map((sale) => ({
+        id: `${sale.id}-rent`,
+        date: sale.date,
+        createdAt: sale.createdAt,
+        centreName: sale.centre.name,
+        kind: "PAYMENT" as const,
+        subtype: "RENT_BY_PARTY",
+        partyName: `${sale.party.name} paid the driver`,
+        amount: sale.rentDeducted ?? ZERO,
+        href: `/vouchers/sales/${sale.id}`,
+      })),
+    ...advances.map((t) => ({
+      id: t.id,
+      date: t.date,
+      createdAt: t.createdAt,
+      centreName: t.centre.name,
+      kind: "PAYMENT" as const,
+      subtype: "ADVANCE",
+      partyName: `${t.vehicle.transporter.name} · ${t.billNo} · ${t.vehicle.number}`,
+      amount: t.advancePaid ?? ZERO,
+      href: `/vouchers/deliveries/${t.id}`,
     })),
     ...settlements.map((st) => ({
       id: st.id,

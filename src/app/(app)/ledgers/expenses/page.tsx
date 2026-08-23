@@ -120,7 +120,15 @@ export default async function ExpenseLedgersPage() {
       <h2 className="heading text-[15px] font-semibold mt-6 mb-1">By vendor</h2>
       <p className="text-muted text-[12px] mb-2">
         A running statement per vendor — negative means we still owe them.
-        Payment vouchers settle against these.
+        Entering an expense does not pay it: it records what is owed, and a{" "}
+        <Link
+          href="/vouchers/payments/new"
+          className="text-accent underline underline-offset-2"
+        >
+          Payment voucher
+        </Link>{" "}
+        settles it. Settlement is against the running balance, never against
+        one particular bill.
       </p>
       <LedgerTable
         rows={vendors}

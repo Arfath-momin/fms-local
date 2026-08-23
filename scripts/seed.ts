@@ -344,8 +344,13 @@ async function main() {
     { party: marketC, billNo: "M-503", place: "Malpe Market", total: 45_000, comm: 900,   labour: 500,  reserve: 1_500, boxes: 30, rent: 20_000 },
   ];
 
+  const MARKET_ADVANCE = 5_000;
   for (const b of marketBills) {
-    const net = b.total - b.comm - b.labour - b.reserve - b.rent;
+    // What the market actually deducts is what it HANDED THE DRIVER — the
+    // trip's total rent less the advance that already went at departure. The
+    // total is recorded on the bill; the deduction is the balance.
+    const rentDeducted = b.rent > 0 ? b.rent - MARKET_ADVANCE : 0;
+    const net = b.total - b.comm - b.labour - b.reserve - rentDeducted;
     const sale = await prisma.sale.create({
       data: {
         ...scope,
@@ -362,7 +367,7 @@ async function main() {
         otherDeduction: D(b.labour),
         reserve: D(b.reserve),
         carriesRent: b.rent > 0,
-        rentDeducted: b.rent > 0 ? D(b.rent) : null,
+        rentDeducted: rentDeducted > 0 ? D(rentDeducted) : null,
         place: b.place,
         // Box counts are what the trip reconciliation tallies against the 100
         // boxes dispatched.
@@ -397,7 +402,7 @@ async function main() {
         payerId: b.party,
         saleId: sale.id,
         rentTotal: b.rent,
-        advance: 5_000,
+        advance: MARKET_ADVANCE,
         billNo: tripBillNo["market"],
       });
     }
@@ -444,6 +449,30 @@ async function main() {
     ]);
   }
 
+  // --- a part-payment, so the paid/unpaid picture is visible --------------
+  //
+  // Entering an expense does not pay it. The ice plant was billed 7,000 and
+  // has been given 4,000, leaving 3,000 owed — which is what the expense
+  // screens and the vendor's statement now have to show. Without an example
+  // like this every vendor reads as fully unpaid and the distinction is
+  // invisible.
+  const icePayment = await prisma.settlement.create({
+    data: {
+      ...scope,
+      partyId: icePlant,
+      kind: "PAYMENT",
+      mode: "CASH",
+      amount: D(4_000),
+      date: day("2026-08-18"),
+      reference: "Cash to plant",
+    },
+    select: { id: true },
+  });
+  await postLedgerEntries(prisma, [
+    // DEBIT: money out settles what we owe, so the balance moves toward zero.
+    { ...scope, partyId: icePlant, type: "DEBIT", sourceType: "PAYMENT", sourceId: icePayment.id, amount: D(4_000), date: day("2026-08-18") },
+  ]);
+
   // --- one overhead, to prove it stays out of the day's gross -------------
   await prisma.expense.create({
     data: {
@@ -466,6 +495,7 @@ async function main() {
   console.log("  purchases 185,000 · direct 47,000 · revenue 263,400");
   console.log("  expected GROSS profit 31,400 (salary 40,000 excluded)");
   console.log("  reserve outstanding 6,000 across three market parties");
+  console.log("  ice plant billed 7,000, paid 4,000 — 3,000 still owed");
   console.log("Sign in as owner@bfm.test / password123");
 }
 
