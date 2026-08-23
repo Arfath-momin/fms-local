@@ -60,6 +60,7 @@ export type VehicleOption = {
 export function DeliveryForm({
   action,
   vehicles,
+  nextNo,
   initial,
   submitLabel,
   existingAttachments = 0,
@@ -72,6 +73,8 @@ export function DeliveryForm({
   ) => Promise<DeliveryFormState>;
   /** Live vehicles for the active company, in number order. */
   vehicles: VehicleOption[];
+  /** The number this note will take — a preview, confirmed on save. */
+  nextNo?: string;
   initial?: DeliveryInit;
   submitLabel: string;
   existingAttachments?: number;
@@ -130,9 +133,14 @@ export function DeliveryForm({
           {/* Issued by the system, not typed. A delivery note is BFM's own
               document, so the number is ours — and two clerks entering at once
               must not be able to produce the same one. */}
-          <div className="border border-line bg-background px-3 py-2 text-sm num text-muted">
-            {initial?.billNo || "Assigned on save (DN-…)"}
+          <div className="border border-line bg-background px-3 py-2 text-sm num">
+            {initial?.billNo || nextNo || "DN-…"}
           </div>
+          {!initial?.billNo && (
+            <p className="text-muted text-[12px] mt-1">
+              Next in the series — confirmed when you save.
+            </p>
+          )}
         </div>
         <div>
           <label htmlFor="date" className={labelCls}>

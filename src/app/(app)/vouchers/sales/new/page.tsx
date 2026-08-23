@@ -5,6 +5,7 @@ import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { SALE_TYPES, SALE_TYPE_LABELS } from "@/lib/sale";
 import { openTripsForChannel } from "@/lib/trip";
+import { peekDocumentNos, SERIES_PREFIX } from "@/lib/document-series";
 import { createSale } from "../actions";
 import { SaleForm } from "../sale-form";
 import { NoCentreNotice } from "../../../no-centre";
@@ -64,6 +65,12 @@ export default async function NewSalePage({
           type === "MARKET" ? "MARKET" : type === "FACTORY" ? "FACTORY" : "FISH_MILL"
         );
 
+  // Only a LOCAL sale takes a number of ours; the rest carry the buyer's.
+  const nextNos =
+    type === "LOCAL"
+      ? await peekDocumentNos(company.id, [SERIES_PREFIX.SALE_LOCAL])
+      : {};
+
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-1">
@@ -82,6 +89,7 @@ export default async function NewSalePage({
         type={type}
         action={createSale}
         trips={trips}
+        nextNo={nextNos[SERIES_PREFIX.SALE_LOCAL]}
         submitLabel="Save Sale"
         scope={scopeFieldValues({ company, centre })}
       />

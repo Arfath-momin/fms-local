@@ -93,6 +93,7 @@ export function SaleForm({
   type,
   action,
   trips,
+  nextNo,
   initial,
   submitLabel,
   existingAttachments = 0,
@@ -103,6 +104,8 @@ export function SaleForm({
   action: (prev: SaleFormState, formData: FormData) => Promise<SaleFormState>;
   /** Open trips for this company, centre and channel. Empty for LOCAL. */
   trips: TripOption[];
+  /** The number a LOCAL sale will take — a preview, confirmed on save. */
+  nextNo?: string;
   initial?: SaleInit;
   submitLabel: string;
   existingAttachments?: number;
@@ -225,9 +228,16 @@ export function SaleForm({
               and fish mill each bill BFM with their own number, which is the
               reference they will quote back when there is a query. */}
           {type === "LOCAL" ? (
-            <div className="border border-line bg-background px-3 py-2 text-sm num text-muted">
-              {initial?.billNo || "Assigned on save (LS-…)"}
-            </div>
+            <>
+              <div className="border border-line bg-background px-3 py-2 text-sm num">
+                {initial?.billNo || nextNo || "LS-…"}
+              </div>
+              {!initial?.billNo && (
+                <p className="text-muted text-[12px] mt-1">
+                  Next in the series — confirmed when you save.
+                </p>
+              )}
+            </>
           ) : (
             <input
               id="billNo"

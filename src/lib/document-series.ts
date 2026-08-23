@@ -1,5 +1,6 @@
 import "server-only";
 import type { Prisma } from "@/generated/prisma/client";
+import { prisma } from "@/lib/db";
 import type { PurchaseType, SaleType } from "@/generated/prisma/enums";
 
 /**
@@ -64,4 +65,28 @@ export async function nextDocumentNo(
   const value = rows[0]?.value;
   if (!value) throw new Error(`Could not allocate a ${prefix} number.`);
   return formatDocumentNo(prefix, value);
+}
+
+/**
+ * What the next number in each series WOULD be, without taking it.
+ *
+ * A preview for the entry forms, so a clerk sees "DN-00004" rather than a
+ * placeholder. Deliberately does not reserve: two people opening the form at
+ * once both see the same number and only one gets it, which is why the real
+ * allocation still happens inside the save. The forms say so.
+ *
+ * A series with no row yet has issued nothing, so it starts at 1.
+ */
+export async function peekDocumentNos(
+  companyId: string,
+  prefixes: string[]
+): Promise<Record<string, string>> {
+  const rows = await prisma.documentSeries.findMany({
+    where: { companyId, prefix: { in: prefixes } },
+    select: { prefix: true, next: true },
+  });
+  const byPrefix = new Map(rows.map((r) => [r.prefix, r.next]));
+  return Object.fromEntries(
+    prefixes.map((p) => [p, formatDocumentNo(p, byPrefix.get(p) ?? 1)])
+  );
 }

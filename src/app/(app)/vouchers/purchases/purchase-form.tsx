@@ -70,6 +70,7 @@ const BLANK_LINE: PurchaseLineInit = {
  */
 export function PurchaseForm({
   action,
+  nextNos,
   initial,
   submitLabel,
   reasonField,
@@ -77,6 +78,8 @@ export function PurchaseForm({
   allowBillUpload = true,
   scope,
 }: {
+  /** Previews for the two series a purchase can take: PP and LP. */
+  nextNos?: Record<string, string>;
   action: (
     prev: PurchaseFormState,
     formData: FormData
@@ -156,10 +159,18 @@ export function PurchaseForm({
               bill arrives with the society's own number, which stays typed: it
               is what they quote back when there is a query. */}
           {issuesOwnNumber ? (
-            <div className="border border-line bg-background px-3 py-2 text-sm num text-muted">
-              {initial?.billNo ||
-                `Assigned on save (${type === "PRIVATE" ? "PP" : "LP"}-…)`}
-            </div>
+            <>
+              <div className="border border-line bg-background px-3 py-2 text-sm num">
+                {initial?.billNo ||
+                  nextNos?.[type === "PRIVATE" ? "PP" : "LP"] ||
+                  `${type === "PRIVATE" ? "PP" : "LP"}-…`}
+              </div>
+              {!initial?.billNo && (
+                <p className="text-muted text-[12px] mt-1">
+                  Next in the series — confirmed when you save.
+                </p>
+              )}
+            </>
           ) : (
             <input
               id="billNo"

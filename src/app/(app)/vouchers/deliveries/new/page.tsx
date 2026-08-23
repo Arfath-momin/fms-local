@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { liveVehicles } from "@/lib/vehicle";
+import { peekDocumentNos, SERIES_PREFIX } from "@/lib/document-series";
 import { createDelivery } from "../actions";
 import { DeliveryForm } from "../delivery-form";
 import { NoCentreNotice } from "../../../no-centre";
@@ -13,7 +14,10 @@ export default async function NewDeliveryPage() {
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
-  const vehicles = await liveVehicles(company.id);
+  const [vehicles, nextNos] = await Promise.all([
+    liveVehicles(company.id),
+    peekDocumentNos(company.id, [SERIES_PREFIX.DELIVERY_NOTE]),
+  ]);
 
   return (
     <div>
@@ -26,6 +30,7 @@ export default async function NewDeliveryPage() {
       <DeliveryForm
         action={createDelivery}
         vehicles={vehicles}
+        nextNo={nextNos[SERIES_PREFIX.DELIVERY_NOTE]}
         submitLabel="Save Delivery Note"
         scope={scopeFieldValues({ company, centre })}
       />
