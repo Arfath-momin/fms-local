@@ -159,9 +159,9 @@ export function SaleForm({
       trip.remaining.map((r) => ({
         particular: r.particular,
         box: r.box ? String(r.box) : "",
-        // The trip's line total divided across its boxes — the sale's kg
-        // column is per box, so this is the average that came off the truck.
-        qtyKg: r.box > 0 ? (r.kg / r.box).toFixed(3) : String(r.kg || ""),
+        // No weight or rate: a market line records boxes, and the money comes
+        // from the net the market paid.
+        qtyKg: "",
         ratePerKg: "",
         count: "",
       }))
@@ -618,19 +618,28 @@ export function SaleForm({
                   <th className="text-left font-semibold px-3 py-2">
                     {type === "FISH_MILL" ? "Fish (variety)" : "Particular"}
                   </th>
-                  <th className="text-right font-semibold px-2 py-2 w-24">
-                    {type === "FISH_MILL" ? "Kgs / box" : "Kgs"}
-                  </th>
+                  {/* A market line carries no weight or rate: the money on a
+                      market bill is the net the market paid, and the line is
+                      there to record which market took how many boxes. */}
+                  {type !== "MARKET" && (
+                    <th className="text-right font-semibold px-2 py-2 w-24">
+                      {type === "FISH_MILL" ? "Kgs / box" : "Kgs"}
+                    </th>
+                  )}
                   {type === "FISH_MILL" && (
                     <th className="text-right font-semibold px-2 py-2 w-24">
                       Total Kg
                     </th>
                   )}
-                  <th className="text-right font-semibold px-2 py-2 w-24">Rate/kg</th>
+                  {type !== "MARKET" && (
+                    <th className="text-right font-semibold px-2 py-2 w-24">Rate/kg</th>
+                  )}
                   {type === "FISH_MILL" && (
                     <th className="text-right font-semibold px-2 py-2 w-16">Count</th>
                   )}
-                  <th className="text-right font-semibold px-3 py-2 w-28">Total</th>
+                  {type !== "MARKET" && (
+                    <th className="text-right font-semibold px-3 py-2 w-28">Total</th>
+                  )}
                   <th className="w-8"></th>
                 </tr>
               </thead>
@@ -648,9 +657,11 @@ export function SaleForm({
                       <td className="px-2 py-1">
                         <input name="particular" value={l.particular} onChange={(e) => setLine(i, { particular: e.target.value })} className={inputCls} placeholder="e.g. Prawn" />
                       </td>
-                      <td className="px-1 py-1">
-                        <input name="qtyKg" inputMode="decimal" value={l.qtyKg} onChange={(e) => setLine(i, { qtyKg: e.target.value })} className={cell} />
-                      </td>
+                      {type !== "MARKET" && (
+                        <td className="px-1 py-1">
+                          <input name="qtyKg" inputMode="decimal" value={l.qtyKg} onChange={(e) => setLine(i, { qtyKg: e.target.value })} className={cell} />
+                        </td>
+                      )}
                       {/* Derived, not typed: box × kgs. Read-only so it can
                           never disagree with the two figures above it. */}
                       {type === "FISH_MILL" && (
@@ -658,15 +669,19 @@ export function SaleForm({
                           {totalKg ? fmtKg(totalKg) : ""}
                         </td>
                       )}
-                      <td className="px-1 py-1">
-                        <input name="ratePerKg" inputMode="decimal" value={l.ratePerKg} onChange={(e) => setLine(i, { ratePerKg: e.target.value })} className={cell} />
-                      </td>
+                      {type !== "MARKET" && (
+                        <td className="px-1 py-1">
+                          <input name="ratePerKg" inputMode="decimal" value={l.ratePerKg} onChange={(e) => setLine(i, { ratePerKg: e.target.value })} className={cell} />
+                        </td>
+                      )}
                       {type === "FISH_MILL" && (
                         <td className="px-1 py-1">
                           <input name="count" inputMode="numeric" value={l.count} onChange={(e) => setLine(i, { count: e.target.value })} className={cell} />
                         </td>
                       )}
-                      <td className="px-3 py-1 num text-right text-muted">{fmtMoney(rowTotal)}</td>
+                      {type !== "MARKET" && (
+                        <td className="px-3 py-1 num text-right text-muted">{fmtMoney(rowTotal)}</td>
+                      )}
                       <td className="px-1 py-1 text-center">
                         {lines.length > 1 && (
                           <button type="button" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} className="text-debit text-lg leading-none" aria-label="Remove line">
@@ -680,11 +695,11 @@ export function SaleForm({
               </tbody>
               <tfoot>
                 <tr className="border-t border-line-strong font-semibold">
-                  {type === "FISH_MILL" && (
+                  {(type === "FISH_MILL" || type === "MARKET") && (
                     <td className="px-2 py-2 num text-right">{boxTotal || ""}</td>
                   )}
-                  <td className="px-3 py-2 text-right" colSpan={2}>
-                    Total
+                  <td className="px-3 py-2 text-right" colSpan={type === "MARKET" ? 1 : 2}>
+                    {type === "MARKET" ? "Boxes" : "Total"}
                   </td>
                   {type === "FISH_MILL" && (
                     <td className="px-2 py-2 num text-right">
@@ -692,7 +707,11 @@ export function SaleForm({
                     </td>
                   )}
                   {type === "FISH_MILL" && <td />}
-                  <td className="px-3 py-2 num text-right text-credit">{fmtMoney(lineTotal)}</td>
+                  {/* A market bill's money is the net the market paid, so
+                      there is no line total to foot to — only the boxes. */}
+                  {type !== "MARKET" && (
+                    <td className="px-3 py-2 num text-right text-credit">{fmtMoney(lineTotal)}</td>
+                  )}
                   <td></td>
                 </tr>
               </tfoot>

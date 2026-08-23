@@ -76,10 +76,10 @@ export default async function PartyStatementPage({
   // Resolve source links for drill-down: each ledger entry's sourceId points at
   // its own voucher page (purchase / sale / expense / settlement).
   const sourceIds = [...new Set(entries.map((e) => e.sourceId))];
-  const [sales, purchases, expenses, settlements] = await Promise.all([
+  const [sales, purchases, expenses, settlements, trips] = await Promise.all([
     prisma.sale.findMany({
       where: { id: { in: sourceIds } },
-      select: { id: true },
+      select: { id: true, billNo: true },
     }),
     // The boats come back with the purchase so the statement can name the
     // vessels on each line — the whole point of moving the ledger to the group.
@@ -99,6 +99,19 @@ export default async function PartyStatementPage({
     prisma.settlement.findMany({
       where: { id: { in: sourceIds } },
       select: { id: true, kind: true },
+    }),
+    // Trips, so a transporter's advance says WHICH trip it went out on. It is
+    // the only source type sitting outside the four voucher tables, and
+    // leaving it unresolved is why an advance read as a bare "Payment" with
+    // nothing to tie it to — the one row a transporter most needs to place.
+    prisma.deliveryNote.findMany({
+      where: { id: { in: sourceIds } },
+      select: {
+        id: true,
+        billNo: true,
+        date: true,
+        vehicle: { select: { number: true } },
+      },
     }),
   ]);
 
@@ -131,6 +144,16 @@ export default async function PartyStatementPage({
       st.id,
       `/vouchers/${st.kind === "PAYMENT" ? "payments" : "receipts"}/${st.id}`
     );
+  for (const t of trips) links.set(t.id, `/vouchers/deliveries/${t.id}`);
+
+  // What each row is FOR, where the source type alone does not say it. A
+  // transporter's statement is otherwise a column of "Payment" and "Vehicle
+  // rent" with no way to tell one trip's from another's.
+  const detailBySource = new Map<string, string>();
+  for (const t of trips)
+    detailBySource.set(t.id, `${t.billNo} · ${t.vehicle.number}`);
+  for (const s2 of sales)
+    if (s2.billNo) detailBySource.set(s2.id, `Bill ${s2.billNo}`);
 
   const balance = latest?.runningBalance ?? new Prisma.Decimal(0);
 
@@ -271,6 +294,17 @@ export default async function PartyStatementPage({
                         </Link>
                       ) : (
                         label
+                      )}
+                      {/* Which trip or bill this row is for. Without it a
+                          transporter's statement is a column of "Payment" and
+                          "Vehicle rent" with no way to tell one journey's from
+                          another's — which is exactly the advance a merchant
+                          needs to place. */}
+                      {detailBySource.has(e.sourceId) && (
+                        <span className="text-muted text-[12px]">
+                          {" "}
+                          · {detailBySource.get(e.sourceId)}
+                        </span>
                       )}
                     </td>
                     {showBoat && (

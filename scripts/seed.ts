@@ -366,14 +366,17 @@ async function main() {
         place: b.place,
         // Box counts are what the trip reconciliation tallies against the 100
         // boxes dispatched.
+        // A market line records WHICH market took HOW MANY boxes. The money is
+        // the net the market paid, not a rate times a weight, so the weight
+        // and rate columns are zero exactly as the form now leaves them.
         lines: {
           create: [
             {
               particular: "Mixed",
               box: b.boxes,
-              qtyKg: D(30),
-              ratePerKg: D(net / (b.boxes * 30)),
-              total: D(net),
+              qtyKg: D(0),
+              ratePerKg: D(0),
+              total: D(0),
             },
           ],
         },

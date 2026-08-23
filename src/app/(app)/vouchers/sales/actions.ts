@@ -102,7 +102,13 @@ function parseMoney(raw: string): Prisma.Decimal | null {
 /** Fish Mill / Local line rows share a shape; box & count are Fish-Mill only. */
 function parseLines(
   formData: FormData,
-  withBoxCount: boolean
+  withBoxCount: boolean,
+  /**
+   * MARKET lines carry boxes and nothing else. The money on a market bill is
+   * the net the market paid, not a rate times a weight, so demanding a weight
+   * would reject every market bill for a figure that has no meaning on one.
+   */
+  boxesOnly = false
 ): { error: string } | { lines: ParsedLine[] } {
   const particulars = formData.getAll("particular").map(String);
   const qtys = formData.getAll("qtyKg").map(String);
@@ -120,8 +126,12 @@ function parseLines(
 
     if (!p && !qtyRaw && !rateRaw && !boxRaw && !countRaw) continue;
     if (!p) return { error: "Every line needs a particular." };
-    if (!DECIMAL3.test(qtyRaw) || Number(qtyRaw) <= 0)
+    if (boxesOnly) {
+      if (!INT.test(boxRaw) || Number(boxRaw) <= 0)
+        return { error: `Boxes for “${p}” must be a positive whole number.` };
+    } else if (!DECIMAL3.test(qtyRaw) || Number(qtyRaw) <= 0) {
       return { error: `Qty for “${p}” must be a positive number.` };
+    }
     // Rate may be blank on a MARKET line: a market bill's money is the net the
     // market paid, not a rate × weight. The line is there to record what went
     // to whom, in boxes.
@@ -141,7 +151,7 @@ function parseLines(
       }
     }
 
-    const qtyKg = new Prisma.Decimal(qtyRaw);
+    const qtyKg = qtyRaw ? new Prisma.Decimal(qtyRaw) : new Prisma.Decimal(0);
     // Blank rate is zero — see the note above; a market line carries boxes,
     // not a price per kilo.
     const ratePerKg = rateRaw ? new Prisma.Decimal(rateRaw) : new Prisma.Decimal(0);
@@ -303,7 +313,7 @@ async function parse(
     // against the boxes it dispatched, and how "which market took how much of
     // the load" is answered at all. The money still comes from the net below;
     // the lines are the box record, not the arithmetic.
-    const marketLines = parseLines(formData, true);
+    const marketLines = parseLines(formData, true, true);
     if ("error" in marketLines) return { error: marketLines.error };
     base.lines = marketLines.lines;
 

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { sumDeliveryLines } from "@/lib/delivery";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import { DateWindow, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
@@ -79,6 +79,8 @@ export default async function DeliveriesPage({
                 <th className="num-col">Big Box</th>
                 <th className="num-col">Loose</th>
                 <th className="num-col">Pcs</th>
+                <th className="num-col">Advance</th>
+                <th className="num-col">Rent</th>
                 <th></th>
               </tr>
             </thead>
@@ -97,7 +99,20 @@ export default async function DeliveriesPage({
                     </td>
                     <td className="num-col num">{t.bigBox || "—"}</td>
                     <td className="num-col num">{t.loose || "—"}</td>
-                    <td className="num-col num">{t.pcs || "—"}</td>
+                    {/* The advance handed to the driver at departure, and the
+                        trip's total rent once a bill has reported it. Without
+                        these on the list, an advance could only be found by
+                        opening each note in turn. */}
+                    <td className="num-col num">
+                      {n.advancePaid ? fmtMoney(n.advancePaid) : "—"}
+                    </td>
+                    <td className="num-col num">
+                      {n.rentAmount ? (
+                        fmtMoney(n.rentAmount)
+                      ) : (
+                        <span className="text-muted text-[12px]">pending</span>
+                      )}
+                    </td>
                     <td>
                       <Link
                         href={`/vouchers/deliveries/${n.id}`}
