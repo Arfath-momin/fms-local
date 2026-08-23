@@ -292,3 +292,134 @@ function remainingByParticular(
       kg: r.kg.gt(0) ? r.kg.toNumber() : 0,
     }));
 }
+
+/**
+ * One trip's boxes, from the truck to each party that unloaded them.
+ *
+ * The record a merchant actually keeps in his head: a hundred boxes went out,
+ * this market took forty, that one thirty, the last thirty — and it has to come
+ * back to nothing. The reconciliation panel on a trip answers "does it add up";
+ * this answers "where did they go", which is the question when a market claims
+ * it received less than it was billed for.
+ *
+ * Broken down by particular as well as by party, because a truck carries two or
+ * three varieties and "sixty boxes" is not an answer when forty were bangdha.
+ */
+export type BoxStatementDrop = {
+  saleId: string;
+  billNo: string;
+  partyName: string;
+  boxes: number;
+  /** Which varieties made up that drop. */
+  byParticular: { particular: string; boxes: number }[];
+};
+
+export type BoxStatement = {
+  tripId: string;
+  billNo: string;
+  date: Date;
+  channel: TripChannel;
+  status: TripStatus;
+  vehicleNumber: string;
+  dispatched: number;
+  dispatchedByParticular: { particular: string; boxes: number }[];
+  drops: BoxStatementDrop[];
+  /** dispatched − everything dropped. Zero when the load is accounted for. */
+  unaccounted: number;
+  /**
+   * True when the bills off this trip do not count boxes at all.
+   *
+   * A factory reweighs the load and bills the KILOS it accepted; a lump-sum
+   * bill itemises nothing. Either way the box column is empty, and calling
+   * that "100 unaccounted" would report a discrepancy where none exists — the
+   * boxes simply are not how that trip was billed. The kilo gap is the tally
+   * that matters there, and the trip's own reconciliation panel shows it.
+   */
+  billedWithoutBoxes: boolean;
+  cratesReturned: number | null;
+};
+
+function tallyBoxes(
+  rows: { particular: string; box: number | null }[]
+): { total: number; byParticular: { particular: string; boxes: number }[] } {
+  const by = new Map<string, { particular: string; boxes: number }>();
+  let total = 0;
+  for (const r of rows) {
+    const boxes = r.box ?? 0;
+    if (boxes === 0) continue;
+    total += boxes;
+    const key = r.particular.trim().toLowerCase();
+    const hit = by.get(key);
+    if (hit) hit.boxes += boxes;
+    else by.set(key, { particular: r.particular, boxes });
+  }
+  return {
+    total,
+    byParticular: [...by.values()].sort((a, b) => b.boxes - a.boxes),
+  };
+}
+
+export async function boxStatements(
+  scope: { companyId: string; centreId: string },
+  window: { from: Date; to: Date }
+): Promise<BoxStatement[]> {
+  const trips = await prisma.deliveryNote.findMany({
+    where: { ...scope, date: { gte: window.from, lte: window.to } },
+    orderBy: [{ date: "desc" }, { billNo: "desc" }],
+    select: {
+      id: true,
+      billNo: true,
+      date: true,
+      channel: true,
+      status: true,
+      cratesReturned: true,
+      vehicle: { select: { number: true } },
+      lines: { select: { particulars: true, box: true } },
+      sales: {
+        orderBy: [{ date: "asc" }, { billNo: "asc" }],
+        select: {
+          id: true,
+          billNo: true,
+          party: { select: { name: true } },
+          careOfParty: { select: { name: true } },
+          lines: { select: { particular: true, box: true } },
+        },
+      },
+    },
+  });
+
+  return trips.map((t) => {
+    const out = tallyBoxes(
+      t.lines.map((l) => ({ particular: l.particulars, box: l.box }))
+    );
+
+    const drops = t.sales.map((sale) => {
+      const got = tallyBoxes(sale.lines);
+      return {
+        saleId: sale.id,
+        billNo: sale.billNo,
+        // The CareOf agent is who the money goes through, but the boxes went
+        // to the buyer — this column is about where the fish physically went.
+        partyName: sale.party.name,
+        boxes: got.total,
+        byParticular: got.byParticular,
+      };
+    });
+
+    return {
+      tripId: t.id,
+      billNo: t.billNo,
+      date: t.date,
+      channel: t.channel,
+      status: t.status,
+      vehicleNumber: t.vehicle.number,
+      dispatched: out.total,
+      dispatchedByParticular: out.byParticular,
+      drops,
+      unaccounted: out.total - drops.reduce((a, d) => a + d.boxes, 0),
+      billedWithoutBoxes:
+        drops.length > 0 && drops.every((d) => d.boxes === 0),
+      cratesReturned: t.cratesReturned,
+    };
+  });
+}

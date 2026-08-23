@@ -153,7 +153,15 @@ export default async function DeliveryNotePage({
           Both are shown against what actually went out on this trip. */}
       <div className="border border-line-strong bg-surface px-4 py-3 mb-4">
         <div className="flex items-baseline justify-between mb-2">
-          <h2 className="heading text-[15px] font-semibold">Reconciliation</h2>
+          <h2 className="heading text-[15px] font-semibold">
+            Reconciliation{" "}
+            <Link
+              href="/ledgers/boxes"
+              className="text-accent text-[12px] font-normal underline underline-offset-2"
+            >
+              box statement
+            </Link>
+          </h2>
           <span className="text-muted text-[12px]">
             {tally.billCount === 0
               ? "No bills back yet"

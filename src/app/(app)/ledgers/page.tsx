@@ -37,6 +37,11 @@ const ITEMS = [
     desc: "Every buyer and what they owe us, grouped by sale category.",
   },
   {
+    href: "/ledgers/boxes",
+    label: "Box Statement",
+    desc: "What went out on each truck and who unloaded it — every load reconciled back to nothing.",
+  },
+  {
     href: "/ledgers/reserve",
     label: "Reserve",
     desc: "What each market party withheld and still holds. Derived per party from their bills less what has been collected — never pooled.",
