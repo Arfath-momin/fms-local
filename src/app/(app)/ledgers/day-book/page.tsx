@@ -35,7 +35,7 @@ export default async function DayBookPage({
 
   return (
     <div className="max-w-3xl">
-      <div className="flex items-end justify-between mb-4">
+      <div className="flex items-end justify-between flex-wrap gap-3 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">Day Book</h1>
           <p className="text-muted text-[13px]">
@@ -66,7 +66,7 @@ export default async function DayBookPage({
       </div>
 
       {/* The daily row: Sale − (Purchase + Expense) = Profit */}
-      <div className="border border-line-strong bg-surface">
+      <div className="border border-line-strong bg-surface overflow-x-auto">
         <table className="ledger-table">
           <thead>
             <tr>

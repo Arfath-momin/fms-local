@@ -102,14 +102,14 @@ export default async function ProfitReportPage({
           only the DIRECT costs of that catch; overheads belong to the month
           and touch net alone. Showing one "profit" number hid which of the two
           you were reading, and they answer different questions. */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-3">
         <Stat label="Revenue" value={r.sale} cls="text-credit" />
         <Stat label="Purchases" value={r.purchase} cls="text-debit" />
         <Stat label="Direct expenses" value={r.directExpense} cls="text-debit" />
         <Stat label="Gross profit" value={r.grossProfit} cls={pfCls} strong />
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <Stat label="Overheads" value={r.overheadExpense} cls="text-debit" />
         <Stat
           label="Reserve collected"

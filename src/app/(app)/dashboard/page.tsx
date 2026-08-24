@@ -135,7 +135,7 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         <Tile
           href="/vouchers/purchases"
           label="Purchase today"
@@ -181,7 +181,7 @@ export default async function DashboardPage() {
             No sales recorded in this centre yet.
           </p>
         ) : (
-          <div className="border border-line-strong bg-surface">
+          <div className="border border-line-strong bg-surface overflow-x-auto">
             <table className="ledger-table">
               <thead>
                 <tr>

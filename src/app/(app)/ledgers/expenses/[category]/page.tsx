@@ -222,7 +222,7 @@ export default async function ExpenseCategoryPage({
           No {category.name.toLowerCase()} expenses for {company.name} yet.
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface">
+        <div className="border border-line-strong bg-surface overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>

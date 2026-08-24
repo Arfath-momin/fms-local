@@ -52,7 +52,7 @@ export default async function CentresPage() {
           {company.name} has no centre yet. Add the first one below.
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface mb-4">
+        <div className="border border-line-strong bg-surface mb-4 overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>

@@ -139,7 +139,7 @@ export function ExpenseForm({
   return (
     <form action={formAction} className="max-w-lg space-y-4">
       <ScopeFields scope={scope} />
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label htmlFor="category" className={labelCls}>
             Category
@@ -212,7 +212,7 @@ export function ExpenseForm({
 
 
       {spec.fields.length > 0 && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {spec.fields.map((f) => (
             <div key={f.name}>
               <label htmlFor={f.name} className={labelCls}>
@@ -240,7 +240,7 @@ export function ExpenseForm({
           every report reads, so the detail is additive and no report has to
           know whether a voucher was itemised. */}
       {category?.allowsLines ? (
-        <div className="border border-line-strong bg-surface">
+        <div className="border border-line-strong bg-surface overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-line">

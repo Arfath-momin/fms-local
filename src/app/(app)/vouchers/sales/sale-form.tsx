@@ -218,7 +218,7 @@ export function SaleForm({
       <ScopeFields scope={scope} />
       <input type="hidden" name="type" value={type} />
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label htmlFor="billNo" className={labelCls}>
             Bill No.
@@ -332,7 +332,7 @@ export function SaleForm({
       {needsTrip && <input type="hidden" name="date" value={tripDate} />}
 
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <PartyCombobox
           name="buyerName"
           label={type === "MARKET" ? "Seller Name" : "Party Name"}
@@ -354,7 +354,7 @@ export function SaleForm({
       {/* ---- Market ---- */}
       {type === "MARKET" && (
         <>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label htmlFor="place" className={labelCls}>
                 Place
@@ -390,7 +390,7 @@ export function SaleForm({
                   total − commission − labour − reserve − rent = net
               and a typed net can disagree with its own working — which the
               ledger would then post as the seller's debt. */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label htmlFor="commissionRate" className={labelCls}>
                 Commission %
@@ -466,7 +466,7 @@ export function SaleForm({
               </p>
             )}
             {carriesRent && (
-              <div className="mt-2 grid grid-cols-2 gap-4 max-w-lg">
+              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg">
                 <div>
                   <label htmlFor="rentTotal" className={labelCls}>
                     Total rent for the trip (₹)
@@ -542,7 +542,7 @@ export function SaleForm({
 
       {/* ---- Fish Mill header ---- */}
       {type === "FISH_MILL" && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <div>
             <label htmlFor="weight" className={labelCls}>
               Weight
@@ -572,7 +572,7 @@ export function SaleForm({
 
       {/* ---- Factory ---- */}
       {type === "FACTORY" && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="vehicleNo" className={labelCls}>
               Vehicle No.
@@ -605,7 +605,7 @@ export function SaleForm({
       {/* ---- Line table (Market / Fish Mill / Local) ---- */}
       {hasLines && (
         <div>
-          <div className="flex items-baseline justify-between">
+          <div className="flex items-baseline justify-between flex-wrap gap-3">
             <label className={labelCls}>Items</label>
             {type === "MARKET" && trip && trip.remaining.length > 0 && (
               <button

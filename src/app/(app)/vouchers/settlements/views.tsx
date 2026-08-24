@@ -190,7 +190,7 @@ export async function SettlementDetailPage({
         ← {SETTLEMENT_KIND_PLURALS[kind]}
       </Link>
 
-      <div className="flex items-end justify-between mt-1 mb-4 gap-3">
+      <div className="flex items-end justify-between flex-wrap gap-3 mt-1 mb-4 gap-3">
         <div>
           <h1 className="heading text-xl font-semibold">
             {SETTLEMENT_KIND_LABELS[kind]} · {fmtDate(settlement.date)}

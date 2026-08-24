@@ -38,7 +38,7 @@ export default async function DeliveriesPage({
 
   return (
     <div>
-      <div className="flex items-end justify-between mb-4">
+      <div className="flex items-end justify-between flex-wrap gap-3 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">Delivery Notes</h1>
           <p className="text-muted text-[13px]">
@@ -66,7 +66,7 @@ export default async function DeliveriesPage({
           {mayEnter && " Or use “New Delivery Note” to record a dispatch."}
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface">
+        <div className="border border-line-strong bg-surface overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>

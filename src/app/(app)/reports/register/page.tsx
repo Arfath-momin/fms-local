@@ -382,7 +382,7 @@ async function TransactionsView({
         </p>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         <Stat label="Sale" value={sale} cls="text-credit" />
         <Stat label="Purchase" value={purchase} cls="text-debit" />
         <Stat label="Expense" value={expense} cls="text-debit" />
@@ -435,7 +435,7 @@ async function BreakdownView({
 
   return (
     <>
-      <div className="border border-line-strong bg-surface mb-5 mt-3">
+      <div className="border border-line-strong bg-surface mb-5 mt-3 overflow-x-auto">
         <table className="ledger-table">
           <thead>
             <tr>
@@ -489,7 +489,7 @@ async function BreakdownView({
         </table>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         <Stat label="Sale" value={total.sale} cls="text-credit" />
         <Stat label="Purchase" value={total.purchase} cls="text-debit" />
         <Stat label="Expense" value={total.expense} cls="text-debit" />

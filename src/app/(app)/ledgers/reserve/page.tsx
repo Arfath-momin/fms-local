@@ -77,7 +77,7 @@ export default async function ReserveLedgerPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
         <Stat label="Withheld (all time)" value={withheld} />
         <Stat label="Collected" value={collected} />
         <Stat label="Still held by parties" value={outstanding} strong />
@@ -89,7 +89,7 @@ export default async function ReserveLedgerPage() {
           one of the deductions the market makes on the bill.
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface mb-6">
+        <div className="border border-line-strong bg-surface mb-6 overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>
@@ -138,7 +138,7 @@ export default async function ReserveLedgerPage() {
             Recognised as income on the day the money arrived — which is the one
             date in the system that is not a buying day.
           </p>
-          <div className="border border-line-strong bg-surface">
+          <div className="border border-line-strong bg-surface overflow-x-auto">
             <table className="ledger-table">
               <thead>
                 <tr>

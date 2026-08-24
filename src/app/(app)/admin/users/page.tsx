@@ -54,7 +54,7 @@ export default async function UsersPage() {
         — every account is created here, by the system owner only.
       </p>
 
-      <div className="border border-line-strong bg-surface mb-6">
+      <div className="border border-line-strong bg-surface mb-6 overflow-x-auto">
         <table className="ledger-table">
           <thead>
             <tr>

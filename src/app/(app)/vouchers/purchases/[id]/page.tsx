@@ -112,7 +112,7 @@ export default async function PurchaseDetailPage({
         </dl>
 
         {purchase.lines.length > 0 && (
-          <div className="border border-line-strong bg-surface mt-4 max-w-2xl">
+          <div className="border border-line-strong bg-surface mt-4 max-w-2xl overflow-x-auto">
             <table className="ledger-table">
               <thead>
                 <tr>

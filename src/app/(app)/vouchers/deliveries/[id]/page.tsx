@@ -84,7 +84,7 @@ export default async function DeliveryNotePage({
       >
         ← Delivery Notes
       </Link>
-      <div className="flex items-end justify-between mt-1 mb-4">
+      <div className="flex items-end justify-between flex-wrap gap-3 mt-1 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">
             Delivery Note · {note.billNo}
@@ -113,7 +113,7 @@ export default async function DeliveryNotePage({
         </div>
       </div>
 
-      <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+      <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
         <Field label="Bill No." value={note.billNo} />
         <Field label="Date" value={fmtDate(note.date)} />
         <Field label="To" value={note.recipient ?? "—"} />
@@ -152,7 +152,7 @@ export default async function DeliveryNotePage({
                      and pays for less, so the KILO gap is the rejection.
           Both are shown against what actually went out on this trip. */}
       <div className="border border-line-strong bg-surface px-4 py-3 mb-4">
-        <div className="flex items-baseline justify-between mb-2">
+        <div className="flex items-baseline justify-between flex-wrap gap-3 mb-2">
           <h2 className="heading text-[15px] font-semibold">
             Reconciliation{" "}
             <Link
@@ -169,7 +169,7 @@ export default async function DeliveryNotePage({
           </span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[13px]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-[13px]">
           {note.channel === "MARKET" ? (
             <>
               <Field

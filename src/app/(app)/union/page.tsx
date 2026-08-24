@@ -115,7 +115,7 @@ export default async function UnionPage({
       </div>
 
       {/* Company total */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <Stat label="Total Sale" value={u.total.sale} cls="text-credit" />
         <Stat label="Total Purchase" value={u.total.purchase} cls="text-debit" />
         <Stat label="Total Expense" value={u.total.expense} cls="text-debit" />
@@ -131,7 +131,7 @@ export default async function UnionPage({
               Profit {fmtMoney(c.profit)}
             </span>
           </div>
-          <div className="border border-line-strong bg-surface">
+          <div className="border border-line-strong bg-surface overflow-x-auto">
             <table className="ledger-table">
               <thead>
                 <tr>

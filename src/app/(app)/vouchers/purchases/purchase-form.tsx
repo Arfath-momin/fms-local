@@ -130,7 +130,7 @@ export function PurchaseForm({
     <form action={formAction} className="max-w-3xl space-y-4">
       <ScopeFields scope={scope} />
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <label htmlFor="type" className={labelCls}>
             Purchase Type

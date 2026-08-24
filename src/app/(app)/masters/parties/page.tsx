@@ -77,7 +77,7 @@ export default async function PartiesPage({
       >
         ← Masters
       </Link>
-      <div className="flex items-end justify-between mt-1 mb-4">
+      <div className="flex items-end justify-between flex-wrap gap-3 mt-1 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">{title}</h1>
           <p className="text-muted text-[13px]">
@@ -125,7 +125,7 @@ export default async function PartiesPage({
           )}
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface max-w-3xl">
+        <div className="border border-line-strong bg-surface max-w-3xl overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>

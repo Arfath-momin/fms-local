@@ -78,7 +78,7 @@ export default async function SalePage({
       >
         ← Sales
       </Link>
-      <div className="flex items-end justify-between mt-1 mb-4">
+      <div className="flex items-end justify-between flex-wrap gap-3 mt-1 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">
             {SALE_TYPE_LABELS[sale.type]} Sale · {sale.billNo}
@@ -110,7 +110,7 @@ export default async function SalePage({
         </div>
       </div>
 
-      <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+      <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
         <Field label="Bill No." value={sale.billNo} />
         <Field label="Purchase Date" value={fmtDate(sale.date)} />
         <Field
@@ -141,7 +141,7 @@ export default async function SalePage({
       </div>
 
       {sale.lines.length > 0 && (
-        <div className="border border-line-strong bg-surface mb-4">
+        <div className="border border-line-strong bg-surface mb-4 overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>
@@ -169,7 +169,7 @@ export default async function SalePage({
         </div>
       )}
 
-      <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-2 gap-3 mb-2">
+      <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
         <Field label="Sale Amount" value={fmtMoney(sale.amount)} />
         <div>
           <div className="text-[11px] uppercase tracking-wide text-muted font-semibold">

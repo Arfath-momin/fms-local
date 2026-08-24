@@ -127,7 +127,7 @@ export function DeliveryForm({
   return (
     <form action={formAction} className="max-w-3xl space-y-4">
       <ScopeFields scope={scope} />
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className={labelCls}>Note No.</label>
           {/* Issued by the system, not typed. A delivery note is BFM's own
@@ -156,7 +156,7 @@ export function DeliveryForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label htmlFor="recipient" className={labelCls}>
             To
@@ -195,7 +195,7 @@ export function DeliveryForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <label htmlFor="vehicleId" className={labelCls}>
             Vehicle
@@ -257,7 +257,7 @@ export function DeliveryForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <label htmlFor="driverName" className={labelCls}>
             Driver Name

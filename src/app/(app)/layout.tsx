@@ -6,6 +6,7 @@ import { getActiveCentre, getCentres } from "@/lib/centre";
 import { logout, switchCompany, switchCentre } from "./actions";
 import { NoCompanyNotice } from "./no-company";
 import { NavLinks } from "./nav-links";
+import { AppShell } from "./app-shell";
 
 const ROLE_LABELS: Record<Role, string> = {
   SUPER_ADMIN: "Super Admin · system owner",
@@ -42,11 +43,17 @@ export default async function AppLayout({
           ? ({ "--company": activeCompany.colour } as React.CSSProperties)
           : undefined
       }
-      className="flex-1 flex min-h-screen"
+      className="flex-1 flex flex-col min-h-screen"
     >
-      {/* Gateway sidebar — Tally-style top-level sections */}
-      <aside className="w-52 shrink-0 bg-sidebar text-sidebar-ink flex flex-col">
-        <div className="px-4 py-4 border-b border-white/10">
+      {/* Gateway sidebar — Tally-style top-level sections. AppShell owns only
+          whether it is on screen; everything inside stays server-rendered, so
+          the company and centre switchers remain Server Action forms. */}
+      <AppShell
+        companyName={activeCompany.name}
+        centreName={activeCentre?.name ?? null}
+        sidebar={
+          <>
+            <div className="px-4 py-4 border-b border-white/10">
           <div className="heading text-white text-lg font-semibold leading-none">
             FMS
           </div>
@@ -131,9 +138,9 @@ export default async function AppLayout({
           </div>
         </div>
 
-        <NavLinks role={session.role} />
+            <NavLinks role={session.role} />
 
-        <div className="mt-auto px-4 py-3 border-t border-white/10 text-[12px]">
+            <div className="mt-auto px-4 py-3 border-t border-white/10 text-[12px]">
           <div className="text-white">{session.name}</div>
           <div className="text-sidebar-ink/60">{ROLE_LABELS[session.role]}</div>
           <form action={logout} className="mt-2">
@@ -143,13 +150,16 @@ export default async function AppLayout({
             >
               Sign out
             </button>
-          </form>
-        </div>
-      </aside>
-
-      <div className="flex-1 flex flex-col min-w-0">
+              </form>
+            </div>
+          </>
+        }
+      >
         {/* Company band — constant, colored, impossible to miss (design doc #1) */}
-        <header className="bg-company text-company-ink px-6 py-2 flex items-center justify-between">
+        {/* Hidden on a phone: the mobile top bar already carries the company
+            and centre, and repeating them here would cost a whole band of a
+            short screen to say the same thing twice. */}
+        <header className="hidden md:flex bg-company text-company-ink px-6 py-2 items-center justify-between gap-4">
           <span className="text-[13px] font-bold tracking-widest uppercase flex items-center gap-2">
             {activeCompany.hasLogo && (
               // eslint-disable-next-line @next/next/no-img-element
@@ -167,14 +177,16 @@ export default async function AppLayout({
               </span>
             ) : null}
           </span>
-          <span className="text-[12px] opacity-80">
+          <span className="text-[12px] opacity-80 hidden lg:inline text-right">
             {activeCentre
               ? `Entries and figures on screen belong to ${activeCompany.name} · ${activeCentre.name}`
               : `${activeCompany.name} has no centre yet — add one under Masters`}
           </span>
         </header>
-        <main className="flex-1 p-6 overflow-x-auto">{children}</main>
-      </div>
+        {/* Tighter gutters on a phone: 24px each side of a 375px screen is
+            13% of the width gone before any figure is drawn. */}
+        <main className="flex-1 p-3 sm:p-6 overflow-x-auto">{children}</main>
+      </AppShell>
     </div>
   );
 }

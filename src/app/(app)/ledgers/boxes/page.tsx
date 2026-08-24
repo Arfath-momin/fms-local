@@ -63,7 +63,7 @@ export default async function BoxLedgerPage({
 
       <DateWindow basePath="/ledgers/boxes" window={listWindow} />
 
-      <div className="grid grid-cols-3 gap-3 my-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-4">
         <Stat label="Trips" value={String(withBoxes.length)} />
         <Stat label="Boxes dispatched" value={String(totalOut)} />
         <Stat
@@ -80,7 +80,10 @@ export default async function BoxLedgerPage({
       ) : (
         <div className="space-y-4">
           {withBoxes.map((s) => (
-            <div key={s.tripId} className="border border-line-strong bg-surface">
+            <div
+              key={s.tripId}
+              className="border border-line-strong bg-surface overflow-x-auto"
+            >
               <div className="px-4 py-2 border-b border-line flex items-baseline justify-between gap-3 flex-wrap">
                 <div>
                   <Link

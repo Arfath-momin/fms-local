@@ -107,7 +107,7 @@ function Section({
           None yet.
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface mb-5">
+        <div className="border border-line-strong bg-surface mb-5 overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>

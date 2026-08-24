@@ -39,7 +39,7 @@ export default async function ExpensesPage({
 
   return (
     <div>
-      <div className="flex items-end justify-between mb-4">
+      <div className="flex items-end justify-between flex-wrap gap-3 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">Expenses</h1>
           <p className="text-muted text-[13px]">
@@ -65,7 +65,7 @@ export default async function ExpensesPage({
           {mayEnter && " Or use “New Expense” to enter one."}
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface max-w-2xl">
+        <div className="border border-line-strong bg-surface max-w-2xl overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>

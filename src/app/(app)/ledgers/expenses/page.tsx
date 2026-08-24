@@ -57,7 +57,7 @@ export default async function ExpenseLedgersPage() {
       >
         ← Ledgers
       </Link>
-      <div className="flex items-end justify-between mt-1 mb-4">
+      <div className="flex items-end justify-between flex-wrap gap-3 mt-1 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">Expense Ledgers</h1>
           <p className="text-muted text-[13px]">
@@ -80,7 +80,7 @@ export default async function ExpenseLedgersPage() {
         set the gross profit; overheads belong to the month and touch the net
         figure only.
       </p>
-      <div className="border border-line-strong bg-surface">
+      <div className="border border-line-strong bg-surface overflow-x-auto">
         <table className="ledger-table">
           <thead>
             <tr>

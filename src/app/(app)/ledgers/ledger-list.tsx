@@ -34,7 +34,7 @@ export function LedgerTable({
     );
 
   return (
-    <div className="border border-line-strong bg-surface">
+    <div className="border border-line-strong bg-surface overflow-x-auto">
       <table className="ledger-table">
         <thead>
           <tr>
@@ -85,7 +85,7 @@ export function SectionHeader({
   totalClass?: string;
 }) {
   return (
-    <div className="flex items-end justify-between mb-4">
+    <div className="flex items-end justify-between flex-wrap gap-3 mb-4">
       <div>
         <h1 className="heading text-xl font-semibold">{title}</h1>
         <p className="text-muted text-[13px]">{scope}</p>

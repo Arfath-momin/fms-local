@@ -176,7 +176,7 @@ export default async function PartyStatementPage({
       >
         ← {section.label}
       </Link>
-      <div className="flex items-end justify-between mt-1 mb-4">
+      <div className="flex items-end justify-between flex-wrap gap-3 mt-1 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">{party.name}</h1>
           <p className="text-muted text-[13px]">
@@ -238,7 +238,7 @@ export default async function PartyStatementPage({
 
       {/* Lifetime position with this party, independent of the date window
           below — what we billed, what came back, and what is still open. */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <Summary label="Total billed" value={totalDebit} cls="text-debit" />
         <Summary label="Total settled" value={totalCredit} cls="text-credit" />
         <Summary
@@ -265,7 +265,7 @@ export default async function PartyStatementPage({
           earlier activity.
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface">
+        <div className="border border-line-strong bg-surface overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>

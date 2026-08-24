@@ -52,7 +52,7 @@ export default async function PurchasesPage({
 
   return (
     <div>
-      <div className="flex items-end justify-between mb-4">
+      <div className="flex items-end justify-between flex-wrap gap-3 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">Purchases</h1>
           <p className="text-muted text-[13px]">
@@ -79,7 +79,7 @@ export default async function PurchasesPage({
           {mayEnter && " Or use “New Purchase” to enter one."}
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface">
+        <div className="border border-line-strong bg-surface overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>

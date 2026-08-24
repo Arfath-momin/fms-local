@@ -81,7 +81,7 @@ export default async function SaleLedgersPage() {
             const subtotal = totalBalance(list);
             return (
               <section key={g.type}>
-                <div className="flex items-baseline justify-between mb-1">
+                <div className="flex items-baseline justify-between flex-wrap gap-3 mb-1">
                   <h2 className="heading text-[15px] font-semibold">
                     {g.label}
                     <span className="text-muted font-normal text-[12px]">

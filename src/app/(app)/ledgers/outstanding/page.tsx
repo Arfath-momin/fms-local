@@ -183,7 +183,7 @@ function Half({
 }) {
   return (
     <section className="mb-6">
-      <div className="flex items-end justify-between gap-4 mb-2 border-b border-line-strong pb-1">
+      <div className="flex items-end justify-between flex-wrap gap-3 gap-4 mb-2 border-b border-line-strong pb-1">
         <div>
           <h2 className="heading text-[16px] font-semibold">{title}</h2>
           <p className="text-muted text-[12px]">{blurb}</p>
@@ -198,7 +198,7 @@ function Half({
           {empty}
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface">
+        <div className="border border-line-strong bg-surface overflow-x-auto">
           <table className="ledger-table">
             <tbody>
               {side.groups.map((g) => {
