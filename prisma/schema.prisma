@@ -694,6 +694,14 @@ model Sale {
   @@index([companyId, centreId, date])
   @@index([companyId, centreId, type])
   @@index([deliveryNoteId])
+  /// At most one bill per trip may carry that trip's rent (spec §4). The
+  /// actions check this too, but only as a read-then-write outside the
+  /// transaction — two bills saved for one trip at the same moment both saw
+  /// nothing and both saved, expensing the rent twice with no error. A partial
+  /// unique index is the only race-free place to settle it. See the migration
+  /// 20260824000000_one_rent_bearing_bill_per_trip; Prisma cannot express a
+  /// partial index, so this stays a comment and the SQL is the definition.
+
   @@map("sales")
 }
 

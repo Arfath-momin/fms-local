@@ -753,6 +753,27 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
   };
 }
 
+/**
+ * Turns the one database constraint a clerk can actually hit into a sentence
+ * they can act on.
+ *
+ * `sales_one_rent_carrier_per_trip` only fires in the race the application
+ * check cannot cover — two bills for the same trip saved in the same instant,
+ * both seeing no existing rent carrier. Rare, but the raw Prisma text names an
+ * index and a table and would leave the clerk with nothing to do.
+ */
+function saveError(e: unknown, fallback: string): string {
+  const text = e instanceof Error ? e.message : "";
+  if (text.includes("sales_one_rent_carrier_per_trip")) {
+    return (
+      "Another bill for this trip was saved at the same moment and has taken " +
+      "the rent. Only the last stop carries it — reopen this bill, untick " +
+      "“last stop”, and save again."
+    );
+  }
+  return e instanceof Error ? e.message : fallback;
+}
+
 export async function createSale(
   _prev: SaleFormState,
   formData: FormData
@@ -827,7 +848,7 @@ export async function createSale(
       return sale.id;
     });
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not save sale." };
+    return { error: saveError(e, "Could not save sale.") };
   }
 
   revalidatePath("/vouchers/sales");
@@ -1007,7 +1028,7 @@ export async function updateSale(
       await resolveReviews(tx, "SALE", saleId, session.userId);
     });
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not save sale." };
+    return { error: saveError(e, "Could not save sale.") };
   }
 
   revalidatePath("/vouchers/sales");
