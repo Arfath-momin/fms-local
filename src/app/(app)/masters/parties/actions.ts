@@ -6,20 +6,34 @@ import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry, requireSuperAdmin } from "@/lib/session";
 import { PARTY_TYPES } from "@/lib/party";
 import type { PartyType } from "@/generated/prisma/enums";
+import type { Prisma } from "@/generated/prisma/client";
 
 export type PartyFormState = { error: string } | null;
 
-/** Everything that can point at a party. Deleting is only safe at zero. */
+/**
+ * Everything that can point at a party. Deleting is only safe at zero.
+ *
+ * `satisfies`, not `as const`. Written as a bare literal this was never checked
+ * against the schema at all, and it silently kept `purchasesAsBoat` after the
+ * rebuild dropped Purchase.boatId — so every delete threw
+ * PrismaClientValidationError at runtime while `tsc` stayed green. Two
+ * relations added at the same time were missing for the same reason, which is
+ * the worse half of the bug: a transporter with vehicles, or a market party
+ * with reserve collections, would have counted as unreferenced and been
+ * deleted. Typed like this, the next relation added to Party breaks the build
+ * here instead.
+ */
 const PARTY_REFERENCES = {
   purchases: true,
-  purchasesAsBoat: true,
   purchaseLinesAsBoat: true,
   expenses: true,
   ledgerEntries: true,
   salesAsBuyer: true,
   salesAsCareOf: true,
   settlements: true,
-} as const;
+  vehicles: true,
+  reserveCollections: true,
+} satisfies Prisma.PartyCountOutputTypeSelect;
 
 type ParseResult =
   | { error: string }

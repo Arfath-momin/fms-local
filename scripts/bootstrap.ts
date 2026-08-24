@@ -144,15 +144,20 @@ async function main() {
         select: {
           id: true,
           _count: {
+            // Every relation Party actually has. Miss one and this deletes a
+            // party something still points at. `purchasesAsBoat` used to be
+            // here and is gone with Purchase.boatId — the boat is recorded per
+            // LINE now, not per bill.
             select: {
               purchases: true,
-              purchasesAsBoat: true,
               purchaseLinesAsBoat: true,
               expenses: true,
               ledgerEntries: true,
               salesAsBuyer: true,
               salesAsCareOf: true,
               settlements: true,
+              vehicles: true,
+              reserveCollections: true,
             },
           },
         },

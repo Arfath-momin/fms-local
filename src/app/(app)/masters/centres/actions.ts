@@ -10,7 +10,14 @@ import { getActiveCentre, setActiveCentreCookie } from "@/lib/centre";
 
 export type CentreFormState = { error: string } | null;
 
-/** Everything a centre owns. Deleting is only safe at zero. */
+/**
+ * Everything a centre owns. Deleting is only safe at zero.
+ *
+ * `satisfies` for the same reason as PARTY_REFERENCES: as a bare literal this
+ * was never checked against the schema, and it had already fallen a relation
+ * behind — reserveCollections was missing, so a centre holding them counted as
+ * empty and was offered for deletion.
+ */
 const CENTRE_REFERENCES = {
   purchases: true,
   sales: true,
@@ -20,7 +27,8 @@ const CENTRE_REFERENCES = {
   settlements: true,
   attachments: true,
   reviewRequests: true,
-} as const;
+  reserveCollections: true,
+} satisfies Prisma.CentreCountOutputTypeSelect;
 
 /**
  * Add a centre to the active company. The new centre is made active

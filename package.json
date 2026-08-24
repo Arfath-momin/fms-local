@@ -14,7 +14,6 @@
     "db:studio": "prisma studio",
     "db:check": "tsx --conditions=react-server scripts/check-ledger.ts",
     "db:verify": "tsx --conditions=react-server scripts/verify-ledger.ts",
-    "db:split-local": "tsx scripts/split-local-individuals.ts",
     "db:backfill-kind": "tsx scripts/backfill-party-kind.ts",
     "user:create": "tsx --conditions=react-server scripts/create-user.ts",
     "bootstrap": "tsx --conditions=react-server scripts/bootstrap.ts",
