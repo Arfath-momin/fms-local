@@ -153,17 +153,31 @@ export default async function RegisterPage({
               <label htmlFor="period" className={filterLabelCls}>
                 {view === "day" ? "Date" : view === "month" ? "Month" : "Year"}
               </label>
-              <input
-                id="period"
-                name="period"
-                type={
-                  view === "day" ? "date" : view === "month" ? "month" : "number"
-                }
-                min={view === "year" ? 2000 : undefined}
-                max={view === "year" ? 2100 : undefined}
-                defaultValue={period}
-                className={filterInputCls}
-              />
+              {/* Day goes through DateField like every other date in the app.
+                  It was the one field still left as a native `type="date"`,
+                  which renders in the BROWSER's locale — so on a machine set to
+                  US English this single box read mm/dd/yyyy while the report
+                  underneath it, and the From/To boxes beside it, all read
+                  dd/mm/yyyy. Month and year are untouched: "August 2026" and
+                  "2026" carry no day to be ambiguous about. */}
+              {view === "day" ? (
+                <DateField
+                  id="period"
+                  name="period"
+                  defaultValue={period}
+                  className={filterInputCls}
+                />
+              ) : (
+                <input
+                  id="period"
+                  name="period"
+                  type={view === "month" ? "month" : "number"}
+                  min={view === "year" ? 2000 : undefined}
+                  max={view === "year" ? 2100 : undefined}
+                  defaultValue={period}
+                  className={filterInputCls}
+                />
+              )}
             </div>
           )}
           <button
