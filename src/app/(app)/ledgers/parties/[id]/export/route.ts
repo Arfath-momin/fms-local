@@ -10,8 +10,29 @@ const SOURCE_LABELS: Record<string, string> = {
   PAYMENT: "Payment",
 };
 
-function csvCell(v: string) {
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+/**
+ * One CSV field, quoted where the format requires it and neutralised where a
+ * spreadsheet would otherwise run it.
+ *
+ * Excel, LibreOffice and Sheets all treat a leading =, +, - or @ as the start of
+ * a formula, so a party recorded as `=HYPERLINK(...)` — and party names are
+ * typed by whoever enters a voucher — becomes live content in the accountant's
+ * spreadsheet rather than a name. A leading apostrophe is the standard
+ * defusing: the cell still reads as the plain text it should be.
+ *
+ * Tab and carriage return are included because both can carry the payload past
+ * a naive check and still be seen by the parser.
+ */
+function csvCell(v: string): string {
+  const defused = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+  return /[",\n\r]/.test(defused)
+    ? `"${defused.replace(/"/g, '""')}"`
+    : defused;
+}
+
+/** A filename part that cannot escape the quoted Content-Disposition header. */
+function safeName(v: string): string {
+  return v.replace(/[^\w-]+/g, "_");
 }
 
 // Statement CSV — generated in-memory and streamed, never persisted
@@ -50,7 +71,12 @@ export async function GET(
     ),
   ];
 
-  const filename = `${company.name}-${centre.name.replace(/[^\w-]+/g, "_")}-${party.name.replace(/[^\w-]+/g, "_")}-statement.csv`;
+  // Every part sanitised, the company included — it was the one name passed
+  // through raw, and a quote in it would have broken out of the quoted
+  // filename in the Content-Disposition header below.
+  const filename =
+    [company.name, centre.name, party.name].map(safeName).join("-") +
+    "-statement.csv";
   return new NextResponse(lines.join("\r\n"), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",

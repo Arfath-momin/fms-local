@@ -11,9 +11,29 @@ import {
 import { fmtDate, toInputDate } from "@/lib/format";
 import { parseRegisterPeriod } from "@/lib/register-period";
 
+/**
+ * One CSV field, quoted where the format requires it and neutralised where a
+ * spreadsheet would otherwise run it.
+ *
+ * Excel, LibreOffice and Sheets all treat a leading =, +, - or @ as the start of
+ * a formula, so a party recorded as `=HYPERLINK(...)` — and party names are
+ * typed by whoever enters a voucher — becomes live content in the accountant's
+ * spreadsheet rather than a name. A leading apostrophe is the standard
+ * defusing: the cell still reads as the plain text it should be.
+ *
+ * Tab and carriage return are included because both can carry the payload past
+ * a naive check and still be seen by the parser.
+ */
+/** A filename part that cannot escape the quoted Content-Disposition header. */
+function safeName(v: string): string {
+  return v.replace(/[^\w-]+/g, "_");
+}
+
 function csvCell(v: string): string {
-  if (/[",\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
-  return v;
+  const defused = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+  return /[",\n\r]/.test(defused)
+    ? `"${defused.replace(/"/g, '""')}"`
+    : defused;
 }
 
 function formatValue(v: Prisma.Decimal | string | number): string {
@@ -118,8 +138,8 @@ export async function GET(req: Request) {
     csv = lines.join("\r\n");
     filename =
       view === "range"
-        ? `${company.name}-transactions-${toInputDate(from)}-to-${toInputDate(to)}.csv`
-        : `${company.name}-transactions-${toInputDate(from)}.csv`;
+        ? `${safeName(company.name)}-transactions-${toInputDate(from)}-to-${toInputDate(to)}.csv`
+        : `${safeName(company.name)}-transactions-${toInputDate(from)}.csv`;
   } else {
     const { buckets, total } = await computePeriodBreakdown({
       companyId: company.id,
@@ -156,7 +176,7 @@ export async function GET(req: Request) {
       ].join(","),
     ];
     csv = lines.join("\r\n");
-    filename = `${company.name}-${view}-report-${period}.csv`;
+    filename = `${safeName(company.name)}-${view}-report-${period}.csv`;
   }
 
   return new NextResponse(csv, {
