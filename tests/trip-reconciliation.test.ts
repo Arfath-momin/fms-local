@@ -1,3 +1,9 @@
+// tallyTrip and deriveTripStatus are pure, but they live in @/lib/trip
+// alongside the box-statement queries, so importing them pulls in the Prisma
+// client — which now refuses to construct without a connection string rather
+// than failing later at the first query. Same dotenv line as the integration
+// tests; nothing here actually reaches the database.
+import "dotenv/config";
 import { describe, expect, it } from "vitest";
 import { Prisma } from "@/generated/prisma/client";
 import { deriveTripStatus, tallyTrip } from "@/lib/trip";

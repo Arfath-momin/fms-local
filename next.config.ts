@@ -13,9 +13,12 @@ const nextConfig: NextConfig = {
   // tracer copies stored bill images into the build output, which would bake
   // client data into a distributable image. Production uses an absolute path
   // outside the project, but local builds must not leak either.
+  // `tests/**` joins the list because the standalone output was carrying the
+  // whole suite into the deployed image — harmless, but it is not application
+  // code and has no business in a production bundle.
   outputFileTracingExcludes: {
-    "/*": ["docs/**", "scripts/**", "src/**", "uploads/**"],
-    "/**": ["docs/**", "scripts/**", "src/**", "uploads/**"],
+    "/*": ["docs/**", "scripts/**", "src/**", "tests/**", "uploads/**"],
+    "/**": ["docs/**", "scripts/**", "src/**", "tests/**", "uploads/**"],
   },
 
   experimental: {

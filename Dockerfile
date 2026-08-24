@@ -107,11 +107,17 @@ RUN mkdir -p /app/uploads && chown -R nextjs:nodejs /app/uploads
 # upload back to failing with EACCES.
 EXPOSE 3000
 
+# Probes /api/health, NOT a page. /login renders straight out of the bundle
+# without touching Postgres or reading SESSION_SECRET, so it answered 200 on a
+# container whose database was misconfigured — healthy forever, 500 on every
+# real request, and no restart. /api/health runs a query and checks the signing
+# key, so "healthy" means the app can actually serve.
+#
 # Reads $PORT rather than hardcoding 3000: platforms that assign the port
 # themselves (Railway) override it, and a probe on the wrong port reports a
 # healthy container as dead.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/login" >/dev/null 2>&1 || exit 1
+  CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/api/health" >/dev/null 2>&1 || exit 1
 
 # Plain server start: under compose the one-shot `migrate` service has already
 # run and the app must not race it. Railway has no such service and overrides
