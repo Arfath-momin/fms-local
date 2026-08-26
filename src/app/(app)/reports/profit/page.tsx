@@ -94,7 +94,7 @@ export default async function ProfitReportPage({
           href={`/reports/profit/print?from=${toInputDate(from)}&to=${toInputDate(to)}`}
           className="border border-line-strong bg-surface px-3 py-1 text-[12px] font-semibold hover:border-accent"
         >
-          Print / Save as PDF
+          Save as PDF
         </Link>
       </div>
 

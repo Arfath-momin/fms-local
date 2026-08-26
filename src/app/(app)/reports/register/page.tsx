@@ -213,7 +213,7 @@ export default async function RegisterPage({
           href={printHref(view, { period, from, to, scope })}
           className="border border-line-strong bg-surface px-3 py-1 text-[12px] font-semibold hover:border-accent"
         >
-          Print
+          Save as PDF
         </Link>
         <span className="flex gap-2">
           <Link

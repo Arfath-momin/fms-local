@@ -7,9 +7,42 @@ import { getActiveScope } from "@/lib/centre";
 import { PARTY_TYPE_LABELS } from "@/lib/party";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
+import { docTitle, titleDate } from "@/lib/doc-title";
 import { PrintHeader } from "../../../../letterhead";
 import { PrintToolbar } from "../../../../print-toolbar";
 import "../../../../voucher-print.css";
+
+/** The filename this statement saves itself as — see src/lib/doc-title.ts. */
+export async function generateMetadata({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<SearchParams>;
+}) {
+  const { id } = await params;
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { title: "FMS" };
+  const party = await prisma.party.findUnique({
+    where: { id },
+    select: { name: true },
+  });
+  if (!party) return { title: "FMS" };
+  // The window is part of the identity here: two statements for one party
+  // differ only by the period they cover, and a filename that omitted it would
+  // make the second overwrite the first.
+  const w = parseListWindow(await searchParams);
+  return {
+    title: docTitle(
+      company.name,
+      "Statement",
+      party.name,
+      titleDate(w.fromDate),
+      `to-${titleDate(w.toDate)}`
+    ),
+  };
+}
+
 
 const ZERO = new Prisma.Decimal(0);
 

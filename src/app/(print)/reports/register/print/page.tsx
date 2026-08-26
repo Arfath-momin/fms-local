@@ -13,9 +13,24 @@ import {
   registerSubtypeLabel,
 } from "@/lib/register-labels";
 import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { docTitle } from "@/lib/doc-title";
 import { PrintHeader } from "../../../letterhead";
 import { PrintToolbar } from "../../../print-toolbar";
 import "../../../voucher-print.css";
+
+/** The filename this register saves itself as — see src/lib/doc-title.ts. */
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<RegisterParams>;
+}) {
+  const { company } = await getActiveScope();
+  // Parsed by the same module the sheet uses, so the name always describes the
+  // window that was actually printed.
+  const { label } = parseRegisterPeriod(await searchParams);
+  return { title: docTitle(company.name, "Transactions", label) };
+}
+
 
 const ZERO = new Prisma.Decimal(0);
 

@@ -6,9 +6,36 @@ import { computeProfit } from "@/lib/report";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { businessTodayDate, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
+import { docTitle, titleDate } from "@/lib/doc-title";
 import { PrintHeader } from "../../../letterhead";
 import { PrintToolbar } from "../../../print-toolbar";
 import "../../../voucher-print.css";
+
+/** The filename this report saves itself as — see src/lib/doc-title.ts. */
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
+  const { company } = await getActiveScope();
+  const sp = await searchParams;
+  const today = businessTodayDate();
+  const from =
+    sp.from && /^\d{4}-\d{2}-\d{2}$/.test(sp.from)
+      ? new Date(sp.from)
+      : monthStart(today);
+  const to =
+    sp.to && /^\d{4}-\d{2}-\d{2}$/.test(sp.to) ? new Date(sp.to) : today;
+  return {
+    title: docTitle(
+      company.name,
+      "Profit-and-Loss",
+      titleDate(from),
+      `to-${titleDate(to)}`
+    ),
+  };
+}
+
 
 function monthStart(d: Date) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));

@@ -7,9 +7,36 @@ import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { purchaseHasLineBoats } from "@/lib/party";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { rupeesInWords } from "@/lib/amount-words";
+import { docTitle, titleDate } from "@/lib/doc-title";
 import { PrintHeader } from "../../../../letterhead";
 import { PrintToolbar } from "../../../../print-toolbar";
 import "../../../../voucher-print.css";
+
+/** The filename this bill saves itself as — see src/lib/doc-title.ts. */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { title: "FMS" };
+  const purchase = await prisma.purchase.findFirst({
+    where: { id, companyId: company.id, centreId: centre.id },
+    select: { billNo: true, date: true, party: { select: { name: true } } },
+  });
+  if (!purchase) return { title: "FMS" };
+  return {
+    title: docTitle(
+      company.name,
+      "Purchase",
+      purchase.billNo,
+      purchase.party.name,
+      titleDate(purchase.date)
+    ),
+  };
+}
+
 
 /**
  * A purchase as a document — the merchant's own record of what was bought from

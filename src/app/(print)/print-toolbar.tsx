@@ -33,9 +33,11 @@ function setPlain(next: boolean) {
 /**
  * The on-screen controls above a printable voucher — never printed themselves.
  *
- * "Print / Save as PDF" is one button because the browser's print dialog is
- * also where Save as PDF lives, so printing a bill and producing a file to send
- * are the same action.
+ * One button, labelled for the thing people actually want: a PDF to send. The
+ * browser's print dialog IS the Save-as-PDF dialog, so this is the same action
+ * either way — and with each page now setting its own document title (see
+ * src/lib/doc-title.ts) the filename arrives pre-filled as the bill rather than
+ * as "FMS".
  *
  * The plain toggle exists because colour on paper is a running cost. A merchant
  * printing fifty delivery notes a day should be able to turn the band and the
@@ -84,7 +86,7 @@ export function PrintToolbar({
           onClick={() => window.print()}
           className="bg-accent text-white px-4 py-2 text-[13px] font-semibold"
         >
-          Print / Save as PDF
+          Save as PDF
         </button>
       </div>
     </div>

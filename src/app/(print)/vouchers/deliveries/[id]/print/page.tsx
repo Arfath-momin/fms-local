@@ -4,9 +4,40 @@ import { getActiveScope } from "@/lib/centre";
 import { requireSession } from "@/lib/session";
 import { lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { docTitle, titleDate } from "@/lib/doc-title";
 import { PrintHeader } from "../../../../letterhead";
 import { PrintToolbar } from "../../../../print-toolbar";
 import "../../../../voucher-print.css";
+
+/** The filename this note saves itself as — see src/lib/doc-title.ts. */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { title: "FMS" };
+  const note = await prisma.deliveryNote.findFirst({
+    where: { id, companyId: company.id, centreId: centre.id },
+    select: {
+      billNo: true,
+      date: true,
+      vehicle: { select: { number: true } },
+    },
+  });
+  if (!note) return { title: "FMS" };
+  return {
+    title: docTitle(
+      company.name,
+      "Delivery-Note",
+      note.billNo,
+      note.vehicle.number,
+      titleDate(note.date)
+    ),
+  };
+}
+
 
 /**
  * The delivery note as a document, to travel with the vehicle.

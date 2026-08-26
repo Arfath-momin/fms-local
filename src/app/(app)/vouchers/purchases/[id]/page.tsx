@@ -97,7 +97,7 @@ export default async function PurchaseDetailPage({
           href={`/vouchers/purchases/${purchase.id}/print`}
           className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
         >
-          Print
+          Save as PDF
         </Link>
         </div>
         <dl className="border border-line-strong bg-surface divide-y divide-line max-w-lg text-[13px]">
@@ -185,7 +185,7 @@ export default async function PurchaseDetailPage({
           href={`/vouchers/purchases/${purchase.id}/print`}
           className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
         >
-          Print
+          Save as PDF
         </Link>
       </div>
       {/* Above the form, not below it: it is the reason this screen is open.

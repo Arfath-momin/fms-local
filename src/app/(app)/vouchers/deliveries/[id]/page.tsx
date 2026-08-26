@@ -78,12 +78,6 @@ export default async function DeliveryNotePage({
 
   return (
     <div className="max-w-3xl">
-      <Link
-        href="/vouchers/deliveries"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Delivery Notes
-      </Link>
       <div className="flex items-end justify-between flex-wrap gap-3 mt-1 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">
@@ -100,7 +94,7 @@ export default async function DeliveryNotePage({
             href={`/vouchers/deliveries/${note.id}/print`}
             className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
           >
-            Print Note
+            Save as PDF
           </Link>
           {mayEdit && (
             <Link
