@@ -9,7 +9,7 @@
 // gets the plain amount field — which is what makes adding "Electricity" from
 // Masters work without a deploy.
 
-/** Codes seeded by scripts/seed.ts. Others are user-created and are fine. */
+/** Codes every company starts with. Others are user-created and are fine. */
 export const DIRECT_CODES = [
   "ICE",
   "LOADERS",
@@ -19,6 +19,41 @@ export const DIRECT_CODES = [
   "RENT",
 ] as const;
 export const OVERHEAD_CODES = ["SALARY", "OFFICE_RENT", "OTHER"] as const;
+
+/**
+ * The heads every company gets on the day it is created.
+ *
+ * These used to exist only inside scripts/seed.ts, which meant a real company —
+ * created from the Companies screen, or by bootstrap on a fresh server — began
+ * with an empty list and could not record a single expense until someone went
+ * to Masters and typed all nine in. Worse, RENT is not optional: recording a
+ * trip's rent looks it up by code and fails outright without it, so a brand new
+ * company could raise a delivery note and then be unable to close it.
+ *
+ * The DIRECT / OVERHEAD split is the whole point of the list and not a
+ * preference — only DIRECT costs reach a buying day's gross profit (spec §3.4).
+ *
+ * The merchant still owns the list: anything here can be archived if they never
+ * use it, and anything else can be added from Masters. This is the starting
+ * point, not a fixed set.
+ */
+export const DEFAULT_EXPENSE_CATEGORIES: readonly {
+  code: string;
+  name: string;
+  kind: "DIRECT" | "OVERHEAD";
+  /** OTHER shows a description/amount line table instead of one flat figure. */
+  allowsLines: boolean;
+}[] = [
+  { code: "ICE", name: "Ice", kind: "DIRECT", allowsLines: false },
+  { code: "LOADERS", name: "Loaders", kind: "DIRECT", allowsLines: false },
+  { code: "LADIES", name: "Ladies", kind: "DIRECT", allowsLines: false },
+  { code: "BATHA", name: "Batha", kind: "DIRECT", allowsLines: false },
+  { code: "CANTEEN", name: "Canteen", kind: "DIRECT", allowsLines: false },
+  { code: "RENT", name: "Vehicle Rent", kind: "DIRECT", allowsLines: false },
+  { code: "SALARY", name: "Salaries", kind: "OVERHEAD", allowsLines: false },
+  { code: "OFFICE_RENT", name: "Office Rent", kind: "OVERHEAD", allowsLines: false },
+  { code: "OTHER", name: "Other", kind: "OVERHEAD", allowsLines: true },
+];
 
 export type ExpenseFieldSpec = {
   name: string; // form field name + key inside details JSON

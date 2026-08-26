@@ -24,6 +24,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { MIN_PASSWORD_LENGTH } from "../src/lib/password";
 import { COMPANY_COLOURS } from "../src/lib/company-theme";
+import { ensureDefaultExpenseCategories } from "../src/lib/expense-provision";
 
 const BCRYPT_COST = 12;
 const DEFAULT_COMPANIES = ["BFM", "B2B"];
@@ -110,7 +111,13 @@ async function main() {
             data: { name: companyName, colour },
             select: { id: true, colour: true },
           });
-      console.log(`company  ${companyName.padEnd(10)} ${c.colour}  ${c.id}`);
+      // Standard expense heads, so a freshly bootstrapped server can record an
+      // expense and close a trip without a visit to Masters first.
+      const added = await ensureDefaultExpenseCategories(prisma, c.id);
+      console.log(
+        `company  ${companyName.padEnd(10)} ${c.colour}  ${c.id}` +
+          (added > 0 ? `  (+${added} expense categories)` : "")
+      );
     }
 
     // --- standing party accounts -------------------------------------------

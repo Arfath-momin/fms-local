@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { ensureDefaultExpenseCategories } from "@/lib/expense-provision";
 import { requireSuperAdmin } from "@/lib/session";
 import { isCompanyColour } from "@/lib/company-theme";
 import { stageAttachmentFile, validateImageFile } from "@/lib/attachments";
@@ -94,7 +95,16 @@ export async function createCompany(
 
   try {
     const logoKey = await stageLogo(formData);
-    await prisma.company.create({ data: { ...parsed.data, logoKey } });
+    // The company and its standard expense heads land together or not at all.
+    // A company created without them cannot record an expense, and cannot close
+    // a trip either — the rent path looks RENT up by code and throws without it.
+    await prisma.$transaction(async (tx) => {
+      const company = await tx.company.create({
+        data: { ...parsed.data, logoKey },
+        select: { id: true },
+      });
+      await ensureDefaultExpenseCategories(tx, company.id);
+    });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
       return { error: `A company called “${parsed.data.name}” already exists.` };

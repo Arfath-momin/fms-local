@@ -15,7 +15,7 @@ import { PrismaClient, Prisma } from "../src/generated/prisma/client";
 import type { PartyType } from "../src/generated/prisma/enums";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { postLedgerEntries } from "../src/lib/ledger";
-import { DIRECT_CODES, OVERHEAD_CODES } from "../src/lib/expense";
+import { ensureDefaultExpenseCategories } from "../src/lib/expense-provision";
 import { refreshTripStatus } from "../src/lib/trip";
 import { nextDocumentNo, SERIES_PREFIX } from "../src/lib/document-series";
 
@@ -28,18 +28,6 @@ const day = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
 /** The buying day everything below is accounted to. */
 const BUYING_DAY = day("2026-08-16");
-
-const CATEGORY_NAMES: Record<string, string> = {
-  ICE: "Ice",
-  LOADERS: "Loaders",
-  LADIES: "Ladies",
-  BATHA: "Batha",
-  CANTEEN: "Canteen",
-  RENT: "Vehicle Rent",
-  SALARY: "Salaries",
-  OFFICE_RENT: "Office Rent",
-  OTHER: "Other",
-};
 
 async function main() {
   // --- clear transactional data (idempotent re-run) ----------------------
@@ -112,26 +100,18 @@ async function main() {
   // --- expense categories -------------------------------------------------
   // The DIRECT / OVERHEAD split is the whole point: only DIRECT costs reach a
   // buying day's gross profit.
+  // The same list every real company gets, from the same place — a seeded
+  // database that disagreed with a bootstrapped one about which heads exist
+  // would make local testing prove nothing about production.
   const categoryId: Record<string, string> = {};
   for (const companyId of Object.values(companies)) {
-    let order = 0;
-    for (const code of [...DIRECT_CODES, ...OVERHEAD_CODES]) {
-      const kind = (DIRECT_CODES as readonly string[]).includes(code)
-        ? "DIRECT"
-        : "OVERHEAD";
-      const cat = await prisma.expenseCategory.create({
-        data: {
-          companyId,
-          code,
-          name: CATEGORY_NAMES[code] ?? code,
-          kind,
-          allowsLines: code === "OTHER",
-          sortOrder: order++,
-        },
-        select: { id: true },
-      });
-      if (companyId === BFM) categoryId[code] = cat.id;
-    }
+    await ensureDefaultExpenseCategories(prisma, companyId);
+  }
+  for (const c of await prisma.expenseCategory.findMany({
+    where: { companyId: BFM },
+    select: { id: true, code: true },
+  })) {
+    categoryId[c.code] = c.id;
   }
 
   // --- masters ------------------------------------------------------------
