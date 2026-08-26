@@ -158,6 +158,9 @@ export async function recordTripRent(
           date: trip.date,
           spentOn: new Date(),
           notes: `Vehicle rent for trip ${trip.billNo}`,
+          // A real column now, not just the JSON blob. `details` keeps its copy
+          // so nothing reading the old shape breaks.
+          deliveryNoteId: trip.id,
           details: { tripId: trip.id },
         },
       });

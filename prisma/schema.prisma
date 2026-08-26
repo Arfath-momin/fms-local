@@ -424,6 +424,13 @@ model Expense {
   /// against. Set it when the money is genuinely owed to someone.
   partyId     String?         @map("party_id")
   categoryId  String          @map("category_id")
+  /// The trip this cost came off, for a vehicle-rent expense (spec §4: a sale
+  /// or expense links to its trip by deliveryNoteId, NEVER by matching date and
+  /// vehicle text). It used to live in `details` as `{ tripId }`, which is the
+  /// same mistake one layer down — a JSON blob no foreign key protects and no
+  /// query can join through, so the rent ledger could not name the vehicle the
+  /// rent was for. Null on every expense that is not tied to a trip.
+  deliveryNoteId String?      @map("delivery_note_id")
   amount      Decimal         @db.Decimal(14, 2)
   details     Json?
   notes       String?
@@ -441,16 +448,18 @@ model Expense {
   createdById String?         @map("created_by_id")
   updatedById String?         @map("updated_by_id")
 
-  company   Company @relation(fields: [companyId], references: [id])
-  centre    Centre  @relation(fields: [centreId], references: [id])
-  party     Party?          @relation(fields: [partyId], references: [id])
-  category  ExpenseCategory @relation(fields: [categoryId], references: [id])
-  createdBy User?           @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
-  updatedBy User?           @relation("ExpenseUpdatedBy", fields: [updatedById], references: [id])
-  lines     ExpenseLine[]
+  company      Company       @relation(fields: [companyId], references: [id])
+  centre       Centre        @relation(fields: [centreId], references: [id])
+  party        Party?          @relation(fields: [partyId], references: [id])
+  category     ExpenseCategory @relation(fields: [categoryId], references: [id])
+  deliveryNote DeliveryNote?   @relation(fields: [deliveryNoteId], references: [id])
+  createdBy    User?           @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  updatedBy    User?           @relation("ExpenseUpdatedBy", fields: [updatedById], references: [id])
+  lines        ExpenseLine[]
 
   @@index([companyId, centreId, categoryId, date])
   @@index([companyId, centreId, date])
+  @@index([deliveryNoteId])
   @@map("expenses")
 }
 
@@ -536,6 +545,7 @@ model DeliveryNote {
   updatedBy User?              @relation("DeliveryNoteUpdatedBy", fields: [updatedById], references: [id])
   lines     DeliveryNoteLine[]
   sales     Sale[]
+  expenses  Expense[]
 
   @@index([companyId, centreId, date])
   @@index([status])
