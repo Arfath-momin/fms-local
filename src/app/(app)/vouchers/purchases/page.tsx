@@ -42,6 +42,12 @@ export default async function PurchasesPage({
       include: {
         party: { select: { name: true } },
         _count: { select: { lines: true } },
+        // The boats behind the bill. On a Society purchase the money is owed to
+        // the Society, so "Owed to" alone never tells you WHICH boat the
+        // payment is for — which is the thing the merchant actually needs when
+        // settling. The names are already on the rows; they were just never
+        // brought up to the list.
+        lines: { select: { boat: { select: { name: true } } } },
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       skip: listWindow.skip,
@@ -94,6 +100,16 @@ export default async function PurchasesPage({
             </thead>
             <tbody>
               {purchases.map((p) => {
+                // Distinct and in row order: one boat usually lands several
+                // varieties on one bill, and repeating its name once per line
+                // would be noise rather than information.
+                const boats = [
+                  ...new Set(
+                    p.lines
+                      .map((l) => l.boat?.name)
+                      .filter((n): n is string => Boolean(n))
+                  ),
+                ];
                 return (
                   <tr key={p.id}>
                     <td className="whitespace-nowrap">
@@ -104,6 +120,11 @@ export default async function PurchasesPage({
                     </td>
                     <td className="font-medium">
                       <span>{p.party.name}</span>
+                      {boats.length > 0 && (
+                        <div className="text-muted text-[12px] font-normal">
+                          {boats.join(", ")}
+                        </div>
+                      )}
                     </td>
                     <td >{TYPE_LABELS[p.type]}</td>
                     <td className="num-col num text-muted">
