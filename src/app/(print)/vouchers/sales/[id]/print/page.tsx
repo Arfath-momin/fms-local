@@ -6,9 +6,42 @@ import { requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS, saleLineTotalKg } from "@/lib/sale";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { rupeesInWords } from "@/lib/amount-words";
+import { docTitle, titleDate } from "@/lib/doc-title";
 import { PrintHeader } from "../../../../letterhead";
 import { PrintToolbar } from "../../../../print-toolbar";
 import "../../../../voucher-print.css";
+
+/**
+ * The filename this bill saves itself as. See src/lib/doc-title.ts — a browser
+ * names a "Save as PDF" file after the document title, and every one of these
+ * used to inherit "FMS" from the root layout.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const { company, centre } = await getActiveScope();
+  if (!centre) return { title: "FMS" };
+  // A deliberately tiny read: this runs alongside the page's own query, and
+  // there is no reason to fetch a whole bill to name a file.
+  const sale = await prisma.sale.findFirst({
+    where: { id, companyId: company.id, centreId: centre.id },
+    select: { billNo: true, date: true, type: true },
+  });
+  if (!sale) return { title: "FMS" };
+  return {
+    title: docTitle(
+      company.name,
+      SALE_TYPE_LABELS[sale.type],
+      "Bill",
+      sale.billNo,
+      titleDate(sale.date)
+    ),
+  };
+}
+
 
 /**
  * The customer-facing bill for one sale, as a document.
@@ -64,6 +97,10 @@ export default async function SaleBillPage({
   const outstanding = latest?.runningBalance ?? new Prisma.Decimal(0);
 
   const isFishMill = sale.type === "FISH_MILL";
+  // Factory rows carry a count now too, so the header follows the DATA rather
+  // than the sale type: a bill that recorded counts prints them, one that did
+  // not gets a plain Kgs column instead of an empty prefix.
+  const anyCount = sale.lines.some((l) => l.count != null);
   // A market line is a BOX record: which market took how many of the load.
   const isMarket = sale.type === "MARKET";
   const totalBoxes = sale.lines.reduce((a, l) => a + (l.box ?? 0), 0);
@@ -179,7 +216,7 @@ export default async function SaleBillPage({
                   <th className="r">Boxes</th>
                 ) : (
                   <>
-                    {isFishMill ? (
+                    {anyCount ? (
                       <th className="r">Count / Kg</th>
                     ) : (
                       <th className="r">Kgs</th>
@@ -205,7 +242,7 @@ export default async function SaleBillPage({
                             box × kgs. The count prefixes it where the mill
                             recorded one, since "180 / 45.500 kg" is how the
                             trade reads a line. */}
-                        {isFishMill && l.count ? `${l.count} / ` : ""}
+                        {l.count ? `${l.count} / ` : ""}
                         {fmtKg(
                           saleLineTotalKg({
                             qtyKg: Number(l.qtyKg),

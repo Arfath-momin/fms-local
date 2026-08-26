@@ -331,12 +331,29 @@ async function parse(
     // rent is grossed back up at report time (see saleRevenue in lib/sale).
     amount = netBill;
   } else if (type === "FACTORY") {
-    const billAmount = parseMoney(clean(formData.get("amount")));
-    if (!billAmount || billAmount.lte(0))
-      return { error: "Bill amount total must be a positive number." };
     base.vehicleNo = clean(formData.get("vehicleNo")) || null;
     base.returnNote = clean(formData.get("returnNote")) || null;
-    amount = billAmount;
+
+    // Factory bills are itemised now, the same shape as a fish mill bill: the
+    // factory reweighs on arrival and pays for what it accepts, and without
+    // rows there was no record of how many BOXES that was — so a factory trip
+    // could never be reconciled by box the way a market trip is.
+    const parsedLines = parseLines(formData, true);
+    if ("error" in parsedLines) return { error: parsedLines.error };
+
+    if (parsedLines.lines.length > 0) {
+      base.lines = parsedLines.lines;
+      amount = parsedLines.lines.reduce((a, l) => a.add(l.total), ZERO);
+    } else {
+      // A bill entered before itemisation existed keeps its single figure.
+      // Re-pricing one to zero because it has no rows would quietly rewrite a
+      // sale the merchant never touched, so the old field is still accepted —
+      // but only when there is genuinely nothing to itemise.
+      const billAmount = parseMoney(clean(formData.get("amount")));
+      if (!billAmount || billAmount.lte(0))
+        return { error: "Add at least one line item." };
+      amount = billAmount;
+    }
   } else if (type === "FISH_MILL") {
     const parsedLines = parseLines(formData, true);
     if ("error" in parsedLines) return { error: parsedLines.error };
@@ -692,6 +709,7 @@ async function postTripRentExpense(
       date: trip?.date ?? t.date,
       spentOn: t.date,
       notes: `Vehicle rent for trip ${trip?.billNo ?? ""}`.trim(),
+      deliveryNoteId: t.deliveryNoteId,
       details: { tripId: t.deliveryNoteId },
     },
   });

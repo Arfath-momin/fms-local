@@ -121,8 +121,29 @@ export function SaleForm({
   // MARKET is in here now: a market bill is counted in boxes, and those box
   // counts are what tally against the boxes the trip dispatched. Without them
   // there is no way to know which market took how much of the load.
+  // A factory bill entered before it was itemised has an amount and no rows.
+  // Re-opening one must not silently re-price it to zero, so it keeps its
+  // single-amount box; only NEW factory bills are itemised. `initial` is set
+  // on edit and absent on new, which is exactly the distinction.
+  const factoryLumpSum =
+    type === "FACTORY" && !!initial && (initial.lines?.length ?? 0) === 0;
+
+  // MARKET is in here now: a market bill is counted in boxes, and those box
+  // counts are what tally against the boxes the trip dispatched. Without them
+  // there is no way to know which market took how much of the load.
+  //
+  // FACTORY joined for the same reason one layer along: the factory reweighs
+  // and pays for what it accepts, and without rows there was no record of how
+  // many BOXES went into that — so a factory trip could never be reconciled by
+  // box the way a market trip is.
   const hasLines =
-    type === "FISH_MILL" || type === "LOCAL" || type === "MARKET";
+    type === "FISH_MILL" ||
+    type === "LOCAL" ||
+    type === "MARKET" ||
+    (type === "FACTORY" && !factoryLumpSum);
+
+  /** Types whose rows are boxed: a box count, a per-box weight, and a count. */
+  const boxedLines = type === "FISH_MILL" || type === "FACTORY";
   const [lines, setLines] = useState<SaleLineInit[]>(
     initial?.lines?.length ? initial.lines : [BLANK_LINE]
   );
@@ -209,7 +230,7 @@ export function SaleForm({
   const amount =
     type === "MARKET"
       ? netBill
-      : type === "FACTORY"
+      : factoryLumpSum
         ? n(factoryAmount)
         : lineTotal;
 
@@ -579,20 +600,28 @@ export function SaleForm({
             </label>
             <input id="vehicleNo" name="vehicleNo" defaultValue={initial?.vehicleNo ?? ""} className={inputCls} />
           </div>
-          <div>
-            <label htmlFor="amount" className={labelCls}>
-              Bill Amount Total (₹)
-            </label>
-            <input
-              id="amount"
-              name="amount"
-              inputMode="decimal"
-              required
-              value={factoryAmount}
-              onChange={(e) => setFactoryAmount(e.target.value)}
-              className={inputCls + " num text-right"}
-            />
-          </div>
+          {/* Only on a bill that predates itemisation — see factoryLumpSum.
+              New factory bills take their total from the rows below. */}
+          {factoryLumpSum && (
+            <div>
+              <label htmlFor="amount" className={labelCls}>
+                Bill Amount Total (₹)
+              </label>
+              <input
+                id="amount"
+                name="amount"
+                inputMode="decimal"
+                required
+                value={factoryAmount}
+                onChange={(e) => setFactoryAmount(e.target.value)}
+                className={inputCls + " num text-right"}
+              />
+              <p className="text-muted text-[12px] mt-1">
+                This bill was entered as one figure, before factory bills
+                carried rows. It stays that way — new ones are itemised.
+              </p>
+            </div>
+          )}
           <div className="col-span-2">
             <label htmlFor="returnNote" className={labelCls}>
               Return (optional)
@@ -622,21 +651,21 @@ export function SaleForm({
             <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="text-muted text-[12px] uppercase tracking-wide">
-                  {(type === "FISH_MILL" || type === "MARKET") && (
+                  {(boxedLines || type === "MARKET") && (
                     <th className="text-right font-semibold px-2 py-2 w-16">Box</th>
                   )}
                   <th className="text-left font-semibold px-3 py-2">
-                    {type === "FISH_MILL" ? "Fish (variety)" : "Particular"}
+                    {boxedLines ? "Fish (variety)" : "Particular"}
                   </th>
                   {/* A market line carries no weight or rate: the money on a
                       market bill is the net the market paid, and the line is
                       there to record which market took how many boxes. */}
                   {type !== "MARKET" && (
                     <th className="text-right font-semibold px-2 py-2 w-24">
-                      {type === "FISH_MILL" ? "Kgs / box" : "Kgs"}
+                      {boxedLines ? "Kgs / box" : "Kgs"}
                     </th>
                   )}
-                  {type === "FISH_MILL" && (
+                  {boxedLines && (
                     <th className="text-right font-semibold px-2 py-2 w-24">
                       Total Kg
                     </th>
@@ -644,7 +673,7 @@ export function SaleForm({
                   {type !== "MARKET" && (
                     <th className="text-right font-semibold px-2 py-2 w-24">Rate/kg</th>
                   )}
-                  {type === "FISH_MILL" && (
+                  {boxedLines && (
                     <th className="text-right font-semibold px-2 py-2 w-16">Count</th>
                   )}
                   {type !== "MARKET" && (
@@ -659,7 +688,7 @@ export function SaleForm({
                   const rowTotal = totalKg * n(l.ratePerKg);
                   return (
                     <tr key={i} className="border-t border-line">
-                      {(type === "FISH_MILL" || type === "MARKET") && (
+                      {(boxedLines || type === "MARKET") && (
                         <td className="px-1 py-1">
                           <input name="box" inputMode="numeric" value={l.box} onChange={(e) => setLine(i, { box: e.target.value })} className={cell} />
                         </td>
@@ -674,7 +703,7 @@ export function SaleForm({
                       )}
                       {/* Derived, not typed: box × kgs. Read-only so it can
                           never disagree with the two figures above it. */}
-                      {type === "FISH_MILL" && (
+                      {boxedLines && (
                         <td className="px-2 py-1 num text-right text-muted">
                           {totalKg ? fmtKg(totalKg) : ""}
                         </td>
@@ -684,7 +713,7 @@ export function SaleForm({
                           <input name="ratePerKg" inputMode="decimal" value={l.ratePerKg} onChange={(e) => setLine(i, { ratePerKg: e.target.value })} className={cell} />
                         </td>
                       )}
-                      {type === "FISH_MILL" && (
+                      {boxedLines && (
                         <td className="px-1 py-1">
                           <input name="count" inputMode="numeric" value={l.count} onChange={(e) => setLine(i, { count: e.target.value })} className={cell} />
                         </td>
@@ -705,18 +734,18 @@ export function SaleForm({
               </tbody>
               <tfoot>
                 <tr className="border-t border-line-strong font-semibold">
-                  {(type === "FISH_MILL" || type === "MARKET") && (
+                  {(boxedLines || type === "MARKET") && (
                     <td className="px-2 py-2 num text-right">{boxTotal || ""}</td>
                   )}
                   <td className="px-3 py-2 text-right" colSpan={type === "MARKET" ? 1 : 2}>
                     {type === "MARKET" ? "Boxes" : "Total"}
                   </td>
-                  {type === "FISH_MILL" && (
+                  {boxedLines && (
                     <td className="px-2 py-2 num text-right">
                       {kgTotal ? fmtKg(kgTotal) : ""}
                     </td>
                   )}
-                  {type === "FISH_MILL" && <td />}
+                  {boxedLines && <td />}
                   {/* A market bill's money is the net the market paid, so
                       there is no line total to foot to — only the boxes. */}
                   {type !== "MARKET" && (

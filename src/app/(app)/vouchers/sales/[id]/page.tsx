@@ -4,8 +4,8 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { getActiveScope } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
-import { SALE_TYPE_LABELS } from "@/lib/sale";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { SALE_TYPE_LABELS, saleLineTotalKg } from "@/lib/sale";
+import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
 import { AttachmentPanel } from "../../../attachments/attachment-panel";
@@ -68,16 +68,12 @@ export default async function SalePage({
   });
   const outstanding = latest?.runningBalance ?? new Prisma.Decimal(0);
   const attachments = await getAttachments("SALE", sale.id);
-  const isFishMill = sale.type === "FISH_MILL";
+  // Factory bills are itemised the same way a fish mill bill is — boxes, a
+  // per-box weight and a count — so the row table reads identically for both.
+  const boxedLines = sale.type === "FISH_MILL" || sale.type === "FACTORY";
 
   return (
     <div className="max-w-3xl">
-      <Link
-        href="/vouchers/sales"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Sales
-      </Link>
       <div className="flex items-end justify-between flex-wrap gap-3 mt-1 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">
@@ -145,22 +141,31 @@ export default async function SalePage({
           <table className="ledger-table">
             <thead>
               <tr>
-                {isFishMill && <th className="num-col">Box</th>}
-                <th>{isFishMill ? "Fish (variety)" : "Particular"}</th>
-                <th className="num-col">Kgs</th>
+                {boxedLines && <th className="num-col">Box</th>}
+                <th>{boxedLines ? "Fish (variety)" : "Particular"}</th>
+                <th className="num-col">{boxedLines ? "Kgs / box" : "Kgs"}</th>
+                {boxedLines && <th className="num-col">Total Kg</th>}
                 <th className="num-col">Rate/kg</th>
-                {isFishMill && <th className="num-col">Count</th>}
+                {boxedLines && <th className="num-col">Count</th>}
                 <th className="num-col">Total</th>
               </tr>
             </thead>
             <tbody>
               {sale.lines.map((l) => (
                 <tr key={l.id}>
-                  {isFishMill && <td className="num-col num">{l.box ?? "—"}</td>}
+                  {boxedLines && <td className="num-col num">{l.box ?? "—"}</td>}
                   <td className="font-medium">{l.particular}</td>
                   <td className="num-col num">{l.qtyKg.toString()}</td>
+                  {boxedLines && (
+                    <td className="num-col num font-semibold">
+                      {fmtKg(saleLineTotalKg({
+                        qtyKg: Number(l.qtyKg),
+                        box: l.box,
+                      }))}
+                    </td>
+                  )}
                   <td className="num-col num">{fmtMoney(l.ratePerKg)}</td>
-                  {isFishMill && <td className="num-col num">{l.count ?? "—"}</td>}
+                  {boxedLines && <td className="num-col num">{l.count ?? "—"}</td>}
                   <td className="num-col num">{fmtMoney(l.total)}</td>
                 </tr>
               ))}
