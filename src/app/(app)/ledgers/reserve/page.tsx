@@ -53,12 +53,6 @@ export default async function ReserveLedgerPage() {
 
   return (
     <div className="max-w-3xl">
-      <Link
-        href="/ledgers"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Ledgers
-      </Link>
       <div className="flex items-end justify-between mt-1 mb-4 gap-4 flex-wrap">
         <div>
           <h1 className="heading text-xl font-semibold">Reserve</h1>

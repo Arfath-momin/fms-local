@@ -168,11 +168,14 @@ export default async function PartyStatementPage({
 
   return (
     <div className="max-w-3xl">
-      {/* Back to the section this party belongs to, not to a flat list —
-          whoever opened this statement came from one of the sections. */}
+      {/* Kept as the page's own link rather than the layout's, and excluded
+          there by name. The layout derives "back" from the URL, and this is the
+          one screen where the URL is not enough: /ledgers/parties/<id> serves
+          both sections, so only the party's TYPE says whether the way back is
+          Purchase Parties or Parties. */}
       <Link
         href={section.href}
-        className="text-muted text-[12px] underline underline-offset-2"
+        className="text-muted text-[12px] underline underline-offset-2 inline-block mb-1"
       >
         ← {section.label}
       </Link>
@@ -198,7 +201,7 @@ export default async function PartyStatementPage({
               href={`/ledgers/parties/${party.id}/print?from=${listWindow.from}&to=${listWindow.to}`}
               className="text-accent text-[12px] underline underline-offset-2"
             >
-              Print statement
+              Save as PDF
             </Link>
           </div>
         </div>

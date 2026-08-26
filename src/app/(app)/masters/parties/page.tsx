@@ -71,12 +71,6 @@ export default async function PartiesPage({
 
   return (
     <div>
-      <Link
-        href="/masters"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Masters
-      </Link>
       <div className="flex items-end justify-between flex-wrap gap-3 mt-1 mb-4">
         <div>
           <h1 className="heading text-xl font-semibold">{title}</h1>

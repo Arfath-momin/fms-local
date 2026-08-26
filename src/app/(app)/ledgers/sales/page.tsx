@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { PartyType } from "@/generated/prisma/enums";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
@@ -51,12 +50,6 @@ export default async function SaleLedgersPage() {
 
   return (
     <div className="max-w-2xl">
-      <Link
-        href="/ledgers"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Ledgers
-      </Link>
       <div className="mt-1">
         <SectionHeader
           title="Sale Ledgers"

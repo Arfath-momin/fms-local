@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { sectionLedgers, totalBalance } from "@/lib/ledger-index";
@@ -40,12 +39,6 @@ export default async function PurchasePartyLedgersPage() {
 
   return (
     <div className="max-w-2xl">
-      <Link
-        href="/ledgers"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Ledgers
-      </Link>
       <div className="mt-1">
         <SectionHeader
           title="Purchase Parties"

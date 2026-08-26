@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { canAdminister, canSuperAdminister, requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
@@ -33,12 +32,6 @@ export default async function ExpenseCategoriesPage() {
 
   return (
     <div className="max-w-3xl">
-      <Link
-        href="/masters"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Masters
-      </Link>
       <h1 className="heading text-xl font-semibold mt-1 mb-1">
         Expense Categories
       </h1>

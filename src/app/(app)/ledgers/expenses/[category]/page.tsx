@@ -47,8 +47,20 @@ export default async function ExpenseCategoryPage({
   const expenses = await prisma.expense.findMany({
     where: { ...scope, categoryId: category.id },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-    include: { party: { select: { id: true, name: true } } },
+    include: {
+      party: { select: { id: true, name: true } },
+      // Vehicle rent is the one head where the vendor is not enough to identify
+      // the row: one transporter runs several vehicles, so "Ahmed · 20,000"
+      // twice in a day is unreadable without the number that tells them apart.
+      deliveryNote: {
+        select: { id: true, billNo: true, vehicle: { select: { number: true } } },
+      },
+    },
   });
+
+  // Only shown where it exists, so heads that have nothing to do with trips
+  // (ice, canteen, salary) do not gain an empty column.
+  const anyTrip = expenses.some((e) => e.deliveryNote);
   const total = expenses.reduce((acc, e) => acc.add(e.amount), ZERO);
 
   // Spend under this head, per vendor.
@@ -103,12 +115,6 @@ export default async function ExpenseCategoryPage({
 
   return (
     <div className="max-w-3xl">
-      <Link
-        href="/ledgers/expenses"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Expense Ledgers
-      </Link>
       <div className="flex items-end justify-between mt-1 mb-4 gap-4 flex-wrap">
         <div>
           <h1 className="heading text-xl font-semibold">
@@ -227,6 +233,8 @@ export default async function ExpenseCategoryPage({
             <thead>
               <tr>
                 <th>Date</th>
+                {anyTrip && <th>Vehicle</th>}
+                {anyTrip && <th>Trip</th>}
                 <th>Vendor</th>
                 <th>Notes</th>
                 <th className="num-col">Amount</th>
@@ -236,6 +244,25 @@ export default async function ExpenseCategoryPage({
               {expenses.map((e) => (
                 <tr key={e.id}>
                   <td className="whitespace-nowrap">{fmtDate(e.date)}</td>
+                  {anyTrip && (
+                    <td className="whitespace-nowrap font-medium">
+                      {e.deliveryNote?.vehicle.number ?? "—"}
+                    </td>
+                  )}
+                  {anyTrip && (
+                    <td className="whitespace-nowrap">
+                      {e.deliveryNote ? (
+                        <Link
+                          href={`/vouchers/deliveries/${e.deliveryNote.id}`}
+                          className="text-accent underline underline-offset-2"
+                        >
+                          {e.deliveryNote.billNo}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  )}
                   <td>
                     {e.party ? (
                       e.party.name

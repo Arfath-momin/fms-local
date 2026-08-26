@@ -6,6 +6,7 @@ import { getActiveCentre, getCentres } from "@/lib/centre";
 import { logout, switchCompany, switchCentre } from "./actions";
 import { NoCompanyNotice } from "./no-company";
 import { NavLinks } from "./nav-links";
+import { BackLink } from "./back-link";
 import { AppShell } from "./app-shell";
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -185,7 +186,12 @@ export default async function AppLayout({
         </header>
         {/* Tighter gutters on a phone: 24px each side of a 375px screen is
             13% of the width gone before any figure is drawn. */}
-        <main className="flex-1 p-3 sm:p-6 overflow-x-auto">{children}</main>
+        <main className="flex-1 p-3 sm:p-6 overflow-x-auto">
+          {/* Derived from the URL, so every screen below a top-level section
+              has a way back without each page carrying its own copy. */}
+          <BackLink />
+          {children}
+        </main>
       </AppShell>
     </div>
   );

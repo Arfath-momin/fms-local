@@ -183,12 +183,6 @@ export async function SettlementDetailPage({
 
   return (
     <div className="max-w-lg">
-      <Link
-        href={base}
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← {SETTLEMENT_KIND_PLURALS[kind]}
-      </Link>
 
       <div className="flex items-end justify-between flex-wrap gap-3 mt-1 mb-4 gap-3">
         <div>

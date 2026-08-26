@@ -93,12 +93,6 @@ export default async function OutstandingPage() {
 
   return (
     <div className="max-w-3xl">
-      <Link
-        href="/ledgers"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Ledgers
-      </Link>
       <h1 className="heading text-xl font-semibold mt-1 mb-1">Outstanding</h1>
       <p className="text-muted text-[13px] mb-4">
         {company.name} · {centre.name} · every account with money still open.

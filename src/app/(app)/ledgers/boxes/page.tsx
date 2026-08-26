@@ -49,12 +49,6 @@ export default async function BoxLedgerPage({
 
   return (
     <div className="max-w-3xl">
-      <Link
-        href="/ledgers"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Ledgers
-      </Link>
       <h1 className="heading text-xl font-semibold mt-1">Box Statement</h1>
       <p className="text-muted text-[13px] mb-4">
         {company.name} · {centre.name} · what went out on each truck, and who

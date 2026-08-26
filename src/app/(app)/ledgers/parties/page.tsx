@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { sectionLedgers } from "@/lib/ledger-index";
@@ -28,12 +27,6 @@ export default async function PartyLedgersPage() {
 
   return (
     <div className="max-w-2xl">
-      <Link
-        href="/ledgers"
-        className="text-muted text-[12px] underline underline-offset-2"
-      >
-        ← Ledgers
-      </Link>
       <h1 className="heading text-xl font-semibold mt-1 mb-1">All Ledgers</h1>
       <p className="text-muted text-[13px] mb-4">
         {company.name} · {centre.name} · positive balance = party owes us.
