@@ -92,9 +92,7 @@ export default async function EditSalePage({
           // only be a second answer that could disagree.
           netBill: sale.type === "MARKET" ? sale.amount.toString() : "",
           deliveryNoteId: sale.deliveryNoteId ?? "",
-          carriesRent: sale.carriesRent,
-          // The trip's stored total — this bill is what recorded it.
-          rentTotal: sale.deliveryNote?.rentAmount?.toString() ?? "",
+          rentDeducted: sale.rentDeducted?.toString() ?? "",
           amount: sale.type === "FACTORY" ? sale.amount.toString() : "",
           weight: sale.weight?.toString() ?? "",
           vehicleNo: sale.vehicleNo ?? "",

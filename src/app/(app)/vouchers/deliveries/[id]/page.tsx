@@ -17,7 +17,6 @@ import { DeleteVoucher } from "../../delete-voucher";
 import { ReviewPanel } from "../../review-panel";
 import { VoucherMeta } from "../../voucher-meta";
 import { deleteDelivery } from "../actions";
-import { RecordRentForm } from "../record-rent-form";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -61,7 +60,6 @@ export default async function DeliveryNotePage({
           billNo: true,
           amount: true,
           rentDeducted: true,
-          carriesRent: true,
           party: { select: { name: true } },
           lines: { select: { qtyKg: true, box: true } },
         },
@@ -113,30 +111,15 @@ export default async function DeliveryNotePage({
         <Field label="To" value={note.recipient ?? "—"} />
         <Field label="Channel" value={TRIP_CHANNEL_LABELS[note.channel]} />
         <Field label="Status" value={TRIP_STATUS_LABELS[note.status]} />
-        <Field
-          label="Rent"
-          value={note.rentAmount ? fmtMoney(note.rentAmount) : "—"}
-        />
         <Field label="Vehicle No." value={note.vehicle.number} />
         <Field label="Transporter" value={note.vehicle.transporter.name} />
-        <Field
-          label="Advance Paid"
-          value={note.advancePaid ? fmtMoney(note.advancePaid) : "—"}
-        />
         <Field label="Driver Name" value={note.driverName ?? "—"} />
         <Field label="Mobile No." value={note.mobileNo ?? "—"} />
       </div>
 
-      {/* A market trip's rent is recorded on the bill that carried it, so this
-          appears only where BFM settles with the driver directly. */}
-      {mayEnter && note.channel !== "MARKET" && (
-        <RecordRentForm
-          deliveryNoteId={note.id}
-          advancePaid={Number(note.advancePaid ?? 0)}
-          transporterName={note.vehicle.transporter.name}
-          existingRent={note.rentAmount ? Number(note.rentAmount) : null}
-        />
-      )}
+      {/* No rent panel. Vehicle rent is an ordinary expense voucher now —
+          agreed when the truck is loaded, entered then, whatever the trip turns
+          out to sell. See the RENT spec in src/lib/expense.ts. */}
 
       {/* Trip reconciliation — one panel serving both tallies, because the
           question differs by channel:
@@ -198,16 +181,6 @@ export default async function DeliveryNotePage({
           )}
         </div>
 
-        {tally.rentUnsettled.gt(0) && (
-          <p className="text-[12px] text-muted mt-2">
-            Rent still unsettled with {note.vehicle.transporter.name}:{" "}
-            <span className="num font-semibold">
-              {fmtMoney(tally.rentUnsettled)}
-            </span>
-            . A balance that does not close at zero means something is genuinely
-            unpaid.
-          </p>
-        )}
 
         {note.sales.length > 0 && (
           <table className="ledger-table mt-3">
@@ -231,10 +204,10 @@ export default async function DeliveryNotePage({
                     >
                       {sale.billNo}
                     </Link>
-                    {sale.carriesRent && (
+                    {sale.rentDeducted && Number(sale.rentDeducted) > 0 && (
                       <span className="text-muted text-[12px]">
                         {" "}
-                        · carried rent {fmtMoney(sale.rentDeducted ?? 0)}
+                        · market deducted {fmtMoney(sale.rentDeducted)}
                       </span>
                     )}
                   </td>

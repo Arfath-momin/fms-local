@@ -81,22 +81,8 @@ describe("market trip: three stops, 100 boxes", () => {
     expect(tally.boxesBilled).toBe(100);
     expect(tally.boxesDispatched).toBe(100);
     expect(deriveTripStatus("MARKET", tally)).toBe("CLOSED");
-    // Rent fully settled: 20,000 − 5,000 advance − 15,000 carried = 0.
-    expect(tally.rentUnsettled.toNumber()).toBe(0);
   });
 
-  it("leaves rent unsettled when no bill carried it", () => {
-    const trip = {
-      channel: "MARKET" as const,
-      rentAmount: D(20_000),
-      advancePaid: D(5_000),
-      lines: dispatched,
-      sales: [bill(148_400, [{ qtyKg: 3_000, box: 100 }])],
-    };
-    // That 15,000 is a real debt to the transporter, and the screen says so
-    // rather than quietly assuming it was paid.
-    expect(tallyTrip(trip).rentUnsettled.toNumber()).toBe(15_000);
-  });
 });
 
 describe("factory trip: a 40 kg rejection", () => {

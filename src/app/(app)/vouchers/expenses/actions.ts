@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
+import type { PartyType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
@@ -43,6 +44,8 @@ type Parsed = {
   notes: string | null;
   details: Record<string, string>;
   vendorName: string;
+  /** EXPENSE_VENDOR for most heads; TRANSPORTER for vehicle rent. */
+  vendorType: PartyType;
   file: unknown;
 };
 
@@ -162,6 +165,7 @@ async function parse(
       notes: notes || null,
       details,
       vendorName: expenseVendorName(category.code, category.name, details),
+      vendorType: EXPENSE_SPECS[category.code]?.vendorType ?? "EXPENSE_VENDOR",
       file,
     },
   };
@@ -232,7 +236,7 @@ export async function createExpense(
     // instead of leaving an expense with no receipt against it.
     const staged = await stageAttachmentFile(d.file);
     await prisma.$transaction(async (tx) => {
-      const partyId = await findOrCreateParty(tx, d.vendorName, "EXPENSE_VENDOR");
+      const partyId = await findOrCreateParty(tx, d.vendorName, d.vendorType);
       const expense = await tx.expense.create({
         data: {
           companyId: company.id,
@@ -334,7 +338,7 @@ export async function updateExpense(
         sourceId: expenseId,
         sourceType: ["EXPENSE", "PAYMENT"],
       });
-      const partyId = await findOrCreateParty(tx, d.vendorName, "EXPENSE_VENDOR");
+      const partyId = await findOrCreateParty(tx, d.vendorName, d.vendorType);
       // Replaced wholesale rather than diffed: the set is small, and an edit
       // can change the category from itemised to flat, which leaves rows that
       // no longer belong to anything.

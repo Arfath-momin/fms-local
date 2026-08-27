@@ -74,13 +74,11 @@ type Parsed = {
   /** The trip this bill came off. Required for MARKET/FACTORY/FISH_MILL. */
   deliveryNoteId: string | null;
   /** This bill carried the trip's rent — the last market stop. */
-  carriesRent: boolean;
   /**
    * The TRIP's whole rent, as the driver reported it here. Written back to the
    * trip, because rent is a property of the trip (invariant 2) — it is merely
    * not KNOWN until this bill.
    */
-  rentTotal: Prisma.Decimal | null;
   /** What this market actually handed the driver: total − advance. Derived. */
   rentDeducted: Prisma.Decimal | null;
   weight: Prisma.Decimal | null;
@@ -171,13 +169,11 @@ function parseLines(
   return { lines };
 }
 
-// Async: the trip has to be read to validate against it — its date, its
-// channel, its rent and whether another bill already claimed that rent.
+// Async: where a trip is named, it has to be read to validate the bill against
+// its date and its channel.
 async function parse(
   formData: FormData,
-  scope: { companyId: string; centreId: string },
-  /** Set when editing, so this sale does not collide with itself. */
-  editingSaleId?: string
+  scope: { companyId: string; centreId: string }
 ): Promise<{ error: string } | { data: Parsed }> {
   const type = String(formData.get("type") ?? "") as SaleType;
   if (!SALE_TYPES.includes(type)) return { error: "Choose a sale type." };
@@ -232,8 +228,6 @@ async function parse(
     reserve: null as Prisma.Decimal | null,
     otherDeduction: null as Prisma.Decimal | null,
     deliveryNoteId: null as string | null,
-    carriesRent: false,
-    rentTotal: null as Prisma.Decimal | null,
     rentDeducted: null as Prisma.Decimal | null,
     weight: null as Prisma.Decimal | null,
     netWeight: null as Prisma.Decimal | null,
@@ -277,23 +271,19 @@ async function parse(
     const reserve = parseMoney(clean(formData.get("reserve")));
     if (reserve && reserve.lt(0)) return { error: "Reserve cannot be negative." };
 
-    // Rent lands on exactly ONE bill per trip — the last market stop. What the
-    // driver reports here is the TRIP'S WHOLE RENT, because it depends on the
-    // kilometres he covered and nobody could know it at dispatch. What THIS
-    // market handed him is that total less the advance already paid, and it is
-    // derived rather than typed so the two can never disagree.
-    const carriesRent = clean(formData.get("carriesRent")) === "on";
-    const rentTotal = parseMoney(clean(formData.get("rentTotal")));
-    if (!carriesRent && rentTotal && rentTotal.gt(0))
-      return {
-        error:
-          "A rent total is entered but this bill is not marked as the last " +
-          "stop. Tick that, or clear the rent.",
-      };
-    if (carriesRent && (!rentTotal || rentTotal.lte(0)))
-      return {
-        error: "Enter the trip's total rent, or untick the last-stop box.",
-      };
+    // Rent deducted, TYPED, straight off the market's paper — one more
+    // deduction line beside commission and labour, which is exactly how it
+    // appears on the bill the merchant is copying from.
+    //
+    // It used to be derived: tick "last stop", type the trip's whole rent, and
+    // the figure came out as total less the advance. That asked the clerk to
+    // know the truck's whole route before they could enter a bill, and had no
+    // answer at all when one journey ended in a factory bill for the load and a
+    // market bill for the returns. The cost itself is a Vehicle Rent expense
+    // voucher now; this number only grosses the day's revenue back up.
+    const rentDeducted = parseMoney(clean(formData.get("rentDeducted")));
+    if (rentDeducted && rentDeducted.lt(0))
+      return { error: "Rent deducted cannot be negative." };
 
     // Net Bill is TYPED, from the paper the market handed over — it is the
     // figure they actually paid. "Labour / other" is then the balancing item:
@@ -322,10 +312,7 @@ async function parse(
     base.commissionRate = commissionRate;
     base.commission = commission;
     base.reserve = reserve && reserve.gt(0) ? reserve : null;
-    base.carriesRent = carriesRent;
-    base.rentTotal = carriesRent ? rentTotal : null;
-    // rentDeducted is filled in below, once the trip's advance is known — it
-    // is total − advance, and the trip has to be read to know the advance.
+    base.rentDeducted = rentDeducted && rentDeducted.gt(0) ? rentDeducted : null;
     // Net Bill is what the seller owes us for the fish. Commission, labour and
     // reserve stay netted inside it and are never posted separately; only the
     // rent is grossed back up at report time (see saleRevenue in lib/sale).
@@ -404,15 +391,13 @@ async function parse(
   // --- the trip this bill came off (spec §4) ------------------------------
   //
   // LOCAL is the exception: a local buyer collects, so there is no trip.
-  const needsTrip = type === "MARKET" || type === "FACTORY" || type === "FISH_MILL";
+  // OPTIONAL on every channel now. It was required on market, factory and fish
+  // mill so that the rent could be found — and the rent is not here any more.
+  // What the link still buys is the box statement: name a trip and this bill's
+  // boxes tally against the ones that went out. A bill that names no trip is a
+  // perfectly ordinary bill, and refusing to save one was refusing to record a
+  // sale over a piece of bookkeeping the merchant may not need that day.
   const deliveryNoteId = clean(formData.get("deliveryNoteId")) || null;
-
-  if (needsTrip && !deliveryNoteId)
-    return {
-      error:
-        "Choose the trip this bill came off. Matching on date and vehicle " +
-        "text was never reliable, which is why the link is required.",
-    };
 
   if (deliveryNoteId) {
     const trip = await prisma.deliveryNote.findFirst({
@@ -429,14 +414,14 @@ async function parse(
     if (!trip)
       return { error: "That trip does not belong to this company and centre." };
 
-    // The channel is what the truck went out as; a factory bill cannot have
-    // come off a market trip.
-    const wanted =
-      type === "MARKET" ? "MARKET" : type === "FACTORY" ? "FACTORY" : "FISH_MILL";
-    if (trip.channel !== wanted)
-      return {
-        error: `Trip ${trip.billNo} went out as ${trip.channel.toLowerCase().replace("_", " ")}, so it cannot carry a ${wanted.toLowerCase().replace("_", " ")} bill.`,
-      };
+    // The channel a truck went out as no longer restricts what may be billed
+    // against it, because one journey routinely ends in more than one kind of
+    // sale: the load goes to the factory, the factory rejects some of it, and
+    // the returns are sold at a market or locally on the way home. Refusing a
+    // market bill on a factory trip made that ordinary day unrecordable.
+    //
+    // The trip's channel stays on the note as what it was DISPATCHED as, which
+    // is what the box statement and the note itself are about.
 
     // One trip, one buying day. The sale's date is the trip's, full stop —
     // a bill arriving three days later still belongs to the day the fish was
@@ -449,39 +434,6 @@ async function parse(
           `A bill takes its buying day from its trip.`,
       };
 
-    if (base.carriesRent) {
-      // What THIS market handed the driver: the trip's whole rent less the
-      // advance that already went to him at departure. Derived, never typed —
-      // the two figures cannot then disagree.
-      const advance = trip.advancePaid ?? ZERO;
-      if (base.rentTotal && base.rentTotal.lt(advance))
-        return {
-          error:
-            `Trip ${trip.billNo} was given an advance of ${advance.toFixed(2)}, ` +
-            `so its total rent cannot be ${base.rentTotal.toFixed(2)}.`,
-        };
-      base.rentDeducted = (base.rentTotal ?? ZERO).sub(advance);
-
-      // At most one bill per trip may carry the rent.
-      const alreadyCarrying = await prisma.sale.findFirst({
-        where: {
-          deliveryNoteId,
-          carriesRent: true,
-          ...(editingSaleId ? { id: { not: editingSaleId } } : {}),
-        },
-        select: { billNo: true },
-      });
-      if (alreadyCarrying)
-        return {
-          error:
-            `Bill ${alreadyCarrying.billNo} already carries the rent for trip ` +
-            `${trip.billNo}. Only the last stop does.`,
-        };
-
-      // No cap against a stored total: this bill IS where the total is
-      // recorded. The only cap that means anything is the advance, checked
-      // above.
-    }
 
     base.deliveryNoteId = trip.id;
   }
@@ -554,7 +506,6 @@ async function postSaleLedger(
     commission: Prisma.Decimal | null;
     reserve: Prisma.Decimal | null;
     /** The trip's whole rent, reported on this bill. */
-    rentTotal: Prisma.Decimal | null;
     /** What this market handed the driver: total − advance. */
     rentDeducted: Prisma.Decimal | null;
     /** The trip's transporter, resolved by the caller. Null off-trip. */
@@ -589,131 +540,35 @@ async function postSaleLedger(
   // party as SUM(sales.reserve) − SUM(reserve collections), which is what
   // keeps it per-party instead of pooled into one meaningless figure.
 
-  // The last market stop is where the trip's rent finally becomes known, so
-  // three things happen here rather than at dispatch (spec §2, invariant 2):
+  // Rent posts NOTHING here either, and that is a correction as much as a
+  // simplification.
   //
-  //   1. RENT           credit the transporter the WHOLE rent — we owe it now
-  //   2. RENT_BY_PARTY  debit him what this market handed the driver, and
-  //                     credit the market party, who is not out of pocket
-  //   3. the rent EXPENSE, once, dated to the buying day
+  // A market bill used to credit the market party the rent it had deducted, on
+  // the reasoning that they were not out of pocket. But the NET this sale
+  // DEBITs is the figure off the market's own paper, and that net is ALREADY
+  // after the rent deduction. Crediting it again subtracted the same rupee
+  // twice, so every market party who paid their bill in full ended up looking
+  // like a creditor. Traced on a real bill:
   //
-  // Together with the advance already debited at dispatch, the transporter
-  // closes at zero:  +advance − total + (total − advance) = 0.
+  //   total 45,000 − commission 900 − reserve 1,500 − labour 500
+  //                − rent 15,000  =  net 27,100
+  //   DEBIT 27,100, CREDIT 15,000  →  balance 12,100
+  //   they pay the 27,100 printed on the bill  →  balance −15,000  ✗
   //
-  // Posting the credit and the settling debit as one net figure would hide the
-  // rent itself, and the expense is what the day's gross profit is charged.
-  if (s.rentTotal && s.rentTotal.gt(0) && s.transporterId) {
-    const common = {
-      companyId: s.companyId,
-      centreId: s.centreId,
-      sourceId: s.id,
-      date: s.date,
-    };
-    entries.push({
-      ...common,
-      partyId: s.transporterId,
-      type: "CREDIT" as const,
-      sourceType: "RENT" as const,
-      amount: s.rentTotal,
-    });
-
-    if (s.rentDeducted && s.rentDeducted.gt(0)) {
-      entries.push(
-        {
-          ...common,
-          partyId: s.transporterId,
-          type: "DEBIT" as const,
-          sourceType: "RENT_BY_PARTY" as const,
-          amount: s.rentDeducted,
-        },
-        {
-          ...common,
-          partyId: s.ledgerPartyId,
-          type: "CREDIT" as const,
-          sourceType: "RENT_BY_PARTY" as const,
-          amount: s.rentDeducted,
-        }
-      );
-    }
-  }
+  // With nothing posted, the market owes exactly the net they will pay, and
+  // closes at zero. The rent itself is a Vehicle Rent expense voucher: it
+  // credits the transporter what he is owed and debits him the advance and
+  // whatever the market handed him, so he closes at zero too.
+  //
+  // `rentDeducted` still lives on the sale, as a deduction line off the market's
+  // paper. It buys one thing and only one: revenue is the net PLUS it (see
+  // saleRevenue), because that money did leave the business — through the
+  // driver — and a day whose revenue omitted it would be charged a cost it was
+  // never credited for.
 
   await postLedgerEntries(tx, entries);
 }
 
-/** The category a trip's rent is filed under. */
-const RENT_CATEGORY_CODE = "RENT";
-
-/**
- * Record the trip's rent as a DIRECT expense of the buying day, and write the
- * total back onto the trip.
- *
- * Both belong here because this bill is the first moment the total is known.
- * The expense is dated to the trip's buying day, not to the bill, so the cost
- * lands on the day the fish was bought — which is what every report reads.
- *
- * Exactly one expense per trip: it is stamped with the trip id and cleared
- * before being rewritten, so an edit that changes the rent cannot leave the day
- * charged the old figure as well as the new one.
- */
-async function postTripRentExpense(
-  tx: Prisma.TransactionClient,
-  t: {
-    companyId: string;
-    centreId: string;
-    transporterId: string | null;
-    deliveryNoteId: string | null;
-    rentTotal: Prisma.Decimal | null;
-    date: Date;
-  }
-) {
-  if (!t.deliveryNoteId) return;
-
-  // Cleared unconditionally: unticking "last stop" on an edit has to take the
-  // expense away as surely as ticking it creates one.
-  await tx.expense.deleteMany({
-    where: { details: { path: ["tripId"], equals: t.deliveryNoteId } },
-  });
-  await tx.deliveryNote.update({
-    where: { id: t.deliveryNoteId },
-    data: { rentAmount: t.rentTotal },
-  });
-
-  if (!t.rentTotal || t.rentTotal.lte(0)) return;
-
-  const category = await tx.expenseCategory.findUnique({
-    where: {
-      companyId_code: { companyId: t.companyId, code: RENT_CATEGORY_CODE },
-    },
-    select: { id: true },
-  });
-  if (!category)
-    throw new Error(
-      `No "${RENT_CATEGORY_CODE}" expense category exists for this company — ` +
-        `add one under Masters before recording a trip's rent.`
-    );
-
-  const trip = await tx.deliveryNote.findUnique({
-    where: { id: t.deliveryNoteId },
-    select: { billNo: true, date: true },
-  });
-
-  await tx.expense.create({
-    data: {
-      companyId: t.companyId,
-      centreId: t.centreId,
-      categoryId: category.id,
-      partyId: t.transporterId,
-      amount: t.rentTotal,
-      // The TRIP's buying day, not this bill's date — the cost belongs to the
-      // day the fish was bought.
-      date: trip?.date ?? t.date,
-      spentOn: t.date,
-      notes: `Vehicle rent for trip ${trip?.billNo ?? ""}`.trim(),
-      deliveryNoteId: t.deliveryNoteId,
-      details: { tripId: t.deliveryNoteId },
-    },
-  });
-}
 
 /**
  * The number this sale will carry.
@@ -750,7 +605,6 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
     reserve: d.reserve,
     otherDeduction: d.otherDeduction,
     deliveryNoteId: d.deliveryNoteId,
-    carriesRent: d.carriesRent,
     rentDeducted: d.rentDeducted,
     notes: d.notes,
     weight: d.weight,
@@ -838,19 +692,8 @@ export async function createSale(
         amount: d.amount,
         commission: d.commission,
         reserve: d.reserve,
-        rentTotal: d.rentTotal,
         rentDeducted: d.rentDeducted,
         transporterId: await tripTransporterId(tx, d.deliveryNoteId),
-        date: d.date,
-      });
-      // The rent expense and the write-back to the trip. Both live here
-      // because this bill is the first moment the total is known.
-      await postTripRentExpense(tx, {
-        companyId: company.id,
-        centreId: centre.id,
-        transporterId: await tripTransporterId(tx, d.deliveryNoteId),
-        deliveryNoteId: d.deliveryNoteId,
-        rentTotal: d.rentTotal,
         date: d.date,
       });
       // The trip moves DISPATCHED → PART_BILLED → CLOSED as its bills land.
@@ -906,14 +749,6 @@ export async function deleteSale(
       // If this was the bill that recorded the trip's rent, the rent goes with
       // it: the expense is cleared and the trip's total returns to unknown,
       // which is honest — nothing has reported the kilometres any more.
-      await postTripRentExpense(tx, {
-        companyId: company.id,
-        centreId: centre.id,
-        transporterId: null,
-        deliveryNoteId: existing.deliveryNoteId,
-        rentTotal: null,
-        date: new Date(),
-      });
       await unlinkAttachments(tx, "SALE", saleId);
       // Removing the voucher answers any request against it. The request rows
       // themselves survive — they record that a correction was asked for.
@@ -944,13 +779,10 @@ export async function updateSale(
   const { company, centre } = await getActiveScope();
   if (!centre) return { error: "No centre is selected." };
 
-  const parsed = await parse(
-    formData,
-    { companyId: company.id, centreId: centre.id },
-    // Editing: this sale must not be treated as another bill already claiming
-    // the trip's rent.
-    saleId
-  );
+  const parsed = await parse(formData, {
+    companyId: company.id,
+    centreId: centre.id,
+  });
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
@@ -1012,19 +844,8 @@ export async function updateSale(
         amount: d.amount,
         commission: d.commission,
         reserve: d.reserve,
-        rentTotal: d.rentTotal,
         rentDeducted: d.rentDeducted,
         transporterId: await tripTransporterId(tx, d.deliveryNoteId),
-        date: d.date,
-      });
-      // The rent expense and the write-back to the trip. Both live here
-      // because this bill is the first moment the total is known.
-      await postTripRentExpense(tx, {
-        companyId: company.id,
-        centreId: centre.id,
-        transporterId: await tripTransporterId(tx, d.deliveryNoteId),
-        deliveryNoteId: d.deliveryNoteId,
-        rentTotal: d.rentTotal,
         date: d.date,
       });
       // Both trips, because an edit can move a bill from one to another: the

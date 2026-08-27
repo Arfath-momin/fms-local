@@ -41,8 +41,6 @@ export type TripTally = {
   gapValue: Prisma.Decimal;
   billCount: number;
   billedAmount: Prisma.Decimal;
-  /** Rent still to settle: rentAmount − advance − rent carried on a bill. */
-  rentUnsettled: Prisma.Decimal;
 };
 
 export function tallyTrip(trip: {
@@ -86,14 +84,6 @@ export function tallyTrip(trip: {
     ? kgGap.mul(billedAmount).div(kgBilled).toDecimalPlaces(2)
     : ZERO;
 
-  const rentCarried = trip.sales.reduce(
-    (a, s) => a.add(s.rentDeducted ?? ZERO),
-    ZERO
-  );
-  const rentUnsettled = (trip.rentAmount ?? ZERO)
-    .sub(trip.advancePaid ?? ZERO)
-    .sub(rentCarried);
-
   return {
     boxesDispatched,
     boxesBilled,
@@ -103,7 +93,6 @@ export function tallyTrip(trip: {
     gapValue,
     billCount: trip.sales.length,
     billedAmount,
-    rentUnsettled,
   };
 }
 

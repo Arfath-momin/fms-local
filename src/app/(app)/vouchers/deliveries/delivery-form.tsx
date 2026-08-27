@@ -33,7 +33,6 @@ export type DeliveryInit = {
   channel: string;
   vehicleId: string;
   /** MARKET only — paid to the driver before departure. */
-  advancePaid: string;
   driverName: string;
   mobileNo: string;
   lines: DeliveryLineInit[];
@@ -236,25 +235,6 @@ export function DeliveryForm({
             the balance: a market trip's last stop hands the driver the rest and
             deducts it from their bill, while on a factory, mill or local trip
             he collects it from BFM when he gets back. */}
-        <div>
-          <label htmlFor="advancePaid" className={labelCls}>
-            Advance Paid (₹)
-          </label>
-          <input
-            id="advancePaid"
-            name="advancePaid"
-            inputMode="decimal"
-            defaultValue={initial?.advancePaid ?? ""}
-            className={inputCls + " num text-right"}
-          />
-          <p className="text-muted text-[12px] mt-1">
-            Handed to the driver at departure. The TOTAL rent is not known
-            until he reports the kilometres —{" "}
-            {channel === "MARKET"
-              ? "it is entered on the last market bill."
-              : "record it on this trip when he returns."}
-          </p>
-        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

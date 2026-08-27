@@ -74,6 +74,14 @@ export type ExpenseCategorySpec = {
   /** detail key whose value names the vendor ledger; falls back to label. */
   vendorFrom?: string;
   /**
+   * What KIND of party that vendor is. Defaults to EXPENSE_VENDOR, which is
+   * right for an ice plant or a canteen. Vehicle rent is the exception: the
+   * money is owed to a TRANSPORTER, and filing him as an expense vendor would
+   * split one man's account in two — the rent on one ledger, the trips he ran
+   * on another.
+   */
+  vendorType?: "EXPENSE_VENDOR" | "TRANSPORTER";
+  /**
    * Detail keys holding money already handed over against this total.
    *
    * Vehicle rent is agreed as one figure but rarely paid as one: an advance
@@ -140,12 +148,37 @@ export const EXPENSE_SPECS: Record<string, ExpenseCategorySpec> = {
     fields: [],
     amountEntered: true,
   },
-  // RENT has no entry spec on purpose. Vehicle rent is expensed exactly once,
-  // from the trip, dated to the buying day (spec §2, invariant 2) — the
-  // advance and whatever a market party paid the driver are settlements
-  // against it, never further expenses. A hand-entered rent voucher would be
-  // the second one. The category still exists so the trip's expense has
-  // somewhere to file itself.
+  // Vehicle rent is an ordinary expense voucher again.
+  //
+  // It was moved onto the trip — recorded from the delivery note, or carried on
+  // whichever market bill happened to be the last stop — on the reasoning that
+  // a hand-entered voucher would be a second expense. In practice that got the
+  // business backwards. A rent is agreed when the truck is LOADED, before
+  // anybody knows what it will sell for or how many places it will stop; and
+  // one journey can end in a factory bill for the load and a market bill for
+  // the returns, which made "which bill carries the rent" a question with no
+  // natural answer. The clerk had to know the whole route before entering a
+  // cost they had already agreed.
+  //
+  // So: one voucher, entered at loading, for every channel. The advance and
+  // anything a market handed the driver are SETTLEMENTS against it — each
+  // posts a DEBIT beside the total's CREDIT, so what the transporter is still
+  // owed is the ledger balance itself and never a second stored figure.
+  // Invariant 2 holds exactly as before: expensed once, dated to the buying
+  // day. It is simply entered where the merchant already knows it.
+  RENT: {
+    label: "Vehicle Rent",
+    fields: [
+      t("vehicleNo", "Vehicle No"),
+      t("transporter", "Transporter / Vehicle Owner"),
+      n("advance", "Advance Paid at Loading", false),
+      n("paidByMarket", "Paid to Driver by Market", false),
+    ],
+    amountEntered: true,
+    vendorFrom: "transporter",
+    vendorType: "TRANSPORTER",
+    prepaidFrom: ["advance", "paidByMarket"],
+  },
 };
 
 /**

@@ -51,9 +51,8 @@ export type SaleInit = {
   netBill: string;
   /** The trip this bill came off. Required on MARKET/FACTORY/FISH_MILL. */
   deliveryNoteId: string;
-  carriesRent: boolean;
-  /** The TRIP's whole rent, reported by the driver on the last stop. */
-  rentTotal: string;
+  /** What the market deducted for the driver, off their own paper. */
+  rentDeducted: string;
   amount: string; // factory bill amount total
   weight: string;
   vehicleNo: string;
@@ -149,8 +148,7 @@ export function SaleForm({
   );
   const [totalBill, setTotalBill] = useState(initial?.totalBill ?? "");
   const [netBillRaw, setNetBillRaw] = useState(initial?.netBill ?? "");
-  const [carriesRent, setCarriesRent] = useState(initial?.carriesRent ?? false);
-  const [rentTotal, setRentTotal] = useState(initial?.rentTotal ?? "");
+  const [rentDeducted, setRentDeducted] = useState(initial?.rentDeducted ?? "");
   const [tripId, setTripId] = useState(initial?.deliveryNoteId ?? "");
   // Pre-filled rather than fixed: most bills are still 2%, but the clerk can
   // type whatever this one was agreed at. An existing sale keeps its own rate.
@@ -213,10 +211,6 @@ export function SaleForm({
   const commission =
     type === "MARKET" ? commissionAmount(n(totalBill), n(commissionRate)) : 0;
 
-  // What THIS market handed the driver: the trip's whole rent less the advance
-  // that already went at departure. Derived, so the two cannot disagree.
-  const rentDeducted =
-    carriesRent && trip ? Math.max(0, n(rentTotal) - trip.advancePaid) : 0;
 
   // Net is TYPED from the paper the market handed over — it is what they
   // actually paid. "Labour / other" is then the BALANCING item: the market
@@ -224,7 +218,7 @@ export function SaleForm({
   // the named deductions is exactly what those came to.
   const netBill = n(netBillRaw);
   const otherDeduction =
-    n(totalBill) - commission - n(reserve) - rentDeducted - netBill;
+    n(totalBill) - commission - n(reserve) - n(rentDeducted) - netBill;
 
   // The sale amount (what posts to the ledger) depends on the type.
   const amount =
@@ -467,52 +461,28 @@ export function SaleForm({
             </div>
           </div>
 
-          {/* Rent lands on exactly ONE bill per trip — the last stop. The
-              driver reports the TRIP'S WHOLE rent here, because it depends on
-              the kilometres he covered and nobody could know it at dispatch. */}
-          <div className="border border-line bg-surface px-4 py-3">
-            <label className="flex items-center gap-2 text-[13px]">
-              <input
-                type="checkbox"
-                name="carriesRent"
-                checked={carriesRent}
-                onChange={(e) => setCarriesRent(e.target.checked)}
-                disabled={trip?.rentAlreadyRecorded && !initial?.carriesRent}
-              />
-              This was the last stop — the driver reported the trip&rsquo;s rent
+          {/* One more deduction off the market's paper, typed like the rest.
+              It used to be a "last stop" tick plus the trip's whole rent, which
+              asked the clerk to know the truck's route before they could enter
+              a bill. The COST is a Vehicle Rent expense voucher now; this
+              figure only tells the report that the money left through the
+              driver, so the day's revenue is not short by it. */}
+          <div>
+            <label htmlFor="rentDeducted" className={labelCls}>
+              Vehicle rent deducted (₹)
             </label>
-            {trip?.rentAlreadyRecorded && !initial?.carriesRent && (
-              <p className="text-muted text-[12px] mt-1">
-                Another bill on this trip already recorded the rent.
-              </p>
-            )}
-            {carriesRent && (
-              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg">
-                <div>
-                  <label htmlFor="rentTotal" className={labelCls}>
-                    Total rent for the trip (₹)
-                  </label>
-                  <input
-                    id="rentTotal"
-                    name="rentTotal"
-                    inputMode="decimal"
-                    value={rentTotal}
-                    onChange={(e) => setRentTotal(e.target.value)}
-                    className={inputCls + " num text-right"}
-                  />
-                </div>
-                <div className="self-end pb-1 text-[12px]">
-                  <div className="flex justify-between">
-                    <span className="text-muted">Advance already paid</span>
-                    <span className="num">{fmtMoney(trip?.advancePaid ?? 0)}</span>
-                  </div>
-                  <div className="flex justify-between font-semibold">
-                    <span>This market paid the driver</span>
-                    <span className="num">{fmtMoney(rentDeducted)}</span>
-                  </div>
-                </div>
-              </div>
-            )}
+            <input
+              id="rentDeducted"
+              name="rentDeducted"
+              inputMode="decimal"
+              value={rentDeducted}
+              onChange={(e) => setRentDeducted(e.target.value)}
+              className={inputCls + " num text-right max-w-xs"}
+            />
+            <p className="text-muted text-[12px] mt-1">
+              What this market handed the driver, if any. Enter the rent itself
+              under Expenses → Vehicle Rent.
+            </p>
           </div>
 
           {/* The bill's working, read top to bottom the way the market's paper
@@ -524,8 +494,8 @@ export function SaleForm({
             <Row label="Total bill" value={n(totalBill)} />
             <Row label="Less commission" value={-commission} />
             <Row label="Less reserve" value={-n(reserve)} />
-            {carriesRent && (
-              <Row label="Less vehicle rent" value={-rentDeducted} />
+            {n(rentDeducted) > 0 && (
+              <Row label="Less vehicle rent" value={-n(rentDeducted)} />
             )}
             <div
               className={
@@ -550,11 +520,11 @@ export function SaleForm({
                 negative.
               </p>
             )}
-            {carriesRent && (
+            {n(rentDeducted) > 0 && (
               <p className="text-muted text-[12px] mt-2">
-                Revenue recognised is {fmtMoney(netBill + rentDeducted)} — the
-                net plus the rent this market paid the driver on your behalf.
-                The rent itself is expensed once, to the buying day.
+                Revenue recognised is {fmtMoney(netBill + n(rentDeducted))} —
+                the net plus the rent this market paid the driver on your
+                behalf. The rent itself is expensed once, on its own voucher.
               </p>
             )}
           </div>
