@@ -44,7 +44,6 @@ export type TripTally = {
 };
 
 export function tallyTrip(trip: {
-  channel: TripChannel;
   rentAmount: Prisma.Decimal | null;
   advancePaid: Prisma.Decimal | null;
   lines: { kg: Prisma.Decimal; box: number }[];
@@ -108,21 +107,25 @@ export function tallyTrip(trip: {
  * closes on its first bill, because the whole load goes to one buyer and the
  * rejection gap is a fact about that bill, not an outstanding delivery.
  */
-export function deriveTripStatus(
-  channel: TripChannel,
-  tally: TripTally
-): TripStatus {
+export function deriveTripStatus(tally: TripTally): TripStatus {
   if (tally.billCount === 0) return "DISPATCHED";
 
-  if (channel === "MARKET") {
-    // Billed boxes can exceed dispatched when a market splits a box; the trip
-    // is still fully accounted for, so this is >= rather than ===.
-    if (tally.boxesDispatched > 0 && tally.boxesBilled >= tally.boxesDispatched)
-      return "CLOSED";
-    return "PART_BILLED";
-  }
+  // Boxes, for every trip, whatever it went out as. A non-market trip used to
+  // CLOSE on its first bill, on the assumption that the whole load went to one
+  // buyer — which is why a factory trip vanished from the picker the moment its
+  // factory bill landed, and the returns sold on the way home had no trip left
+  // to belong to. One journey, several bills, and it is only finished when the
+  // boxes are.
+  //
+  // A note that recorded no boxes at all — weight only — has nothing to tally,
+  // so the first bill closes it. Holding such a trip open forever would fill
+  // the picker with journeys nobody can ever finish.
+  if (tally.boxesDispatched === 0) return "CLOSED";
 
-  return "CLOSED";
+  // Billed can exceed dispatched when a buyer splits a box, so this is >=
+  // rather than ===.
+  if (tally.boxesBilled >= tally.boxesDispatched) return "CLOSED";
+  return "PART_BILLED";
 }
 
 /**
@@ -156,7 +159,7 @@ export async function refreshTripStatus(
   });
   if (!trip) return;
 
-  const next = deriveTripStatus(trip.channel, tallyTrip(trip));
+  const next = deriveTripStatus(tallyTrip(trip));
   // Only write when it actually moved — an unchanged status is not an edit,
   // and updatedAt on the trip should mean somebody changed the trip.
   if (next !== trip.status) {
@@ -168,16 +171,23 @@ export async function refreshTripStatus(
 }
 
 /**
- * Trips a bill of this channel may still be attached to.
+ * Trips a bill may still be attached to — any bill, of any kind.
+ *
+ * This used to filter by channel, so a market bill was offered only market
+ * trips and a LOCAL bill was offered none at all. That does not survive contact
+ * with the business: a truck goes out to the factory, the factory rejects part
+ * of the load, and the returns are sold at a market or locally on the way home.
+ * One journey, one rent, several bills — and the channel filter made every bill
+ * after the first one impossible to attach, which is exactly the trip whose
+ * boxes most needed accounting for.
  *
  * CLOSED trips are excluded, with one exception: the trip a bill being edited
  * already points at. Closing is derived from the boxes billed, so the very act
  * of billing the last box closes the trip — and refusing to re-open that bill
  * for correction would be the wrong lesson to draw from it.
  */
-export async function openTripsForChannel(
+export async function openTrips(
   scope: { companyId: string; centreId: string },
-  channel: TripChannel,
   includeTripId?: string | null,
   /** The bill being edited — its own boxes count as still available. */
   excludeSaleId?: string | null
@@ -185,7 +195,6 @@ export async function openTripsForChannel(
   const trips = await prisma.deliveryNote.findMany({
     where: {
       ...scope,
-      channel,
       ...(includeTripId
         ? { OR: [{ status: { not: "CLOSED" } }, { id: includeTripId }] }
         : { status: { not: "CLOSED" } }),
@@ -216,7 +225,7 @@ export async function openTripsForChannel(
   });
 
   return trips.map((t) => {
-    const tally = tallyTrip({ ...t, channel });
+    const tally = tallyTrip(t);
     return {
       id: t.id,
       billNo: t.billNo,
@@ -312,7 +321,6 @@ export type BoxStatement = {
   tripId: string;
   billNo: string;
   date: Date;
-  channel: TripChannel;
   status: TripStatus;
   vehicleNumber: string;
   dispatched: number;
@@ -364,7 +372,6 @@ export async function boxStatements(
       id: true,
       billNo: true,
       date: true,
-      channel: true,
       status: true,
       cratesReturned: true,
       vehicle: { select: { number: true } },
@@ -404,7 +411,6 @@ export async function boxStatements(
       tripId: t.id,
       billNo: t.billNo,
       date: t.date,
-      channel: t.channel,
       status: t.status,
       vehicleNumber: t.vehicle.number,
       dispatched: out.total,

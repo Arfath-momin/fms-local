@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { SALE_TYPES, SALE_TYPE_LABELS } from "@/lib/sale";
-import { openTripsForChannel } from "@/lib/trip";
+import { openTrips } from "@/lib/trip";
 import { peekDocumentNos, SERIES_PREFIX } from "@/lib/document-series";
 import { createSale } from "../actions";
 import { SaleForm } from "../sale-form";
@@ -58,13 +58,15 @@ export default async function NewSalePage({
   }
 
   // LOCAL has no truck behind it, so no trip to offer.
-  const trips =
-    type === "LOCAL"
-      ? []
-      : await openTripsForChannel(
-          { companyId: company.id, centreId: centre.id },
-          type === "MARKET" ? "MARKET" : type === "FACTORY" ? "FACTORY" : "FISH_MILL"
-        );
+  // Every open trip, offered to every kind of bill. A truck goes out to the
+  // factory, the factory rejects part of the load, and the returns are sold at
+  // a market or locally on the way home — all off one journey. Filtering by
+  // channel made those later bills impossible to attach, and LOCAL was offered
+  // no trips at all.
+  const trips = await openTrips({
+    companyId: company.id,
+    centreId: centre.id,
+  });
 
   // The heads a bill may raise a cost under. Live, like everywhere else:
   // archived ones drop out, and anything the merchant added shows up.

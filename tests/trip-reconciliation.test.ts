@@ -44,7 +44,7 @@ describe("market trip: three stops, 100 boxes", () => {
     const tally = tallyTrip(trip);
     expect(tally.boxesDispatched).toBe(100);
     expect(tally.boxesBilled).toBe(0);
-    expect(deriveTripStatus("MARKET", tally)).toBe("DISPATCHED");
+    expect(deriveTripStatus(tally)).toBe("DISPATCHED");
   });
 
   it("is PART_BILLED while boxes are still out", () => {
@@ -60,7 +60,7 @@ describe("market trip: three stops, 100 boxes", () => {
     };
     const tally = tallyTrip(trip);
     expect(tally.boxesBilled).toBe(70);
-    expect(deriveTripStatus("MARKET", tally)).toBe("PART_BILLED");
+    expect(deriveTripStatus(tally)).toBe("PART_BILLED");
   });
 
   it("tallies to 100 and CLOSES on the third bill", () => {
@@ -80,7 +80,7 @@ describe("market trip: three stops, 100 boxes", () => {
     const tally = tallyTrip(trip);
     expect(tally.boxesBilled).toBe(100);
     expect(tally.boxesDispatched).toBe(100);
-    expect(deriveTripStatus("MARKET", tally)).toBe("CLOSED");
+    expect(deriveTripStatus(tally)).toBe("CLOSED");
   });
 
 });
@@ -103,9 +103,11 @@ describe("factory trip: a 40 kg rejection", () => {
     // 40 kg at the ₹100/kg the accepted fish actually fetched.
     expect(tally.gapValue.toNumber()).toBe(4_000);
 
-    // A factory trip closes on its first bill: the whole load went to one
-    // buyer, so the gap is a fact about that bill, not an outstanding delivery.
-    expect(deriveTripStatus("FACTORY", tally)).toBe("CLOSED");
+    // This note recorded weight and no boxes, so there is nothing to tally
+    // and the first bill closes it. A note that DOES carry boxes stays open
+    // until they are accounted for, whatever it went out as — the returns a
+    // factory rejects are sold off the same trip.
+    expect(deriveTripStatus(tally)).toBe("CLOSED");
   });
 
   it("values nothing when nothing has been billed", () => {
@@ -119,7 +121,7 @@ describe("factory trip: a 40 kg rejection", () => {
     const tally = tallyTrip(trip);
     // No rate to value the gap at yet — better zero than a divide by zero.
     expect(tally.gapValue.toNumber()).toBe(0);
-    expect(deriveTripStatus("FACTORY", tally)).toBe("DISPATCHED");
+    expect(deriveTripStatus(tally)).toBe("DISPATCHED");
   });
 });
 

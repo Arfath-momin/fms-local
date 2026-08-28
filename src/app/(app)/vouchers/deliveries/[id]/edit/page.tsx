@@ -68,7 +68,6 @@ export default async function EditDeliveryPage({
           // Optional now — who received what comes from the bills that point
           // back at this trip, not from a typed name (spec §3.2).
           recipient: note.recipient ?? "",
-          channel: note.channel,
           vehicleId: note.vehicleId,
           advancePaid: note.advancePaid?.toString() ?? "",
           driverName: note.driverName ?? "",

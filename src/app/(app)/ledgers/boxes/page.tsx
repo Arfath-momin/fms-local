@@ -3,7 +3,6 @@ import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import {
   boxStatements,
-  TRIP_CHANNEL_LABELS,
   TRIP_STATUS_LABELS,
 } from "@/lib/trip";
 import { fmtDate } from "@/lib/format";
@@ -88,8 +87,7 @@ export default async function BoxLedgerPage({
                   </Link>
                   <span className="text-muted text-[12px]">
                     {" "}
-                    · {s.vehicleNumber} · {fmtDate(s.date)} ·{" "}
-                    {TRIP_CHANNEL_LABELS[s.channel]}
+                    · {s.vehicleNumber} · {fmtDate(s.date)}
                   </span>
                 </div>
                 <span className="text-muted text-[12px]">

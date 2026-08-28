@@ -61,26 +61,41 @@ export function commissionAmount(totalBill: number, ratePercent: number): number
 }
 
 /**
- * The weight one sale line actually represents.
+ * The weight one sale line represents.
  *
- * On a Fish Mill bill `kgs` is the weight of a SINGLE box, not of the row: 100
- * kg packed into 10 boxes is 1,000 kg sold, and the money follows the 1,000.
- * This is the same rule delivery notes use (see lineTotalKg in src/lib/delivery
- * .ts), and for the same reason — the merchant weighs a box, not a consignment.
+ * Now simply what was entered. `qtyKg` used to be the weight of a SINGLE box,
+ * multiplied up by the box count — but the merchant does not weigh boxes. A lot
+ * goes on the scale whole: 150 boxes, 4,500 kg. Asking for a per-box figure
+ * made the clerk divide before they could type, and a rounded average moved the
+ * money — 4,400 over 150 boxes is 29.333, which multiplies back to 4,399.95.
  *
- * A row with no boxes has nowhere to multiply, so its kgs counts once.
- * Multiplying by zero would erase the weight of anything sold loose, and Local
- * sales have no box column at all.
+ * The per-box figure is the average, and it falls out of the two numbers that
+ * were actually observed (see saleLineKgPerBox). Delivery notes already worked
+ * this way; sale lines now agree with them, so one column means one thing on
+ * both documents.
  *
- * Deliberately computed rather than stored: a `total_kg` column could drift
- * from the box and kg it was derived from, and there is no second source of
- * truth to reconcile it against.
+ * Kept as a function rather than inlined so every caller reading a line's
+ * weight goes through one place if the rule ever moves again.
  */
 export function saleLineTotalKg(line: {
   qtyKg: number;
   box?: number | null;
 }): number {
-  return line.box && line.box > 0 ? line.qtyKg * line.box : line.qtyKg;
+  return line.qtyKg;
+}
+
+/**
+ * The average weight of one box on this line — derived, never entered.
+ *
+ * Zero when the line carries no boxes: a market row counted only in boxes has
+ * no weight to average, and a loose row has no boxes to divide by.
+ */
+export function saleLineKgPerBox(line: {
+  qtyKg: number;
+  box?: number | null;
+}): number {
+  if (!line.box || line.box <= 0) return 0;
+  return line.qtyKg / line.box;
 }
 
 /**

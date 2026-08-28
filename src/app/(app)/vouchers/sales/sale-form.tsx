@@ -21,6 +21,7 @@ import {
   DEFAULT_MARKET_COMMISSION_RATE,
   SALE_BUYER_TYPE,
   SALE_TYPE_LABELS,
+  saleLineKgPerBox,
   saleLineTotalKg,
 } from "@/lib/sale";
 
@@ -170,7 +171,6 @@ export function SaleForm({
   const [factoryAmount, setFactoryAmount] = useState(initial?.amount ?? "");
 
   // LOCAL is the one channel with no truck behind it — a local buyer collects.
-  const needsTrip = type !== "LOCAL";
   const trip = trips.find((t) => t.id === tripId);
   // The buying day is the trip's, copied rather than typed. A bill arriving
   // three days late still belongs to the day the fish was bought.
@@ -206,6 +206,10 @@ export function SaleForm({
   // action uses, so the figure on screen and the figure saved cannot disagree.
   const rowKg = (l: SaleLineInit) =>
     saleLineTotalKg({ qtyKg: n(l.qtyKg), box: n(l.box) });
+  // The average that falls out of the two figures actually observed — the whole
+  // lot on the scale, and the boxes it was packed into.
+  const rowKgPerBox = (l: SaleLineInit) =>
+    saleLineKgPerBox({ qtyKg: n(l.qtyKg), box: n(l.box) });
 
   const lineTotal = useMemo(
     () => lines.reduce((s, l) => s + rowKg(l) * n(l.ratePerKg), 0),
@@ -297,48 +301,54 @@ export function SaleForm({
         </div>
       </div>
 
-      {/* The trip this bill came off. Matching a bill to its truck on date and
-          vehicle text was never reliable, so the link is explicit and required
-          on every channel that goes out on a truck. */}
-      {needsTrip ? (
-        <div className="max-w-lg">
-          <label htmlFor="deliveryNoteId" className={labelCls}>
-            Trip
-          </label>
-          <select
-            id="deliveryNoteId"
-            name="deliveryNoteId"
-            value={tripId}
-            onChange={(e) => setTripId(e.target.value)}
-            className={inputCls}
-          >
-            <option value="">No trip — this bill stands on its own</option>
-            {trips.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.date} · {t.billNo} · {t.vehicleNumber}
-                {t.boxesDispatched > 0 ? ` · ${t.boxesDispatched} boxes` : ""}
-              </option>
-            ))}
-          </select>
-          {trips.length === 0 ? (
-            <p className="text-debit text-[12px] mt-1">
-              No open {SALE_TYPE_LABELS[type].toLowerCase()} trips.{" "}
-              <Link
-                href="/vouchers/deliveries/new"
-                className="underline underline-offset-2"
-              >
-                Enter the delivery note first
-              </Link>
-              .
-            </p>
-          ) : (
-            <p className="text-muted text-[12px] mt-1">
-              The buying day comes from the trip — one trip, one buying day.
-            </p>
-          )}
-        </div>
+      {/* The trip this bill came off, offered on EVERY kind of sale — local
+          included. A local sale used to be given no picker at all, on the
+          reasoning that a local buyer collects. But the fish a factory rejected
+          is sold locally on the way home, off the same truck, and those boxes
+          have to come off the same trip or the box statement never balances. */}
+      <div className="max-w-lg">
+        <label htmlFor="deliveryNoteId" className={labelCls}>
+          Trip (optional)
+        </label>
+        <select
+          id="deliveryNoteId"
+          name="deliveryNoteId"
+          value={tripId}
+          onChange={(e) => setTripId(e.target.value)}
+          className={inputCls}
+        >
+          <option value="">No trip — this bill stands on its own</option>
+          {trips.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.date} · {t.billNo} · {t.vehicleNumber}
+              {t.boxesDispatched > 0 ? ` · ${t.boxesDispatched} boxes` : ""}
+            </option>
+          ))}
+        </select>
+        {trips.length === 0 ? (
+          <p className="text-muted text-[12px] mt-1">
+            No open trips.{" "}
+            <Link
+              href="/vouchers/deliveries/new"
+              className="underline underline-offset-2"
+            >
+              Enter a delivery note
+            </Link>{" "}
+            if this bill came off one.
+          </p>
+        ) : (
+          <p className="text-muted text-[12px] mt-1">
+            Name it and the buying day comes from the trip, and this bill&rsquo;s
+            boxes count against what the truck carried.
+          </p>
+        )}
+      </div>
+
+      {trip ? (
+        // The buying day is the trip's, posted but never typed — the action
+        // refuses a date that disagrees with it. One trip, one buying day.
+        <input type="hidden" name="date" value={tripDate} />
       ) : (
-        // LOCAL has no trip: the buyer collects, so the buying day is typed.
         <div className="max-w-xs">
           <label htmlFor="date" className={labelCls}>
             Purchase Date
@@ -356,9 +366,6 @@ export function SaleForm({
           </p>
         </div>
       )}
-      {/* Posted, but never typed on a trip-linked bill: the action refuses a
-          date that disagrees with the trip's. */}
-      {needsTrip && <input type="hidden" name="date" value={tripDate} />}
 
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -655,12 +662,12 @@ export function SaleForm({
                       there to record which market took how many boxes. */}
                   {type !== "MARKET" && (
                     <th className="text-right font-semibold px-2 py-2 w-24">
-                      {boxedLines ? "Kgs / box" : "Kgs"}
+                      {boxedLines ? "Total Kg" : "Kgs"}
                     </th>
                   )}
                   {boxedLines && (
                     <th className="text-right font-semibold px-2 py-2 w-24">
-                      Total Kg
+                      Kg / box
                     </th>
                   )}
                   {type !== "MARKET" && (
@@ -694,11 +701,13 @@ export function SaleForm({
                           <input name="qtyKg" inputMode="decimal" value={l.qtyKg} onChange={(e) => setLine(i, { qtyKg: e.target.value })} className={cell} />
                         </td>
                       )}
-                      {/* Derived, not typed: box × kgs. Read-only so it can
-                          never disagree with the two figures above it. */}
+                      {/* The AVERAGE, derived from the two figures actually
+                          observed: the lot on the scale and the boxes it was
+                          packed into. Read-only, because the merchant never
+                          weighed a single box and should not be asked to. */}
                       {boxedLines && (
                         <td className="px-2 py-1 num text-right text-muted">
-                          {totalKg ? fmtKg(totalKg) : ""}
+                          {rowKgPerBox(l) ? fmtKg(rowKgPerBox(l)) : ""}
                         </td>
                       )}
                       {type !== "MARKET" && (
@@ -726,18 +735,26 @@ export function SaleForm({
                 })}
               </tbody>
               <tfoot>
+                {/* One cell per column, in the header's order, rather than
+                    colSpan arithmetic — the columns moved once and the totals
+                    silently landed under the wrong headings. */}
                 <tr className="border-t border-line-strong font-semibold">
                   {(boxedLines || type === "MARKET") && (
                     <td className="px-2 py-2 num text-right">{boxTotal || ""}</td>
                   )}
-                  <td className="px-3 py-2 text-right" colSpan={type === "MARKET" ? 1 : 2}>
+                  <td className="px-3 py-2 text-right">
                     {type === "MARKET" ? "Boxes" : "Total"}
                   </td>
-                  {boxedLines && (
+                  {type !== "MARKET" && (
                     <td className="px-2 py-2 num text-right">
                       {kgTotal ? fmtKg(kgTotal) : ""}
                     </td>
                   )}
+                  {/* No average of the averages — it would be a figure with no
+                      meaning. The lot's own average is total kg ÷ total boxes,
+                      which the boxes and kilos beside it already give. */}
+                  {boxedLines && <td />}
+                  {type !== "MARKET" && <td />}
                   {boxedLines && <td />}
                   {/* A market bill's money is the net the market paid, so
                       there is no line total to foot to — only the boxes. */}

@@ -29,8 +29,6 @@ export type DeliveryInit = {
   billNo: string;
   date: string;
   recipient: string;
-  /** Which channel this trip went to — decides how its rent settles. */
-  channel: string;
   vehicleId: string;
   /** MARKET only — paid to the driver before departure. */
   advancePaid: string;
@@ -90,8 +88,6 @@ export function DeliveryForm({
     initial?.lines?.length ? initial.lines : [BLANK_LINE]
   );
   // Controlled: the advance field exists only on a market trip, because on
-  // every other channel the driver is paid in full on his return.
-  const [channel, setChannel] = useState(initial?.channel ?? "MARKET");
   const today = businessToday();
 
   // The line's TOTAL weight, as typed. At dispatch the merchant weighs the
@@ -170,29 +166,6 @@ export function DeliveryForm({
             className={inputCls}
           />
         </div>
-        <div>
-          <label htmlFor="channel" className={labelCls}>
-            Channel
-          </label>
-          {/* Controlled, because the advance field below appears only for
-              MARKET — the rent settles differently on every other channel. */}
-          <select
-            id="channel"
-            name="channel"
-            required
-            value={channel}
-            onChange={(e) => setChannel(e.target.value)}
-            className={inputCls}
-          >
-            <option value="MARKET">Market</option>
-            <option value="FACTORY">Factory</option>
-            <option value="FISH_MILL">Fish Mill</option>
-            <option value="LOCAL">Local</option>
-          </select>
-          <p className="text-muted text-[12px] mt-1">
-            Decides how the rent settles. Only a market trip takes an advance.
-          </p>
-        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -232,7 +205,7 @@ export function DeliveryForm({
             </p>
           )}
         </div>
-        {/* An advance goes out on every channel. What differs is who settles
+        {/* An advance goes out on any trip. What differs is who settles
             the balance: a market trip's last stop hands the driver the rest and
             deducts it from their bill, while on a factory, mill or local trip
             he collects it from BFM when he gets back. */}

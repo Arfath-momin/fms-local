@@ -1,0 +1,20 @@
+-- Retire the trip channel.
+--
+-- It decided two things and was wrong about both. It filtered which trips a
+-- bill could name — so a market bill was offered only market trips, and a local
+-- bill was offered none at all — and it decided when a trip closed, closing any
+-- non-market trip on its very first bill.
+--
+-- Neither survives contact with the business. A truck goes to the factory, the
+-- factory rejects part of the load, and the returns are sold at a market or
+-- locally on the way home. One journey, one rent, several bills. Under the old
+-- rules that trip vanished from the picker the moment its factory bill landed,
+-- and the boxes that came back had nowhere to be accounted for — which is
+-- exactly the trip whose boxes most needed accounting for.
+--
+-- A trip now closes when its BOXES are accounted for, whatever it went out as,
+-- and every open trip is offered to every bill.
+--
+-- Nullable rather than dropped: notes raised while this mattered keep their
+-- history, and nothing reads it to make a decision any more.
+ALTER TABLE "delivery_notes" ALTER COLUMN "channel" DROP NOT NULL;

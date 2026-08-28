@@ -201,6 +201,50 @@ async function writeSaleExpenses(
   }
 }
 
+/**
+ * Boxes still unbilled on a trip, keyed by particular in lower case.
+ *
+ * Counts what went out on the note against what every OTHER bill on the trip
+ * has already claimed. `excludeSaleId` leaves out the bill being edited, so
+ * re-opening a bill offers back its own boxes rather than counting them against
+ * itself — which would make every edit fail.
+ */
+async function remainingBoxes(
+  deliveryNoteId: string,
+  excludeSaleId: string | null
+): Promise<Map<string, number>> {
+  const trip = await prisma.deliveryNote.findUnique({
+    where: { id: deliveryNoteId },
+    select: {
+      lines: { select: { particulars: true, box: true } },
+      sales: {
+        select: {
+          id: true,
+          lines: { select: { particular: true, box: true } },
+        },
+      },
+    },
+  });
+  const left = new Map<string, number>();
+  if (!trip) return left;
+
+  for (const l of trip.lines) {
+    const key = l.particulars.trim().toLowerCase();
+    left.set(key, (left.get(key) ?? 0) + l.box);
+  }
+  for (const sale of trip.sales) {
+    if (excludeSaleId && sale.id === excludeSaleId) continue;
+    for (const l of sale.lines) {
+      if (!l.box || l.box <= 0) continue;
+      const key = l.particular.trim().toLowerCase();
+      // Only subtract from particulars the note actually carried; an unknown
+      // one is reported by the caller rather than silently going negative.
+      if (left.has(key)) left.set(key, left.get(key)! - l.box);
+    }
+  }
+  return left;
+}
+
 /** The category a trip's rent is filed under. */
 const RENT_CATEGORY_CODE = "RENT";
 
@@ -330,10 +374,10 @@ function parseLines(
     // Blank rate is zero — see the note above; a market line carries boxes,
     // not a price per kilo.
     const ratePerKg = rateRaw ? new Prisma.Decimal(rateRaw) : new Prisma.Decimal(0);
-    // Rate is per kilo, so it applies to the weight actually sold — box × kgs
-    // on a Fish Mill row, where kgs is the weight of one box. Charging the
-    // per-box weight would bill ten boxes at the price of one.
-    const totalKg = box && box > 0 ? qtyKg.mul(box) : qtyKg;
+    // The weight typed IS the line's weight now — the whole lot on the scale,
+    // not one box multiplied up. Nothing to derive; the per-box average is
+    // shown from these two numbers rather than being the input to them.
+    const totalKg = qtyKg;
     lines.push({
       particular: p,
       box,
@@ -347,10 +391,12 @@ function parseLines(
 }
 
 // Async: where a trip is named, it has to be read to validate the bill against
-// its date and its channel.
+// its buying day and against the boxes it still has unbilled.
 async function parse(
   formData: FormData,
-  scope: { companyId: string; centreId: string }
+  scope: { companyId: string; centreId: string },
+  /** The bill being edited — its own boxes count as still available. */
+  editingSaleId?: string
 ): Promise<{ error: string } | { data: Parsed }> {
   const type = String(formData.get("type") ?? "") as SaleType;
   if (!SALE_TYPES.includes(type)) return { error: "Choose a sale type." };
@@ -604,6 +650,43 @@ async function parse(
 
 
     base.deliveryNoteId = trip.id;
+
+    // BOX TRACKING. A trip that went out with 30 boxes could be billed for 40,
+    // or 50, or anything — nothing ever compared the two. The trip's own screen
+    // showed the discrepancy afterwards, which is not the same as refusing to
+    // create it.
+    //
+    // Checked per particular, not just on the total: 30 prawn and 20 mixed
+    // billed as 50 prawn adds up correctly and is still wrong about where the
+    // fish went, which is the whole question the box statement exists to
+    // answer. The bill being edited is excluded, so re-opening one offers back
+    // the boxes it already claimed instead of counting them against itself.
+    const billedBoxes = new Map<string, number>();
+    for (const l of base.lines) {
+      if (!l.box || l.box <= 0) continue;
+      const key = l.particular.trim().toLowerCase();
+      billedBoxes.set(key, (billedBoxes.get(key) ?? 0) + l.box);
+    }
+
+    if (billedBoxes.size > 0) {
+      const available = await remainingBoxes(trip.id, editingSaleId ?? null);
+      for (const [key, boxes] of billedBoxes) {
+        const left = available.get(key);
+        if (left === undefined)
+          return {
+            error:
+              `Trip ${trip.billNo} did not carry any “${key}”. Check the ` +
+              `particular, or add it to the delivery note.`,
+          };
+        if (boxes > left)
+          return {
+            error:
+              `Trip ${trip.billNo} has ${left} box${left === 1 ? "" : "es"} of ` +
+              `“${key}” left unbilled, but this bill claims ${boxes}. ` +
+              `Correct the boxes, or correct the delivery note.`,
+          };
+      }
+    }
 
     // What THIS market handed the driver: the rent entered in the expenses
     // panel, less the advance that already went at loading. Derived from the
@@ -1009,10 +1092,12 @@ export async function updateSale(
   const { company, centre } = await getActiveScope();
   if (!centre) return { error: "No centre is selected." };
 
-  const parsed = await parse(formData, {
-    companyId: company.id,
-    centreId: centre.id,
-  });
+  const parsed = await parse(
+    formData,
+    { companyId: company.id, centreId: centre.id },
+    // Editing: this bill's own boxes are still available to it.
+    saleId
+  );
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 

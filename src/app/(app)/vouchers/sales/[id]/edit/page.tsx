@@ -4,7 +4,7 @@ import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { toInputDate } from "@/lib/format";
-import { openTripsForChannel } from "@/lib/trip";
+import { openTrips } from "@/lib/trip";
 import { updateSale } from "../../actions";
 import { ReviewPanel } from "../../../review-panel";
 import { SaleForm } from "../../sale-form";
@@ -53,20 +53,15 @@ export default async function EditSalePage({
   // The trip this bill already points at is included even if that trip has
   // since closed — billing the last box is what closes it, and an edit must
   // still find it.
-  const trips =
-    sale.type === "LOCAL"
-      ? []
-      : await openTripsForChannel(
-          { companyId: company.id, centreId: centre.id },
-          sale.type === "MARKET"
-            ? "MARKET"
-            : sale.type === "FACTORY"
-              ? "FACTORY"
-              : "FISH_MILL",
-          sale.deliveryNoteId,
-          // This bill's own boxes count as still available when re-opening it.
-          sale.id
-        );
+  // LOCAL is no longer excluded. A local sale of the fish a factory rejected
+  // came off the same truck as everything else, and giving it no trip to point
+  // at is how those boxes went unaccounted for.
+  const trips = await openTrips(
+    { companyId: company.id, centreId: centre.id },
+    sale.deliveryNoteId,
+    // This bill's own boxes count as still available when re-opening it.
+    sale.id
+  );
 
   // The heads a bill may raise a cost under. Live, like everywhere else —
   // archived ones drop out, and anything the merchant added shows up.

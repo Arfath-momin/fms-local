@@ -109,7 +109,11 @@ export default async function DeliveryNotePage({
         <Field label="Bill No." value={note.billNo} />
         <Field label="Date" value={fmtDate(note.date)} />
         <Field label="To" value={note.recipient ?? "—"} />
-        <Field label="Channel" value={TRIP_CHANNEL_LABELS[note.channel]} />
+        {/* Only on notes raised while the channel still meant something. It
+            decides nothing now — every open trip is offered to every bill. */}
+        {note.channel && (
+          <Field label="Dispatched as" value={TRIP_CHANNEL_LABELS[note.channel]} />
+        )}
         <Field label="Status" value={TRIP_STATUS_LABELS[note.status]} />
         <Field label="Vehicle No." value={note.vehicle.number} />
         <Field

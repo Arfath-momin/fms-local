@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
-import type { TripChannel } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { nextDocumentNo, SERIES_PREFIX } from "@/lib/document-series";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
@@ -19,13 +18,6 @@ import {
 } from "@/lib/attachments";
 
 export type DeliveryFormState = { error: string } | null;
-
-const TRIP_CHANNELS: TripChannel[] = [
-  "MARKET",
-  "FACTORY",
-  "FISH_MILL",
-  "LOCAL",
-];
 
 
 /**
@@ -58,7 +50,6 @@ type ParsedLine = {
 type Parsed = {
   date: Date;
   recipient: string;
-  channel: TripChannel;
   vehicleId: string;
   advancePaid: Prisma.Decimal | null;
   driverName: string | null;
@@ -119,7 +110,6 @@ const clean = (v: FormDataEntryValue | null) =>
 function parse(formData: FormData): { error: string } | { data: Parsed } {
   const dateRaw = String(formData.get("date") ?? "");
   const recipient = clean(formData.get("recipient"));
-  const channelRaw = clean(formData.get("channel"));
   const vehicleId = clean(formData.get("vehicleId"));
   const driverName = clean(formData.get("driverName"));
   const mobileNo = clean(formData.get("mobileNo"));
@@ -129,9 +119,6 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return { error: "Pick a date." };
   if (!recipient) return { error: "Enter the recipient (To)." };
   if (!vehicleId) return { error: "Choose a vehicle." };
-  if (!TRIP_CHANNELS.includes(channelRaw as TripChannel))
-    return { error: "Choose a channel." };
-  const channel = channelRaw as TripChannel;
 
 
 
@@ -206,7 +193,6 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
     data: {
       date: new Date(dateRaw),
       recipient,
-      channel,
       vehicleId,
       advancePaid,
       driverName: driverName || null,
@@ -257,7 +243,6 @@ export async function createDelivery(
           ),
           date: d.date,
           recipient: d.recipient,
-          channel: d.channel,
           vehicleId: vehicle.id,
           // The TOTAL rent is not known here — it is entered when the bill
           // comes back. The advance is, so it lives on the note where it
@@ -415,7 +400,6 @@ export async function updateDelivery(
           // on paper that has already left the building.
           date: d.date,
           recipient: d.recipient,
-          channel: d.channel,
           vehicleId: updVehicle.id,
           // rentAmount is deliberately absent: the total belongs to whatever
           // recorded it, and editing the note must not wipe it.

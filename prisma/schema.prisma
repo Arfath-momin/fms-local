@@ -521,7 +521,13 @@ model DeliveryNote {
   /// a figure.
   dispatchedOn DateTime? @map("dispatched_on") @db.Date
 
-  channel   TripChannel
+  /// RETIRED. What the truck was dispatched as, on notes raised while this
+  /// mattered. It decided which bills could name a trip and when a trip closed,
+  /// and both rules were wrong: one journey ends in a factory bill for the load
+  /// and a market bill for the returns, and a channel filter made the second
+  /// one impossible to attach. Kept nullable so old notes keep their history;
+  /// nothing reads it to make a decision any more.
+  channel   TripChannel?
   vehicleId String      @map("vehicle_id")
 
   /// Total rent agreed for this trip. Expensed ONCE, on `date`, as a direct
