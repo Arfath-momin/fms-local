@@ -58,6 +58,12 @@ export async function GET(req: Request) {
   // there in Masters and the form offered nothing, with no error to explain it.
   // The centre is only needed for the balance column, so it is optional now and
   // its absence costs the figures, not the suggestions.
+  // Narrows nothing, but REORDERS: vendors this head has been paid before come
+  // first. Picking Ice and being shown the canteen man alongside the ice plant
+  // is technically a correct list and practically a useless one — the name the
+  // merchant wants is nearly always one they have used under this head before.
+  const expenseCategoryId = url.searchParams.get("expenseCategory");
+
   const { company, centre } = await getActiveScope();
 
   const base: Prisma.PartyWhereInput = {
@@ -72,47 +78,78 @@ export async function GET(req: Request) {
 
   const select = { id: true, name: true, type: true } as const;
 
-  // Two passes rather than one sorted in memory. Sorting after a single capped
-  // query would be wrong, not just slower: `take` applies before the sort, so a
-  // prefix match sitting 30 names down the alphabet would be cut before it
-  // could be promoted. Asking for the prefixes first guarantees they are the
-  // ones that survive the cap.
-  const prefix = q
-    ? await prisma.party.findMany({
-        where: { ...base, name: { startsWith: q, mode: "insensitive" } },
-        select,
-        orderBy: { name: "asc" },
-        take: LIMIT,
-      })
-    : [];
+  // Who has been paid under this head before, in this company and centre.
+  // One grouped query; empty when no head was named, which leaves the ordinary
+  // prefix-first behaviour exactly as it was.
+  let seenIds: string[] = [];
+  if (expenseCategoryId && centre) {
+    const rows = await prisma.expense.findMany({
+      where: {
+        companyId: company.id,
+        centreId: centre.id,
+        categoryId: expenseCategoryId,
+        partyId: { not: null },
+      },
+      select: { partyId: true },
+      distinct: ["partyId"],
+      take: 200,
+    });
+    seenIds = rows.map((r) => r.partyId!).filter(Boolean);
+  }
 
-  // Only top up when the prefix pass left room, so the common case of a
-  // well-matched query stays a single query.
-  const remaining = LIMIT - prefix.length;
-  const contains =
-    q && remaining > 0
-      ? await prisma.party.findMany({
-          where: {
-            ...base,
-            name: { contains: q, mode: "insensitive" },
-            id: { notIn: prefix.map((p) => p.id) },
-          },
-          select,
-          orderBy: { name: "asc" },
-          take: remaining,
-        })
-      : [];
+  /**
+   * One pass of the search, restricted to a set of ids or excluding the ones
+   * already found. Passes run in priority order and each takes only what the
+   * ones before it left room for, so the cap always falls on the least
+   * relevant names rather than on the best ones.
+   */
+  const found: { id: string; name: string; type: PartyType }[] = [];
+  const room = () => LIMIT - found.length;
+  const pass = async (where: Prisma.PartyWhereInput) => {
+    if (room() <= 0) return;
+    const rows = await prisma.party.findMany({
+      where: {
+        ...base,
+        ...where,
+        ...(found.length ? { id: { notIn: found.map((p) => p.id) } } : {}),
+      },
+      select,
+      orderBy: { name: "asc" },
+      take: room(),
+    });
+    found.push(...rows);
+  };
 
-  // Empty query: the plain alphabetical list, which is what a freshly focused
-  // field should show before anything is typed.
-  const all = q
-    ? [...prefix, ...contains]
-    : await prisma.party.findMany({
-        where: base,
-        select,
-        orderBy: { name: "asc" },
-        take: LIMIT,
-      });
+  // Separate passes rather than one query sorted in memory. Sorting after a
+  // single capped query would be wrong, not just slower: `take` applies before
+  // the sort, so a prefix match sitting 30 names down the alphabet would be cut
+  // before it could be promoted. Running the best passes first guarantees they
+  // are the ones that survive the cap.
+  //
+  //   1. used under this head, and the name starts with what was typed
+  //   2. used under this head, name contains it
+  //   3. any matching party, prefix
+  //   4. any matching party, contains
+  //
+  // With no head named, 1 and 2 are empty and this is exactly the prefix-first
+  // behaviour it has always had.
+  const seen = seenIds.length ? { id: { in: seenIds } } : null;
+
+  if (q) {
+    if (seen) {
+      await pass({ ...seen, name: { startsWith: q, mode: "insensitive" } });
+      await pass({ ...seen, name: { contains: q, mode: "insensitive" } });
+    }
+    await pass({ name: { startsWith: q, mode: "insensitive" } });
+    await pass({ name: { contains: q, mode: "insensitive" } });
+  } else {
+    // Nothing typed yet. A freshly focused field shows the names this head has
+    // actually used, which on most days is the whole answer.
+    if (seen) await pass(seen);
+    await pass({});
+  }
+
+  const all = found;
 
   if (all.length === 0) return NextResponse.json({ parties: [] });
 

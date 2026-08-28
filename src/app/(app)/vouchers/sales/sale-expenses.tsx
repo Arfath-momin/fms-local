@@ -1,6 +1,7 @@
 "use client";
 
 import { fmtMoney } from "@/lib/format";
+import { PartyCombobox } from "../../masters/party-combobox";
 
 /**
  * The costs a bill reveals, entered on the bill.
@@ -174,12 +175,22 @@ export function SaleExpenses({
                           />
                         </>
                       ) : (
-                        <input
+                        // Suggests whoever has been paid under this head
+                        // before, so picking Ice offers the ice plant rather
+                        // than every expense vendor in the book. Controlled,
+                        // because removing a row has to move the row below it
+                        // up rather than leave its name in a recycled cell.
+                        <PartyCombobox
                           name="expVendorName"
+                          label="Paid to"
+                          compact
+                          required={false}
+                          types={["EXPENSE_VENDOR"]}
+                          defaultType="EXPENSE_VENDOR"
+                          expenseCategoryId={r.categoryId || undefined}
                           value={r.vendorName}
-                          onChange={(e) => set(i, { vendorName: e.target.value })}
-                          className={inputCls}
-                          placeholder="Vendor — leave blank if nobody is owed"
+                          onValueChange={(v) => set(i, { vendorName: v })}
+                          placeholder="Vendor — blank if nobody is owed"
                         />
                       )}
                     </td>

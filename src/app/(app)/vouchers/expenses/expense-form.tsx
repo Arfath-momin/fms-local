@@ -13,6 +13,7 @@ import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
 import { DateField } from "../../date-field";
+import { PartyCombobox } from "../../masters/party-combobox";
 
 const inputCls =
   "w-full border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
@@ -281,25 +282,44 @@ export function ExpenseForm({
 
       {spec.fields.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {spec.fields.map((f) => (
-            <div key={f.name}>
-              <label htmlFor={f.name} className={labelCls}>
-                {f.label}
-                {!f.required && (
-                  <span className="normal-case font-normal"> (optional)</span>
-                )}
-              </label>
-              <input
-                id={f.name}
+          {spec.fields.map((f) =>
+            // The field that names the vendor gets the party picker, so the ice
+            // plant you paid last week is one keystroke away instead of being
+            // retyped — and retyped slightly differently, which is how one
+            // vendor ends up with two ledgers. Suggestions are ranked by who
+            // has been paid under THIS head before.
+            f.name === spec.vendorFrom ? (
+              <PartyCombobox
+                key={f.name}
                 name={f.name}
+                label={f.label}
                 required={f.required}
-                inputMode={f.kind === "number" ? "decimal" : undefined}
+                types={[spec.vendorType === "TRANSPORTER" ? "TRANSPORTER" : "EXPENSE_VENDOR"]}
+                defaultType={spec.vendorType === "TRANSPORTER" ? "TRANSPORTER" : "EXPENSE_VENDOR"}
+                expenseCategoryId={category?.id}
                 value={details[f.name] ?? ""}
-                onChange={(e) => setField(f.name, e.target.value)}
-                className={inputCls + (f.kind === "number" ? " num text-right" : "")}
+                onValueChange={(v) => setField(f.name, v)}
               />
-            </div>
-          ))}
+            ) : (
+              <div key={f.name}>
+                <label htmlFor={f.name} className={labelCls}>
+                  {f.label}
+                  {!f.required && (
+                    <span className="normal-case font-normal"> (optional)</span>
+                  )}
+                </label>
+                <input
+                  id={f.name}
+                  name={f.name}
+                  required={f.required}
+                  inputMode={f.kind === "number" ? "decimal" : undefined}
+                  value={details[f.name] ?? ""}
+                  onChange={(e) => setField(f.name, e.target.value)}
+                  className={inputCls + (f.kind === "number" ? " num text-right" : "")}
+                />
+              </div>
+            )
+          )}
         </div>
       )}
 

@@ -31,6 +31,7 @@ export function PartyCombobox({
   label,
   types,
   purchaseKind,
+  expenseCategoryId,
   defaultValue = "",
   defaultType,
   typeFieldName,
@@ -52,6 +53,12 @@ export function PartyCombobox({
    * kind on record still appear under all of them.
    */
   purchaseKind?: PurchaseType;
+  /**
+   * Puts vendors already paid under this expense head at the top of the list.
+   * Narrows nothing — a new vendor is still findable and still creatable — it
+   * just stops the ice plant being buried under every other expense vendor.
+   */
+  expenseCategoryId?: string;
   defaultValue?: string;
   /** Pre-selected party kind for a newly created party. */
   defaultType?: PartyType;
@@ -109,6 +116,7 @@ export function PartyCombobox({
       try {
         const params = new URLSearchParams({ q: query, types: typesKey });
         if (purchaseKind) params.set("purchaseKind", purchaseKind);
+        if (expenseCategoryId) params.set("expenseCategory", expenseCategoryId);
         const res = await fetch(`/api/parties/search?${params}`);
         if (!res.ok) throw new Error("search failed");
         const data = (await res.json()) as { parties: PartyOption[] };
@@ -124,7 +132,7 @@ export function PartyCombobox({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, typesKey, purchaseKind]);
+  }, [query, typesKey, purchaseKind, expenseCategoryId]);
 
   // Close when focus leaves the whole control, not just the input, or clicking
   // an option would dismiss the list before the click registers.
