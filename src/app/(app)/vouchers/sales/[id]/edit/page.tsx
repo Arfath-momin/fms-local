@@ -71,6 +71,24 @@ export default async function EditSalePage({
     select: { id: true, code: true, name: true, allowsLines: true },
   });
 
+  // The vehicle master, so a rent row entered on a bill picks its truck rather
+  // than typing a number that has to match one somewhere else.
+  const vehicles = (
+    await prisma.vehicle.findMany({
+      where: { companyId: company.id, archivedAt: null },
+      orderBy: { number: "asc" },
+      select: {
+        id: true,
+        number: true,
+        transporter: { select: { name: true } },
+      },
+    })
+  ).map((v) => ({
+    id: v.id,
+    number: v.number,
+    transporterName: v.transporter.name,
+  }));
+
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-4">
@@ -85,6 +103,7 @@ export default async function EditSalePage({
         type={sale.type}
         trips={trips}
         expenseCategories={expenseCategories}
+        vehicles={vehicles}
         action={updateSale.bind(null, sale.id)}
         initial={{
           billNo: sale.billNo,

@@ -8,12 +8,14 @@ import {
   expenseRowSummary,
   type ExpenseCategoryOption,
   type SaleExpenseRow,
+  type VehicleOption,
 } from "./expense-drawer";
 
 export {
   BLANK_EXPENSE,
   type ExpenseCategoryOption,
   type SaleExpenseRow,
+  type VehicleOption,
 } from "./expense-drawer";
 
 /**
@@ -47,11 +49,14 @@ export function SaleExpenses({
   rows,
   setRows,
   categories,
+  vehicles,
   trip,
 }: {
   rows: SaleExpenseRow[];
   setRows: (rows: SaleExpenseRow[]) => void;
   categories: ExpenseCategoryOption[];
+  /** The vehicle master, for a rent row on a bill that names no trip. */
+  vehicles: VehicleOption[];
   /** The trip these costs belong to, when one is chosen. */
   trip: {
     billNo: string;
@@ -121,6 +126,7 @@ export function SaleExpenses({
             setRow={(r) => setRow(i, r)}
             categories={categories}
             rent={rent}
+            vehicles={vehicles}
             onClose={() => setOpenAt(null)}
             onRemove={() => removeRow(i)}
           />

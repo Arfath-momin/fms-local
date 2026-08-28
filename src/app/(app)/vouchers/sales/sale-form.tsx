@@ -12,6 +12,7 @@ import {
   SaleExpenses,
   type ExpenseCategoryOption,
   type SaleExpenseRow,
+  type VehicleOption,
 } from "./sale-expenses";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
@@ -102,6 +103,7 @@ export function SaleForm({
   action,
   trips,
   expenseCategories,
+  vehicles,
   nextNo,
   initial,
   submitLabel,
@@ -115,6 +117,8 @@ export function SaleForm({
   trips: TripOption[];
   /** Live expense heads, for the costs this bill reveals. */
   expenseCategories: ExpenseCategoryOption[];
+  /** The vehicle master, so a rent row picks its truck rather than typing it. */
+  vehicles: VehicleOption[];
   /** The number a LOCAL sale will take — a preview, confirmed on save. */
   nextNo?: string;
   initial?: SaleInit;
@@ -920,6 +924,7 @@ export function SaleForm({
         rows={expenses}
         setRows={setExpenses}
         categories={expenseCategories}
+        vehicles={vehicles}
         trip={
           trip
             ? {

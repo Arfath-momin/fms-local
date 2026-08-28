@@ -57,6 +57,13 @@ const inputCls =
 const labelCls =
   "block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1";
 
+/** A vehicle from the master, with the transporter it belongs to. */
+export type VehicleOption = {
+  id: string;
+  number: string;
+  transporterName: string;
+};
+
 /** What a trip tells a Vehicle Rent row. None of it is typed. */
 export type RentPrefill = {
   vehicleNumber: string;
@@ -69,6 +76,7 @@ export function ExpenseDrawer({
   setRow,
   categories,
   rent,
+  vehicles,
   onClose,
   onRemove,
 }: {
@@ -77,6 +85,8 @@ export function ExpenseDrawer({
   categories: ExpenseCategoryOption[];
   /** Present when a trip is chosen, so rent can fill itself in. */
   rent: RentPrefill | null;
+  /** The vehicle master, for a rent row on a bill that names no trip. */
+  vehicles: VehicleOption[];
   onClose: () => void;
   onRemove: () => void;
 }) {
@@ -92,17 +102,30 @@ export function ExpenseDrawer({
   // bill saves — it is the only party that can be trusted to say who a trip's
   // transporter is, and a client-sent name would be one more way for one man's
   // account to end up spelled two ways.
-  // The truck, its owner and what has already gone to the driver are all facts
-  // about the TRIP. Asking for any of them again is asking the clerk to retype
-  // something the app is already showing them two inches higher up.
-  const rentDetails: Record<string, string> =
-    isRent && rent
+  // A vehicle is a RECORD, never a string somebody retypes. Rent's truck and
+  // its owner come from one of two places and are typed in neither:
+  //
+  //   with a trip   the trip names both, along with the advance already paid
+  //   without one   the merchant picks the truck out of the master
+  //
+  // Typing them meant "KA20B5521" and "KA 20 B 5521" were two trucks, each
+  // with whatever owner was typed beside it — which is how one man ends up
+  // with two ledgers.
+  const pickedVehicle = vehicles.find((v) => v.id === row.details.vehicleId);
+  const rentDetails: Record<string, string> = !isRent
+    ? {}
+    : rent
       ? {
           vehicleNo: rent.vehicleNumber,
           transporter: rent.transporterName,
           advance: rent.advancePaid > 0 ? String(rent.advancePaid) : "",
         }
-      : {};
+      : pickedVehicle
+        ? {
+            vehicleNo: pickedVehicle.number,
+            transporter: pickedVehicle.transporterName,
+          }
+        : {};
 
   const result = category
     ? expenseEntryAmount(
@@ -152,10 +175,33 @@ export function ExpenseDrawer({
           </select>
         </div>
 
+        {/* No trip to take the truck from, so it is chosen from the master. */}
+        {isRent && !rent && vehicles.length > 0 && (
+          <div>
+            <label className={labelCls}>Vehicle</label>
+            <select
+              value={row.details.vehicleId ?? ""}
+              onChange={(e) => setDetail("vehicleId", e.target.value)}
+              className={inputCls}
+            >
+              <option value="">Choose the truck…</option>
+              {vehicles.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.number} · {v.transporterName}
+                </option>
+              ))}
+            </select>
+            <p className="text-muted text-[12px] mt-1">
+              Its owner fills in below — the rent is owed to him.
+            </p>
+          </div>
+        )}
+
         {spec?.fields.map((f) => {
-          // Rent's transporter and advance are the trip's, shown but not typed.
-          const fromTrip = isRent && rent && f.name in rentDetails;
-          if (fromTrip) {
+          // Rent's truck, owner and advance are answered by the trip or by the
+          // vehicle above — shown, never typed.
+          const known = isRent && f.name in rentDetails;
+          if (known) {
             const value = rentDetails[f.name] ?? "";
             return (
               <div key={f.name}>
@@ -166,12 +212,24 @@ export function ExpenseDrawer({
                     : value || "—"}
                   <span className="text-muted font-normal text-[12px]">
                     {" "}
-                    · from the trip
+                    · from the {rent ? "trip" : "vehicle"}
                   </span>
                 </p>
               </div>
             );
           }
+
+          // Until a truck is named there is nothing to show for these, and
+          // asking for them by hand is the retyping this exists to remove.
+          if (isRent && (f.name === "vehicleNo" || f.name === "transporter"))
+            return (
+              <div key={f.name}>
+                <span className={labelCls}>{f.label}</span>
+                <p className="text-muted text-[13px] py-2">
+                  Choose the vehicle above.
+                </p>
+              </div>
+            );
 
           if (f.name === spec.vendorFrom) {
             return (

@@ -166,14 +166,33 @@ async function writeSaleExpenses(
     // already posted on the delivery note and is deliberately NOT posted again.
     const isRent = rentId !== undefined && row.categoryId === rentId;
     const details: Record<string, string> = { ...row.details };
-    if (isRent && e.transporterName) {
-      details.transporter = e.transporterName;
-      if (e.vehicleNumber) details.vehicleNo = e.vehicleNumber;
-      if (e.advancePaid > 0) details.advance = String(e.advancePaid);
+    if (isRent) {
+      if (e.transporterName) {
+        // A trip settles it: the truck, its owner and what already went to the
+        // driver are the trip's own facts.
+        details.transporter = e.transporterName;
+        if (e.vehicleNumber) details.vehicleNo = e.vehicleNumber;
+        if (e.advancePaid > 0) details.advance = String(e.advancePaid);
+      } else if (details.vehicleId) {
+        // No trip, so the truck was picked from the master. Read back HERE
+        // rather than trusted: the row carries an id, and only the database can
+        // say which truck that is and who owns it.
+        const picked = await tx.vehicle.findFirst({
+          where: {
+            id: details.vehicleId,
+            companyId: e.companyId,
+            archivedAt: null,
+          },
+          select: { number: true, transporter: { select: { name: true } } },
+        });
+        if (!picked) throw new Error("That vehicle no longer exists.");
+        details.vehicleNo = picked.number;
+        details.transporter = picked.transporter.name;
+      }
     }
 
     const vendor = isRent
-      ? e.transporterName
+      ? details.transporter
       : expenseEntryVendor(
           { code: category.code, name: category.name, allowsLines: false },
           details
