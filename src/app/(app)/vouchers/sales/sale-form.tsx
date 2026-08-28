@@ -21,7 +21,6 @@ import {
   DEFAULT_MARKET_COMMISSION_RATE,
   SALE_BUYER_TYPE,
   SALE_TYPE_LABELS,
-  saleLineKgPerBox,
   saleLineTotalKg,
 } from "@/lib/sale";
 
@@ -61,7 +60,9 @@ export type SaleInit = {
   /** Costs entered on this bill, which become expense vouchers. */
   expenses?: SaleExpenseRow[];
   amount: string; // factory bill amount total
+  /** The buyer's weighing slip: as loaded, after water and ice, handed back. */
   weight: string;
+  returnKg: string;
   vehicleNo: string;
   netWeight: string;
   placeOfLoading: string;
@@ -151,13 +152,24 @@ export function SaleForm({
     type === "MARKET" ||
     (type === "FACTORY" && !factoryLumpSum);
 
-  /** Types whose rows are boxed: a box count, a per-box weight, and a count. */
-  const boxedLines = type === "FISH_MILL" || type === "FACTORY";
+  /**
+   * Fish mill and factory record how the buyer weighed the load: as it arrived,
+   * after water and ice, and what came back. The Items rows below are what the
+   * buyer actually TOOK, and they are what the money and the box statement
+   * read — these three are the weighing slip beside them.
+   */
+  const weighed = type === "FISH_MILL" || type === "FACTORY";
   const [lines, setLines] = useState<SaleLineInit[]>(
     initial?.lines?.length ? initial.lines : [BLANK_LINE]
   );
   const [totalBill, setTotalBill] = useState(initial?.totalBill ?? "");
   const [netBillRaw, setNetBillRaw] = useState(initial?.netBill ?? "");
+  // The buyer's weighing slip. Controlled so the reconciliation below can read
+  // them while they are being typed.
+  const [weight, setWeight] = useState(initial?.weight ?? "");
+  const [netWeight, setNetWeight] = useState(initial?.netWeight ?? "");
+  const [returnKg, setReturnKg] = useState(initial?.returnKg ?? "");
+
   const [expenses, setExpenses] = useState<SaleExpenseRow[]>(
     initial?.expenses?.length ? initial.expenses : []
   );
@@ -223,10 +235,6 @@ export function SaleForm({
   // action uses, so the figure on screen and the figure saved cannot disagree.
   const rowKg = (l: SaleLineInit) =>
     saleLineTotalKg({ qtyKg: n(l.qtyKg), box: n(l.box) });
-  // The average that falls out of the two figures actually observed — the whole
-  // lot on the scale, and the boxes it was packed into.
-  const rowKgPerBox = (l: SaleLineInit) =>
-    saleLineKgPerBox({ qtyKg: n(l.qtyKg), box: n(l.box) });
 
   const lineTotal = useMemo(
     () => lines.reduce((s, l) => s + rowKg(l) * n(l.ratePerKg), 0),
@@ -270,6 +278,11 @@ export function SaleForm({
     [lines]
   );
   const kgTotal = useMemo(() => lines.reduce((s, l) => s + rowKg(l), 0), [lines]);
+
+  // What the buyer took, by the weighing slip: the net, less what came back.
+  const expectedKg = Math.max(0, n(netWeight) - n(returnKg));
+  // A kilo of slack, so three decimal places rounding does not read as an error.
+  const kgOff = expectedKg > 0 && Math.abs(expectedKg - kgTotal) > 1;
 
   // Same helper the action stores with, so the figure approved on screen and
   // the figure written to the database are never two calculations.
@@ -589,18 +602,6 @@ export function SaleForm({
       {/* ---- Fish Mill header ---- */}
       {type === "FISH_MILL" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <label htmlFor="weight" className={labelCls}>
-              Weight
-            </label>
-            <input id="weight" name="weight" inputMode="decimal" defaultValue={initial?.weight ?? ""} className={inputCls + " num text-right"} />
-          </div>
-          <div>
-            <label htmlFor="netWeight" className={labelCls}>
-              Net Weight
-            </label>
-            <input id="netWeight" name="netWeight" inputMode="decimal" defaultValue={initial?.netWeight ?? ""} className={inputCls + " num text-right"} />
-          </div>
           {/* The trip already names the truck — the dropdown above prints it —
               so asking again was asking the clerk to type something the app
               knows. The field survives only for a bill with no trip. */}
@@ -688,6 +689,79 @@ export function SaleForm({
         </div>
       )}
 
+      {weighed && (
+        <div className="border border-line-strong bg-surface px-4 py-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label htmlFor="weight" className={labelCls}>
+                Total Weight
+              </label>
+              <input
+                id="weight"
+                name="weight"
+                inputMode="decimal"
+                value={weight}
+                onChange={(e) => setWeight(e.target.value)}
+                className={inputCls + " num text-right"}
+              />
+              <p className="text-muted text-[12px] mt-1">As loaded.</p>
+            </div>
+            <div>
+              <label htmlFor="netWeight" className={labelCls}>
+                Net Weight
+              </label>
+              <input
+                id="netWeight"
+                name="netWeight"
+                inputMode="decimal"
+                value={netWeight}
+                onChange={(e) => setNetWeight(e.target.value)}
+                className={inputCls + " num text-right"}
+              />
+              <p className="text-muted text-[12px] mt-1">
+                After water and ice.
+              </p>
+            </div>
+            <div>
+              <label htmlFor="returnKg" className={labelCls}>
+                Return
+              </label>
+              <input
+                id="returnKg"
+                name="returnKg"
+                inputMode="decimal"
+                value={returnKg}
+                onChange={(e) => setReturnKg(e.target.value)}
+                className={inputCls + " num text-right"}
+              />
+              <p className="text-muted text-[12px] mt-1">
+                Handed back to us.
+              </p>
+            </div>
+          </div>
+
+          {/* The slip against the rows. Net less what came back should be what
+              the buyer actually took, which is what the Items add up to. Shown
+              rather than enforced: the money and the box statement come from
+              the Items, and a paper that does not quite reconcile is a fact to
+              notice, not a reason to refuse the bill. */}
+          {expectedKg > 0 && (
+            <p
+              className={
+                "text-[12px] mt-3 pt-2 border-t border-line " +
+                (kgOff ? "text-debit font-semibold" : "text-muted")
+              }
+            >
+              Net {fmtKg(n(netWeight))} less return {fmtKg(n(returnKg))} ={" "}
+              {fmtKg(expectedKg)} — and the items come to {fmtKg(kgTotal)}
+              {kgOff
+                ? `. ${fmtKg(Math.abs(expectedKg - kgTotal))} apart; check the figures, or save anyway if that is what the paper says.`
+                : ". They agree."}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* ---- Line table (Market / Fish Mill / Local) ---- */}
       {hasLines && (
         <div>
@@ -708,33 +782,19 @@ export function SaleForm({
             <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="text-muted text-[12px] uppercase tracking-wide">
-                  {(boxedLines || type === "MARKET") && (
-                    <th className="text-right font-semibold px-2 py-2 w-16">Box</th>
-                  )}
-                  <th className="text-left font-semibold px-3 py-2">
-                    {boxedLines ? "Fish (variety)" : "Particular"}
-                  </th>
+                  <th className="text-right font-semibold px-2 py-2 w-16">Box</th>
+                  <th className="text-left font-semibold px-3 py-2">Particular</th>
                   {/* A market line carries no weight or rate: the money on a
                       market bill is the net the market paid, and the line is
                       there to record which market took how many boxes. */}
                   {type !== "MARKET" && (
-                    <th className="text-right font-semibold px-2 py-2 w-24">
-                      {boxedLines ? "Total Kg" : "Kgs"}
-                    </th>
-                  )}
-                  {boxedLines && (
-                    <th className="text-right font-semibold px-2 py-2 w-24">
-                      Kg / box
-                    </th>
+                    <th className="text-right font-semibold px-2 py-2 w-24">Kgs</th>
                   )}
                   {type !== "MARKET" && (
                     <th className="text-right font-semibold px-2 py-2 w-24">Rate/kg</th>
                   )}
-                  {boxedLines && (
-                    <th className="text-right font-semibold px-2 py-2 w-16">Count</th>
-                  )}
                   {type !== "MARKET" && (
-                    <th className="text-right font-semibold px-3 py-2 w-28">Total</th>
+                    <th className="text-right font-semibold px-3 py-2 w-28">Amount</th>
                   )}
                   <th className="w-8"></th>
                 </tr>
@@ -745,11 +805,9 @@ export function SaleForm({
                   const rowTotal = totalKg * n(l.ratePerKg);
                   return (
                     <tr key={i} className="border-t border-line">
-                      {(boxedLines || type === "MARKET") && (
-                        <td className="px-1 py-1">
-                          <input name="box" inputMode="numeric" value={l.box} onChange={(e) => setLine(i, { box: e.target.value })} className={cell} />
-                        </td>
-                      )}
+                      <td className="px-1 py-1">
+                        <input name="box" inputMode="numeric" value={l.box} onChange={(e) => setLine(i, { box: e.target.value })} className={cell} />
+                      </td>
                       <td className="px-2 py-1">
                         <input name="particular" value={l.particular} onChange={(e) => setLine(i, { particular: e.target.value })} className={inputCls} placeholder="e.g. Prawn" />
                       </td>
@@ -758,23 +816,9 @@ export function SaleForm({
                           <input name="qtyKg" inputMode="decimal" value={l.qtyKg} onChange={(e) => setLine(i, { qtyKg: e.target.value })} className={cell} />
                         </td>
                       )}
-                      {/* The AVERAGE, derived from the two figures actually
-                          observed: the lot on the scale and the boxes it was
-                          packed into. Read-only, because the merchant never
-                          weighed a single box and should not be asked to. */}
-                      {boxedLines && (
-                        <td className="px-2 py-1 num text-right text-muted">
-                          {rowKgPerBox(l) ? fmtKg(rowKgPerBox(l)) : ""}
-                        </td>
-                      )}
                       {type !== "MARKET" && (
                         <td className="px-1 py-1">
                           <input name="ratePerKg" inputMode="decimal" value={l.ratePerKg} onChange={(e) => setLine(i, { ratePerKg: e.target.value })} className={cell} />
-                        </td>
-                      )}
-                      {boxedLines && (
-                        <td className="px-1 py-1">
-                          <input name="count" inputMode="numeric" value={l.count} onChange={(e) => setLine(i, { count: e.target.value })} className={cell} />
                         </td>
                       )}
                       {type !== "MARKET" && (
@@ -796,23 +840,14 @@ export function SaleForm({
                     colSpan arithmetic — the columns moved once and the totals
                     silently landed under the wrong headings. */}
                 <tr className="border-t border-line-strong font-semibold">
-                  {(boxedLines || type === "MARKET") && (
-                    <td className="px-2 py-2 num text-right">{boxTotal || ""}</td>
-                  )}
-                  <td className="px-3 py-2 text-right">
-                    {type === "MARKET" ? "Boxes" : "Total"}
-                  </td>
+                  <td className="px-2 py-2 num text-right">{boxTotal || ""}</td>
+                  <td className="px-3 py-2 text-right">Total</td>
                   {type !== "MARKET" && (
                     <td className="px-2 py-2 num text-right">
                       {kgTotal ? fmtKg(kgTotal) : ""}
                     </td>
                   )}
-                  {/* No average of the averages — it would be a figure with no
-                      meaning. The lot's own average is total kg ÷ total boxes,
-                      which the boxes and kilos beside it already give. */}
-                  {boxedLines && <td />}
                   {type !== "MARKET" && <td />}
-                  {boxedLines && <td />}
                   {/* A market bill's money is the net the market paid, so
                       there is no line total to foot to — only the boxes. */}
                   {type !== "MARKET" && (

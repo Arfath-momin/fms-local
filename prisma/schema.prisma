@@ -694,8 +694,21 @@ model Sale {
   place      String? // Market "Place"
 
   // Fish Mill-only:
+  /// FISH MILL and FACTORY. The three figures off the buyer's weighing slip.
+  ///
+  ///   weight     as loaded, before anything came off
+  ///   netWeight  after water and ice
+  ///   returnKg   handed back to us
+  ///
+  /// None of them is the money. The Items table is: its rows are what the buyer
+  /// actually took, and their weights, boxes and amounts are what the bill, the
+  /// ledger and the box statement all read. These three sit alongside as the
+  /// record of how the load was weighed, and the form points out when
+  /// netWeight − returnKg does not come to the Items total — a discrepancy
+  /// worth seeing, never worth refusing a bill over.
   weight         Decimal? @db.Decimal(12, 3)
   netWeight      Decimal? @map("net_weight") @db.Decimal(12, 3)
+  returnKg       Decimal? @map("return_kg") @db.Decimal(12, 3)
   vehicleNo      String?  @map("vehicle_no")
   placeOfLoading String?  @map("place_of_loading")
 

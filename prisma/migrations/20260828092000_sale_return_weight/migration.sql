@@ -1,0 +1,16 @@
+-- What a fish mill or factory handed back, in kilos.
+--
+-- The bill already recorded the load as loaded (`weight`) and after water and
+-- ice (`net_weight`). What it could not say was how much came physically BACK —
+-- `return_note` is free text, so the figure was a sentence nothing could read.
+--
+--   Total weight   900   as loaded
+--   Net weight     850   after water and ice
+--   Return          25   handed back
+--
+-- Deliberately NOT part of the money. The Items rows are what the buyer took,
+-- and their weights, boxes and amounts are what the bill, the ledger and the
+-- box statement all read. This is the weighing slip beside them, and the form
+-- points out when net − return does not come to the Items total rather than
+-- refusing the bill over it.
+ALTER TABLE "sales" ADD COLUMN "return_kg" DECIMAL(12, 3);

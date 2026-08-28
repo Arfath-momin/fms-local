@@ -4,7 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { getActiveScope } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
-import { SALE_TYPE_LABELS, saleLineTotalKg } from "@/lib/sale";
+import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
@@ -151,37 +151,44 @@ export default async function SalePage({
         <div className="border border-line-strong bg-surface mb-4 overflow-x-auto">
           <table className="ledger-table">
             <thead>
+              {/* The same five columns the form takes, on every channel. */}
               <tr>
-                {boxedLines && <th className="num-col">Box</th>}
-                <th>{boxedLines ? "Fish (variety)" : "Particular"}</th>
-                <th className="num-col">{boxedLines ? "Kgs / box" : "Kgs"}</th>
-                {boxedLines && <th className="num-col">Total Kg</th>}
+                <th className="num-col">Box</th>
+                <th>Particular</th>
+                <th className="num-col">Kgs</th>
                 <th className="num-col">Rate/kg</th>
-                {boxedLines && <th className="num-col">Count</th>}
-                <th className="num-col">Total</th>
+                <th className="num-col">Amount</th>
               </tr>
             </thead>
             <tbody>
               {sale.lines.map((l) => (
                 <tr key={l.id}>
-                  {boxedLines && <td className="num-col num">{l.box ?? "—"}</td>}
+                  <td className="num-col num">{l.box ?? "—"}</td>
                   <td className="font-medium">{l.particular}</td>
                   <td className="num-col num">{l.qtyKg.toString()}</td>
-                  {boxedLines && (
-                    <td className="num-col num font-semibold">
-                      {fmtKg(saleLineTotalKg({
-                        qtyKg: Number(l.qtyKg),
-                        box: l.box,
-                      }))}
-                    </td>
-                  )}
                   <td className="num-col num">{fmtMoney(l.ratePerKg)}</td>
-                  {boxedLines && <td className="num-col num">{l.count ?? "—"}</td>}
                   <td className="num-col num">{fmtMoney(l.total)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {boxedLines && (sale.weight || sale.netWeight || sale.returnKg) && (
+        <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <Field
+            label="Total Weight"
+            value={sale.weight ? fmtKg(sale.weight) : "—"}
+          />
+          <Field
+            label="Net Weight"
+            value={sale.netWeight ? fmtKg(sale.netWeight) : "—"}
+          />
+          <Field
+            label="Return"
+            value={sale.returnKg ? fmtKg(sale.returnKg) : "—"}
+          />
         </div>
       )}
 

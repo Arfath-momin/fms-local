@@ -85,6 +85,7 @@ type Parsed = {
   expenses: ParsedExpense[];
   weight: Prisma.Decimal | null;
   netWeight: Prisma.Decimal | null;
+  returnKg: Prisma.Decimal | null;
   vehicleNo: string | null;
   placeOfLoading: string | null;
   returnNote: string | null;
@@ -201,49 +202,6 @@ async function writeSaleExpenses(
   }
 }
 
-/**
- * Boxes still unbilled on a trip, keyed by particular in lower case.
- *
- * Counts what went out on the note against what every OTHER bill on the trip
- * has already claimed. `excludeSaleId` leaves out the bill being edited, so
- * re-opening a bill offers back its own boxes rather than counting them against
- * itself — which would make every edit fail.
- */
-async function remainingBoxes(
-  deliveryNoteId: string,
-  excludeSaleId: string | null
-): Promise<Map<string, number>> {
-  const trip = await prisma.deliveryNote.findUnique({
-    where: { id: deliveryNoteId },
-    select: {
-      lines: { select: { particulars: true, box: true } },
-      sales: {
-        select: {
-          id: true,
-          lines: { select: { particular: true, box: true } },
-        },
-      },
-    },
-  });
-  const left = new Map<string, number>();
-  if (!trip) return left;
-
-  for (const l of trip.lines) {
-    const key = l.particulars.trim().toLowerCase();
-    left.set(key, (left.get(key) ?? 0) + l.box);
-  }
-  for (const sale of trip.sales) {
-    if (excludeSaleId && sale.id === excludeSaleId) continue;
-    for (const l of sale.lines) {
-      if (!l.box || l.box <= 0) continue;
-      const key = l.particular.trim().toLowerCase();
-      // Only subtract from particulars the note actually carried; an unknown
-      // one is reported by the caller rather than silently going negative.
-      if (left.has(key)) left.set(key, left.get(key)! - l.box);
-    }
-  }
-  return left;
-}
 
 /** The category a trip's rent is filed under. */
 const RENT_CATEGORY_CODE = "RENT";
@@ -267,6 +225,29 @@ async function rentOnRows(
   return rows
     .filter((r) => r.categoryId === rent.id)
     .reduce((a, r) => a.add(r.amount), ZERO);
+}
+
+/**
+ * The buyer's weighing slip: as loaded, after water and ice, and handed back.
+ *
+ * Recorded on fish mill and factory bills, where the buyer reweighs on arrival.
+ * Deliberately NOT part of the money — the Items rows are what the buyer
+ * actually took, and their weights and amounts are what the bill, the ledger
+ * and the box statement all read. The form points out when net less return does
+ * not come to the Items total; it does not refuse the bill over it, because a
+ * paper that will not quite reconcile is still the paper that was handed over.
+ */
+function readWeighingSlip(
+  formData: FormData,
+  base: {
+    weight: Prisma.Decimal | null;
+    netWeight: Prisma.Decimal | null;
+    returnKg: Prisma.Decimal | null;
+  }
+) {
+  base.weight = parseMoney(clean(formData.get("weight"))) ?? null;
+  base.netWeight = parseMoney(clean(formData.get("netWeight"))) ?? null;
+  base.returnKg = parseMoney(clean(formData.get("returnKg"))) ?? null;
 }
 
 /** One cost entered on a bill, before it becomes an expense voucher. */
@@ -390,13 +371,11 @@ function parseLines(
   return { lines };
 }
 
-// Async: where a trip is named, it has to be read to validate the bill against
-// its buying day and against the boxes it still has unbilled.
+// Async: where a trip is named, it has to be read to validate the bill's buying
+// day against it, and to price the rent a market deducted.
 async function parse(
   formData: FormData,
-  scope: { companyId: string; centreId: string },
-  /** The bill being edited — its own boxes count as still available. */
-  editingSaleId?: string
+  scope: { companyId: string; centreId: string }
 ): Promise<{ error: string } | { data: Parsed }> {
   const type = String(formData.get("type") ?? "") as SaleType;
   if (!SALE_TYPES.includes(type)) return { error: "Choose a sale type." };
@@ -455,6 +434,7 @@ async function parse(
     expenses: [] as ParsedExpense[],
     weight: null as Prisma.Decimal | null,
     netWeight: null as Prisma.Decimal | null,
+    returnKg: null as Prisma.Decimal | null,
     vehicleNo: null as string | null,
     placeOfLoading: null as string | null,
     returnNote: null as string | null,
@@ -528,6 +508,7 @@ async function parse(
     // rent is grossed back up at report time (see saleRevenue in lib/sale).
     amount = netBill;
   } else if (type === "FACTORY") {
+    readWeighingSlip(formData, base);
     base.vehicleNo = clean(formData.get("vehicleNo")) || null;
     base.returnNote = clean(formData.get("returnNote")) || null;
 
@@ -556,8 +537,7 @@ async function parse(
     if ("error" in parsedLines) return { error: parsedLines.error };
     if (parsedLines.lines.length === 0) return { error: "Add at least one line item." };
     base.lines = parsedLines.lines;
-    base.weight = parseMoney(clean(formData.get("weight"))) ?? null;
-    base.netWeight = parseMoney(clean(formData.get("netWeight"))) ?? null;
+    readWeighingSlip(formData, base);
     base.vehicleNo = clean(formData.get("vehicleNo")) || null;
     base.placeOfLoading = clean(formData.get("placeOfLoading")) || null;
     amount = parsedLines.lines.reduce((a, l) => a.add(l.total), ZERO);
@@ -651,43 +631,6 @@ async function parse(
 
     base.deliveryNoteId = trip.id;
 
-    // BOX TRACKING. A trip that went out with 30 boxes could be billed for 40,
-    // or 50, or anything — nothing ever compared the two. The trip's own screen
-    // showed the discrepancy afterwards, which is not the same as refusing to
-    // create it.
-    //
-    // Checked per particular, not just on the total: 30 prawn and 20 mixed
-    // billed as 50 prawn adds up correctly and is still wrong about where the
-    // fish went, which is the whole question the box statement exists to
-    // answer. The bill being edited is excluded, so re-opening one offers back
-    // the boxes it already claimed instead of counting them against itself.
-    const billedBoxes = new Map<string, number>();
-    for (const l of base.lines) {
-      if (!l.box || l.box <= 0) continue;
-      const key = l.particular.trim().toLowerCase();
-      billedBoxes.set(key, (billedBoxes.get(key) ?? 0) + l.box);
-    }
-
-    if (billedBoxes.size > 0) {
-      const available = await remainingBoxes(trip.id, editingSaleId ?? null);
-      for (const [key, boxes] of billedBoxes) {
-        const left = available.get(key);
-        if (left === undefined)
-          return {
-            error:
-              `Trip ${trip.billNo} did not carry any “${key}”. Check the ` +
-              `particular, or add it to the delivery note.`,
-          };
-        if (boxes > left)
-          return {
-            error:
-              `Trip ${trip.billNo} has ${left} box${left === 1 ? "" : "es"} of ` +
-              `“${key}” left unbilled, but this bill claims ${boxes}. ` +
-              `Correct the boxes, or correct the delivery note.`,
-          };
-      }
-    }
-
     // What THIS market handed the driver: the rent entered in the expenses
     // panel, less the advance that already went at loading. Derived from the
     // same row that becomes the expense, so the cost and the deduction are one
@@ -707,26 +650,6 @@ async function parse(
         base.rentDeducted = rentTotal.sub(advance);
       }
     }
-  }
-
-  // "Labour / other" is the BALANCING item on a market bill, derived last
-  // because the rent it has to balance against is only known once the trip has
-  // been read. The market lists two or three sundry charges nobody itemises;
-  // what is left between the total, the named deductions and the net they
-  // actually paid is exactly what those came to.
-  if (type === "MARKET" && base.totalBill) {
-    const named = (base.commission ?? ZERO)
-      .add(base.reserve ?? ZERO)
-      .add(base.rentDeducted ?? ZERO);
-    const other = base.totalBill.sub(named).sub(amount);
-    if (other.lt(0))
-      return {
-        error:
-          `Commission, reserve, rent and the net bill come to ` +
-          `${named.add(amount).toFixed(2)}, more than the Total Bill of ` +
-          `${base.totalBill.toFixed(2)}. Check the figures.`,
-      };
-    base.otherDeduction = other.gt(0) ? other : null;
   }
 
   return { data: { ...base, amount } };
@@ -893,6 +816,7 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
     notes: d.notes,
     weight: d.weight,
     netWeight: d.netWeight,
+    returnKg: d.returnKg,
     vehicleNo: d.vehicleNo,
     placeOfLoading: d.placeOfLoading,
     returnNote: d.returnNote,
@@ -1092,12 +1016,10 @@ export async function updateSale(
   const { company, centre } = await getActiveScope();
   if (!centre) return { error: "No centre is selected." };
 
-  const parsed = await parse(
-    formData,
-    { companyId: company.id, centreId: centre.id },
-    // Editing: this bill's own boxes are still available to it.
-    saleId
-  );
+  const parsed = await parse(formData, {
+    companyId: company.id,
+    centreId: centre.id,
+  });
   if ("error" in parsed) return { error: parsed.error };
   const d = parsed.data;
 
