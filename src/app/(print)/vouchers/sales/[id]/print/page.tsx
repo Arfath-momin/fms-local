@@ -78,6 +78,16 @@ export default async function SaleBillPage({
       party: { select: { name: true, contactInfo: true } },
       careOfParty: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
+      // The truck this bill's fish travelled on. The sale stopped carrying its
+      // own vehicle number — it was a second place to type one the trip already
+      // knew — so the bill reads it from the trip, or failing that from the
+      // rent recorded against the bill, which names the same truck.
+      deliveryNote: { select: { vehicle: { select: { number: true } } } },
+      expenses: {
+        where: { category: { code: "RENT" } },
+        select: { details: true },
+        take: 1,
+      },
     },
   });
   if (!sale) notFound();
@@ -95,6 +105,12 @@ export default async function SaleBillPage({
     select: { runningBalance: true },
   });
   const outstanding = latest?.runningBalance ?? new Prisma.Decimal(0);
+
+  // Trip first, then the rent row, then whatever an older bill typed for
+  // itself — the column is still there for bills entered while it existed.
+  const rentDetails = (sale.expenses[0]?.details ?? {}) as Record<string, string>;
+  const vehicleNo =
+    sale.deliveryNote?.vehicle.number ?? rentDetails.vehicleNo ?? sale.vehicleNo;
 
   const isFishMill = sale.type === "FISH_MILL";
   // Factory rows carry a count now too, so the header follows the DATA rather
@@ -177,9 +193,7 @@ export default async function SaleBillPage({
               <Detail label="Supplier" value={sale.company.name} />
             )}
             {sale.place && <Detail label="Place" value={sale.place} />}
-            {sale.vehicleNo && (
-              <Detail label="Vehicle No." value={sale.vehicleNo} />
-            )}
+            {vehicleNo && <Detail label="Vehicle No." value={vehicleNo} />}
             {sale.placeOfLoading && (
               <Detail label="Place of loading" value={sale.placeOfLoading} />
             )}

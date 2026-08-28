@@ -123,10 +123,6 @@ async function writeSaleExpenses(
     deliveryNoteId: string | null;
     /** The trip's buying day, or the bill's own date when it names no trip. */
     date: Date;
-    transporterName: string | null;
-    vehicleNumber: string | null;
-    /** Already handed to the driver at loading, and already posted on the note. */
-    advancePaid: number;
     rows: ParsedExpense[];
     userId: string;
   }
@@ -166,31 +162,8 @@ async function writeSaleExpenses(
     // already posted on the delivery note and is deliberately NOT posted again.
     const isRent = rentId !== undefined && row.categoryId === rentId;
     const details: Record<string, string> = { ...row.details };
-    if (isRent) {
-      if (e.transporterName) {
-        // A trip settles it: the truck, its owner and what already went to the
-        // driver are the trip's own facts.
-        details.transporter = e.transporterName;
-        if (e.vehicleNumber) details.vehicleNo = e.vehicleNumber;
-        if (e.advancePaid > 0) details.advance = String(e.advancePaid);
-      } else if (details.vehicleId) {
-        // No trip, so the truck was picked from the master. Read back HERE
-        // rather than trusted: the row carries an id, and only the database can
-        // say which truck that is and who owns it.
-        const picked = await tx.vehicle.findFirst({
-          where: {
-            id: details.vehicleId,
-            companyId: e.companyId,
-            archivedAt: null,
-          },
-          select: { number: true, transporter: { select: { name: true } } },
-        });
-        if (!picked) throw new Error("That vehicle no longer exists.");
-        details.vehicleNo = picked.number;
-        details.transporter = picked.transporter.name;
-      }
-    }
-
+    // Rent's truck and owner were resolved in parse(), from the trip or the
+    // vehicle master. Nothing to look up again here.
     const vendor = isRent
       ? details.transporter
       : expenseEntryVendor(
@@ -298,6 +271,67 @@ function readWeighingSlip(
   base.returnKg = parseMoney(clean(formData.get("returnKg"))) ?? null;
 }
 
+/**
+ * The truck a rent row belongs to, and who owns it — read from the database.
+ *
+ * Two ways in, and neither is typed:
+ *
+ *   the bill names a TRIP     the trip's own vehicle, owner and advance
+ *   it does not               the vehicle picked out of the master
+ *
+ * Resolving it here rather than trusting what was posted is what stops
+ * "KA20B5521" and "KA 20 B 5521" becoming two trucks with two ledgers, and it
+ * is the only way the owner beside a number can be relied on at all.
+ */
+async function resolveRentVehicle(
+  formData: FormData,
+  details: Record<string, string>,
+  scope: { companyId: string; centreId: string }
+): Promise<{ error: string } | { details: Record<string, string> }> {
+  const deliveryNoteId = clean(formData.get("deliveryNoteId")) || null;
+
+  if (deliveryNoteId) {
+    const trip = await prisma.deliveryNote.findFirst({
+      where: { id: deliveryNoteId, ...scope },
+      select: {
+        advancePaid: true,
+        vehicle: {
+          select: { number: true, transporter: { select: { name: true } } },
+        },
+      },
+    });
+    if (!trip) return { error: "that trip does not belong here." };
+    const advance = Number(trip.advancePaid ?? 0);
+    return {
+      details: {
+        vehicleNo: trip.vehicle.number,
+        transporter: trip.vehicle.transporter.name,
+        ...(advance > 0 ? { advance: String(advance) } : {}),
+      },
+    };
+  }
+
+  if (details.vehicleId) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: {
+        id: details.vehicleId,
+        companyId: scope.companyId,
+        archivedAt: null,
+      },
+      select: { number: true, transporter: { select: { name: true } } },
+    });
+    if (!vehicle) return { error: "that vehicle no longer exists." };
+    return {
+      details: {
+        vehicleNo: vehicle.number,
+        transporter: vehicle.transporter.name,
+      },
+    };
+  }
+
+  return { error: "choose the vehicle, or the trip this bill came off." };
+}
+
 /** One cost entered on a bill, before it becomes an expense voucher. */
 type ParsedExpense = {
   categoryId: string;
@@ -318,10 +352,11 @@ type ParsedExpense = {
  * with, never taken from what was posted: a total is money, and money the
  * client sends is a suggestion.
  */
-function parseExpenses(
+async function parseExpenses(
   formData: FormData,
-  categories: { id: string; code: string; name: string; allowsLines: boolean }[]
-): { error: string } | { expenses: ParsedExpense[] } {
+  categories: { id: string; code: string; name: string; allowsLines: boolean }[],
+  scope: { companyId: string; centreId: string }
+): Promise<{ error: string } | { expenses: ParsedExpense[] }> {
   const raw = String(formData.get("expenses") ?? "").trim();
   if (!raw || raw === "[]") return { expenses: [] };
 
@@ -374,6 +409,19 @@ function parseExpenses(
           ];
         })
       : [];
+
+    // Vehicle rent's truck and its owner are NOT the client's to send. The
+    // drawer only ever shows them — from the trip, or from the vehicle picked
+    // out of the master — so they arrive missing, and the validation below was
+    // rejecting a perfectly filled-in row for a "Vehicle No" the merchant had
+    // no box to type into. They are resolved HERE, from the database, before
+    // anything is validated: the row carries a trip or a vehicle id, and only
+    // the database can say which truck that is and who owns it.
+    if (category.code === RENT_CATEGORY_CODE) {
+      const resolved = await resolveRentVehicle(formData, details, scope);
+      if ("error" in resolved) return { error: `${category.name}: ${resolved.error}` };
+      Object.assign(details, resolved.details);
+    }
 
     const computed = expenseEntryAmount(
       category,
@@ -609,7 +657,6 @@ async function parse(
     amount = netBill;
   } else if (type === "FACTORY") {
     readWeighingSlip(formData, base);
-    base.vehicleNo = clean(formData.get("vehicleNo")) || null;
     base.returnNote = clean(formData.get("returnNote")) || null;
 
     // Factory bills are itemised now, the same shape as a fish mill bill: the
@@ -638,7 +685,6 @@ async function parse(
     if (parsedLines.lines.length === 0) return { error: "Add at least one line item." };
     base.lines = parsedLines.lines;
     readWeighingSlip(formData, base);
-    base.vehicleNo = clean(formData.get("vehicleNo")) || null;
     base.placeOfLoading = clean(formData.get("placeOfLoading")) || null;
     amount = parsedLines.lines.reduce((a, l) => a.add(l.total), ZERO);
   } else {
@@ -680,7 +726,11 @@ async function parse(
     where: { companyId: scope.companyId, archivedAt: null },
     select: { id: true, code: true, name: true, allowsLines: true },
   });
-  const parsedExpenses = parseExpenses(formData, expenseCategories);
+  const parsedExpenses = await parseExpenses(
+    formData,
+    expenseCategories,
+    scope
+  );
   if ("error" in parsedExpenses) return { error: parsedExpenses.error };
   base.expenses = parsedExpenses.expenses;
 
@@ -798,44 +848,8 @@ async function parse(
  * Read from the trip rather than passed in, so the sale action never has to
  * carry a transporter around that only one branch uses.
  */
-/** The transporter behind a trip's vehicle, by name — rent's vendor. */
-async function tripTransporterName(
-  tx: Prisma.TransactionClient,
-  deliveryNoteId: string | null
-): Promise<string | null> {
-  if (!deliveryNoteId) return null;
-  const trip = await tx.deliveryNote.findUnique({
-    where: { id: deliveryNoteId },
-    select: { vehicle: { select: { transporter: { select: { name: true } } } } },
-  });
-  return trip?.vehicle.transporter.name ?? null;
-}
 
-/** The truck a trip went out on, for the record on a rent row. */
-async function tripVehicleNumber(
-  tx: Prisma.TransactionClient,
-  deliveryNoteId: string | null
-): Promise<string | null> {
-  if (!deliveryNoteId) return null;
-  const trip = await tx.deliveryNote.findUnique({
-    where: { id: deliveryNoteId },
-    select: { vehicle: { select: { number: true } } },
-  });
-  return trip?.vehicle.number ?? null;
-}
 
-/** What already went to the driver at loading, for the record on a rent row. */
-async function tripAdvance(
-  tx: Prisma.TransactionClient,
-  deliveryNoteId: string | null
-): Promise<number> {
-  if (!deliveryNoteId) return 0;
-  const trip = await tx.deliveryNote.findUnique({
-    where: { id: deliveryNoteId },
-    select: { advancePaid: true },
-  });
-  return Number(trip?.advancePaid ?? 0);
-}
 
 async function tripTransporterId(
   tx: Prisma.TransactionClient,
@@ -1086,9 +1100,6 @@ export async function createSale(
         centreId: centre.id,
         deliveryNoteId: d.deliveryNoteId,
         date: d.date,
-        transporterName: await tripTransporterName(tx, d.deliveryNoteId),
-        vehicleNumber: await tripVehicleNumber(tx, d.deliveryNoteId),
-        advancePaid: await tripAdvance(tx, d.deliveryNoteId),
         rows: d.expenses,
         userId: session.userId,
       });
@@ -1269,9 +1280,6 @@ export async function updateSale(
         centreId: centre.id,
         deliveryNoteId: d.deliveryNoteId,
         date: d.date,
-        transporterName: await tripTransporterName(tx, d.deliveryNoteId),
-        vehicleNumber: await tripVehicleNumber(tx, d.deliveryNoteId),
-        advancePaid: await tripAdvance(tx, d.deliveryNoteId),
         rows: d.expenses,
         userId: session.userId,
       });

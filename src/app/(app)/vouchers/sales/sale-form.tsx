@@ -65,7 +65,6 @@ export type SaleInit = {
   /** The buyer's weighing slip: as loaded, after water and ice, handed back. */
   weight: string;
   returnKg: string;
-  vehicleNo: string;
   netWeight: string;
   placeOfLoading: string;
   returnNote: string;
@@ -609,28 +608,6 @@ export function SaleForm({
       {/* ---- Fish Mill header ---- */}
       {type === "FISH_MILL" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-          {/* The trip already names the truck — the dropdown above prints it —
-              so asking again was asking the clerk to type something the app
-              knows. The field survives only for a bill with no trip. */}
-          {trip ? (
-            <div>
-              <span className={labelCls}>Vehicle No.</span>
-              <p className="text-[14px] font-medium py-2">
-                {trip.vehicleNumber}
-                <span className="text-muted font-normal">
-                  {" "}
-                  · {trip.transporterName}
-                </span>
-              </p>
-            </div>
-          ) : (
-            <div>
-              <label htmlFor="vehicleNo" className={labelCls}>
-                Vehicle No.
-              </label>
-              <input id="vehicleNo" name="vehicleNo" defaultValue={initial?.vehicleNo ?? ""} className={inputCls} />
-            </div>
-          )}
           <div>
             <label htmlFor="placeOfLoading" className={labelCls}>
               Place of Loading
@@ -643,28 +620,6 @@ export function SaleForm({
       {/* ---- Factory ---- */}
       {type === "FACTORY" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* The trip already names the truck — the dropdown above prints it —
-              so asking again was asking the clerk to type something the app
-              knows. The field survives only for a bill with no trip. */}
-          {trip ? (
-            <div>
-              <span className={labelCls}>Vehicle No.</span>
-              <p className="text-[14px] font-medium py-2">
-                {trip.vehicleNumber}
-                <span className="text-muted font-normal">
-                  {" "}
-                  · {trip.transporterName}
-                </span>
-              </p>
-            </div>
-          ) : (
-            <div>
-              <label htmlFor="vehicleNo" className={labelCls}>
-                Vehicle No.
-              </label>
-              <input id="vehicleNo" name="vehicleNo" defaultValue={initial?.vehicleNo ?? ""} className={inputCls} />
-            </div>
-          )}
           {/* Only on a bill that predates itemisation — see factoryLumpSum.
               New factory bills take their total from the rows below. */}
           {factoryLumpSum && (

@@ -55,10 +55,12 @@ export default async function SalePage({
         select: {
           id: true,
           amount: true,
-          category: { select: { name: true } },
+          details: true,
+          category: { select: { name: true, code: true } },
           party: { select: { id: true, name: true } },
         },
       },
+      deliveryNote: { select: { vehicle: { select: { number: true } } } },
       createdBy: { select: { name: true } },
       updatedBy: { select: { name: true } },
     },
@@ -79,6 +81,14 @@ export default async function SalePage({
   });
   const outstanding = latest?.runningBalance ?? new Prisma.Decimal(0);
   const attachments = await getAttachments("SALE", sale.id);
+  // The truck this bill's fish travelled on: the trip knows it, and failing
+  // that the rent recorded against the bill names the same one. `vehicleNo` on
+  // the sale itself is only for bills entered while that field existed.
+  const rentDetails = (sale.expenses.find((e) => e.category.code === "RENT")
+    ?.details ?? {}) as Record<string, string>;
+  const vehicleNo =
+    sale.deliveryNote?.vehicle.number ?? rentDetails.vehicleNo ?? sale.vehicleNo;
+
   // Factory bills are itemised the same way a fish mill bill is — boxes, a
   // per-box weight and a count — so the row table reads identically for both.
   const boxedLines = sale.type === "FISH_MILL" || sale.type === "FACTORY";
@@ -130,7 +140,7 @@ export default async function SalePage({
         />
         {sale.careOfParty && <Field label="CareOf" value={sale.careOfParty.name} />}
         {sale.place && <Field label="Place" value={sale.place} />}
-        {sale.vehicleNo && <Field label="Vehicle No." value={sale.vehicleNo} />}
+        {vehicleNo && <Field label="Vehicle No." value={vehicleNo} />}
         {sale.weight && <Field label="Weight" value={sale.weight.toString()} />}
         {sale.netWeight && (
           <Field label="Net Weight" value={sale.netWeight.toString()} />
