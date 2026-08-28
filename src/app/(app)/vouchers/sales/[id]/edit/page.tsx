@@ -36,8 +36,8 @@ export default async function EditSalePage({
         select: {
           categoryId: true,
           amount: true,
-          notes: true,
-          party: { select: { name: true } },
+          details: true,
+          lines: { select: { description: true, amount: true } },
         },
       },
     },
@@ -68,7 +68,7 @@ export default async function EditSalePage({
   const expenseCategories = await prisma.expenseCategory.findMany({
     where: { companyId: company.id, archivedAt: null },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    select: { id: true, code: true, name: true },
+    select: { id: true, code: true, name: true, allowsLines: true },
   });
 
   return (
@@ -105,13 +105,21 @@ export default async function EditSalePage({
           // only be a second answer that could disagree.
           netBill: sale.type === "MARKET" ? sale.amount.toString() : "",
           deliveryNoteId: sale.deliveryNoteId ?? "",
-          // The costs entered on this bill, so re-opening it shows them and a
-          // save rewrites them rather than adding a second set.
+          // The costs entered on this bill, so re-opening it shows them filled
+          // in and a save rewrites them rather than adding a second set. The
+          // details come back out of the JSON column they went into, which is
+          // what lets the drawer re-open on ice's blocks and rate rather than
+          // on a bare total.
           expenses: sale.expenses.map((e) => ({
             categoryId: e.categoryId,
-            vendorName: e.party?.name ?? "",
+            details: (e.details ?? {}) as Record<string, string>,
             amount: e.amount.toString(),
-            notes: e.notes ?? "",
+            lines: e.lines.length
+              ? e.lines.map((l) => ({
+                  description: l.description,
+                  amount: l.amount.toString(),
+                }))
+              : [{ description: "", amount: "" }],
           })),
           amount: sale.type === "FACTORY" ? sale.amount.toString() : "",
           weight: sale.weight?.toString() ?? "",

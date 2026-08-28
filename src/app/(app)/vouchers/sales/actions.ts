@@ -13,6 +13,7 @@ import {
   type PostLedgerArgs,
 } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
+import { expenseEntryAmount, expenseEntryVendor } from "@/lib/expense-entry";
 import { nextDocumentNo, saleSeriesPrefix } from "@/lib/document-series";
 import { refreshTripStatus } from "@/lib/trip";
 import {
@@ -123,6 +124,8 @@ async function writeSaleExpenses(
     /** The trip's buying day, or the bill's own date when it names no trip. */
     date: Date;
     transporterName: string | null;
+    /** Already handed to the driver at loading, and already posted on the note. */
+    advancePaid: number;
     rows: ParsedExpense[];
     userId: string;
   }
@@ -151,14 +154,28 @@ async function writeSaleExpenses(
     // The head has to belong to this company — the id came from the client.
     const category = await tx.expenseCategory.findFirst({
       where: { id: row.categoryId, companyId: e.companyId, archivedAt: null },
-      select: { id: true },
+      select: { id: true, code: true, name: true },
     });
     if (!category) throw new Error("That expense head no longer exists.");
 
-    // Vehicle rent is owed to the trip's transporter, never to a typed name:
-    // one spelling difference would split one man's account in two.
+    // Vehicle rent is owed to the trip's TRANSPORTER, filled in here rather
+    // than taken from the drawer: the trip is the only thing that can say who
+    // that is, and a client-sent name is one more way for one man's account to
+    // end up spelled two ways. The advance rides along for the record — it was
+    // already posted on the delivery note and is deliberately NOT posted again.
     const isRent = rentId !== undefined && row.categoryId === rentId;
-    const vendor = isRent ? e.transporterName : row.vendorName;
+    const details: Record<string, string> = { ...row.details };
+    if (isRent && e.transporterName) {
+      details.transporter = e.transporterName;
+      if (e.advancePaid > 0) details.advance = String(e.advancePaid);
+    }
+
+    const vendor = isRent
+      ? e.transporterName
+      : expenseEntryVendor(
+          { code: category.code, name: category.name, allowsLines: false },
+          details
+        );
     const partyId = vendor
       ? await findOrCreateParty(
           tx,
@@ -178,7 +195,10 @@ async function writeSaleExpenses(
         amount: row.amount,
         date: e.date,
         spentOn: null,
-        details: {},
+        // Everything the head asked for, so the voucher is finished here and
+        // never has to be opened again under Vouchers → Expenses to complete it.
+        details,
+        lines: row.lines.length ? { create: row.lines } : undefined,
       },
       select: { id: true },
     });
@@ -253,47 +273,99 @@ function readWeighingSlip(
 /** One cost entered on a bill, before it becomes an expense voucher. */
 type ParsedExpense = {
   categoryId: string;
-  vendorName: string;
+  details: Record<string, string>;
   amount: Prisma.Decimal;
+  lines: { description: string; amount: Prisma.Decimal }[];
 };
 
 /**
  * The costs a bill reveals, entered on the bill itself.
  *
- * A trip's real costs are not knowable when the truck leaves — the rent depends
- * on where it ends up going — but they ARE known when the bill comes back, at
- * which point the merchant is already on this screen with the paper in hand.
- * Each row here becomes a real expense voucher, dated to the TRIP'S buying day.
+ * They arrive as JSON in one field rather than as repeated inputs, because the
+ * shape differs per head — ice has five fields, canteen has none — and pairing
+ * repeated names up by array index is the kind of thing that works until
+ * somebody adds a category.
  *
- * The vendor is optional on purpose, and matches the Expense model: a canteen
- * bill or a batha has nobody to owe, and forcing a name would only fill the
- * party master with junk nobody settles against. Vehicle rent is the exception
- * — its vendor arrives from the trip, so it is never typed.
+ * The amount is RECOMPUTED here from the same function the drawer previews
+ * with, never taken from what was posted: a total is money, and money the
+ * client sends is a suggestion.
  */
 function parseExpenses(
-  formData: FormData
+  formData: FormData,
+  categories: { id: string; code: string; name: string; allowsLines: boolean }[]
 ): { error: string } | { expenses: ParsedExpense[] } {
-  const categoryIds = formData.getAll("expCategoryId").map(String);
-  const vendors = formData.getAll("expVendorName").map(String);
-  const amounts = formData.getAll("expAmount").map(String);
+  const raw = String(formData.get("expenses") ?? "").trim();
+  if (!raw || raw === "[]") return { expenses: [] };
+
+  let rows: unknown;
+  try {
+    rows = JSON.parse(raw);
+  } catch {
+    return { error: "The expenses on this bill could not be read." };
+  }
+  if (!Array.isArray(rows))
+    return { error: "The expenses on this bill could not be read." };
 
   const expenses: ParsedExpense[] = [];
-  for (let i = 0; i < categoryIds.length; i++) {
-    const categoryId = categoryIds[i].trim();
-    const vendorName = (vendors[i] ?? "").trim().replace(/\s+/g, " ");
-    const raw = (amounts[i] ?? "").trim();
-
-    // A row the clerk added and then left alone is not an error — it is a row
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null) continue;
+    const r = row as {
+      categoryId?: unknown;
+      details?: unknown;
+      amount?: unknown;
+      lines?: unknown;
+    };
+    const categoryId = typeof r.categoryId === "string" ? r.categoryId : "";
+    // A row the clerk opened and never filled in is not an error — it is a row
     // they changed their mind about.
-    if (!categoryId && !raw && !vendorName) continue;
-    if (!categoryId) return { error: "Choose a head for every expense row." };
-    if (!DECIMAL2.test(raw) || Number(raw) <= 0)
-      return { error: "Every expense row needs a positive amount." };
+    if (!categoryId) continue;
+
+    // The head has to be one of this company's, live. The id came from a client.
+    const category = categories.find((c) => c.id === categoryId);
+    if (!category)
+      return { error: "That expense head no longer exists." };
+
+    const details: Record<string, string> = {};
+    if (typeof r.details === "object" && r.details !== null) {
+      for (const [k, v] of Object.entries(r.details as Record<string, unknown>)) {
+        if (typeof v === "string" && v.trim())
+          details[k] = v.trim().replace(/\s+/g, " ");
+      }
+    }
+
+    const lines = Array.isArray(r.lines)
+      ? (r.lines as unknown[]).flatMap((l) => {
+          if (typeof l !== "object" || l === null) return [];
+          const x = l as { description?: unknown; amount?: unknown };
+          return [
+            {
+              description:
+                typeof x.description === "string" ? x.description.trim() : "",
+              amount: typeof x.amount === "string" ? x.amount.trim() : "",
+            },
+          ];
+        })
+      : [];
+
+    const computed = expenseEntryAmount(
+      category,
+      details,
+      typeof r.amount === "string" ? r.amount : "",
+      lines
+    );
+    if ("error" in computed)
+      return { error: `${category.name}: ${computed.error}` };
 
     expenses.push({
-      categoryId,
-      vendorName,
-      amount: new Prisma.Decimal(raw),
+      categoryId: category.id,
+      details,
+      amount: new Prisma.Decimal(computed.amount),
+      lines: lines
+        .filter((l) => l.description && l.amount)
+        .map((l) => ({
+          description: l.description,
+          amount: new Prisma.Decimal(l.amount),
+        })),
     });
   }
   return { expenses };
@@ -574,7 +646,13 @@ async function parse(
       };
   }
 
-  const parsedExpenses = parseExpenses(formData);
+  // The live heads, so a row can only name one this company actually has and
+  // the amount is worked out from the head's own rule rather than trusted.
+  const expenseCategories = await prisma.expenseCategory.findMany({
+    where: { companyId: scope.companyId, archivedAt: null },
+    select: { id: true, code: true, name: true, allowsLines: true },
+  });
+  const parsedExpenses = parseExpenses(formData, expenseCategories);
   if ("error" in parsedExpenses) return { error: parsedExpenses.error };
   base.expenses = parsedExpenses.expenses;
 
@@ -688,6 +766,19 @@ async function tripTransporterName(
     select: { vehicle: { select: { transporter: { select: { name: true } } } } },
   });
   return trip?.vehicle.transporter.name ?? null;
+}
+
+/** What already went to the driver at loading, for the record on a rent row. */
+async function tripAdvance(
+  tx: Prisma.TransactionClient,
+  deliveryNoteId: string | null
+): Promise<number> {
+  if (!deliveryNoteId) return 0;
+  const trip = await tx.deliveryNote.findUnique({
+    where: { id: deliveryNoteId },
+    select: { advancePaid: true },
+  });
+  return Number(trip?.advancePaid ?? 0);
 }
 
 async function tripTransporterId(
@@ -940,6 +1031,7 @@ export async function createSale(
         deliveryNoteId: d.deliveryNoteId,
         date: d.date,
         transporterName: await tripTransporterName(tx, d.deliveryNoteId),
+        advancePaid: await tripAdvance(tx, d.deliveryNoteId),
         rows: d.expenses,
         userId: session.userId,
       });
@@ -1121,6 +1213,7 @@ export async function updateSale(
         deliveryNoteId: d.deliveryNoteId,
         date: d.date,
         transporterName: await tripTransporterName(tx, d.deliveryNoteId),
+        advancePaid: await tripAdvance(tx, d.deliveryNoteId),
         rows: d.expenses,
         userId: session.userId,
       });

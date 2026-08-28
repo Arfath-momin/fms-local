@@ -73,7 +73,7 @@ export default async function NewSalePage({
   const expenseCategories = await prisma.expenseCategory.findMany({
     where: { companyId: company.id, archivedAt: null },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    select: { id: true, code: true, name: true },
+    select: { id: true, code: true, name: true, allowsLines: true },
   });
 
   // Only a LOCAL sale takes a number of ours; the rest carry the buyer's.

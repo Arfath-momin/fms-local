@@ -1,54 +1,47 @@
 "use client";
 
+import { useState } from "react";
 import { fmtMoney } from "@/lib/format";
-import { PartyCombobox } from "../../masters/party-combobox";
+import {
+  BLANK_EXPENSE,
+  ExpenseDrawer,
+  expenseRowSummary,
+  type ExpenseCategoryOption,
+  type SaleExpenseRow,
+} from "./expense-drawer";
+
+export {
+  BLANK_EXPENSE,
+  type ExpenseCategoryOption,
+  type SaleExpenseRow,
+} from "./expense-drawer";
 
 /**
- * The costs a bill reveals, entered on the bill.
+ * The costs a bill reveals, entered on the bill — in full.
  *
  * A trip's real costs are not knowable when the truck leaves. The rent depends
  * on where it ends up going; the ice and the loaders land as the day goes on.
- * They ARE known when the bill comes back — at which point the merchant is
- * already on this screen with the paper in their hand, and was being sent to a
- * different screen to type them.
+ * They ARE known when the bill comes back, at which point the merchant is
+ * already on this screen with the paper in their hand.
  *
- * Each row becomes a real expense voucher, dated to the TRIP'S buying day, so
- * it lands in the same day's gross profit as the fish it was spent on. Nothing
- * is paid here: the vendor is credited what he is owed, and settling is a
- * Payment voucher against him, as it is everywhere else.
+ * This panel used to take a head, a name and an amount, and nothing else — so
+ * every cost entered here had to be opened AGAIN under Vouchers → Expenses to
+ * record what it was actually for. Two visits to enter one thing. Each row now
+ * opens a drawer carrying the same fields the Expenses voucher asks for, so ice
+ * gets its blocks and rate per block here and is finished here.
  *
- * Vehicle rent is the one row that knows things. Its vendor is the trip's
- * transporter — not typed, so one man's account cannot be split in two by a
- * spelling — and the advance already handed over at loading is shown against
- * it, so what is still owed is on screen before the bill is even saved.
+ * The rows travel to the server as JSON in one hidden field. Repeated form
+ * inputs cannot carry a shape that differs per head — ice has five fields,
+ * canteen has none — and pairing them up by array index across a dozen names is
+ * the kind of thing that works until somebody adds a category.
+ *
+ * Nothing is written until the SALE is saved: the bill's own transaction turns
+ * these into expense vouchers, so a bill that fails to save leaves no costs
+ * stranded behind it.
  */
 
-export type SaleExpenseRow = {
-  categoryId: string;
-  vendorName: string;
-  amount: string;
-  notes: string;
-};
-
-export type ExpenseCategoryOption = {
-  id: string;
-  code: string;
-  name: string;
-};
-
-export const BLANK_EXPENSE: SaleExpenseRow = {
-  categoryId: "",
-  vendorName: "",
-  amount: "",
-  notes: "",
-};
-
-const inputCls =
-  "w-full border border-line-strong bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent";
 const labelCls =
   "block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1";
-
-const num = (v: string) => Number(String(v).replace(/,/g, "")) || 0;
 
 export function SaleExpenses({
   rows,
@@ -68,18 +61,25 @@ export function SaleExpenses({
     advancePaid: number;
   } | null;
 }) {
-  const rentCategoryId = categories.find((c) => c.code === "RENT")?.id ?? "";
-  const isRent = (r: SaleExpenseRow) =>
-    !!rentCategoryId && r.categoryId === rentCategoryId;
+  // Which row is open. Only one at a time: this is a form inside a form, and
+  // two of them open at once is how a merchant loses track of which figures
+  // they were typing.
+  const [openAt, setOpenAt] = useState<number | null>(null);
 
-  const set = (i: number, patch: Partial<SaleExpenseRow>) =>
-    setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const rent = trip
+    ? { transporterName: trip.transporterName, advancePaid: trip.advancePaid }
+    : null;
 
-  const total = rows.reduce((s, r) => s + num(r.amount), 0);
-  const rentTotal = rows.filter(isRent).reduce((s, r) => s + num(r.amount), 0);
-  // What is still owed on the rent once the advance is taken off. Shown, never
-  // stored: the transporter's ledger is the only place this figure lives.
-  const rentDue = Math.max(0, rentTotal - (trip?.advancePaid ?? 0));
+  const summaries = rows.map((r) => expenseRowSummary(r, categories));
+  const total = summaries.reduce((s, x) => s + (x?.amount ?? 0), 0);
+
+  const setRow = (i: number, row: SaleExpenseRow) =>
+    setRows(rows.map((r, j) => (j === i ? row : r)));
+
+  const removeRow = (i: number) => {
+    setRows(rows.filter((_, j) => j !== i));
+    setOpenAt(null);
+  };
 
   return (
     <div className="border border-line-strong bg-surface px-4 py-3">
@@ -103,128 +103,54 @@ export function SaleExpenses({
         </p>
       ) : (
         <p className="text-muted text-[12px] mb-2">
-          Costs entered here are dated to this bill. Choose a trip above and
-          they take the trip&rsquo;s buying day instead, and vehicle rent fills
-          in its own transporter.
+          Costs entered here are dated to this bill. Choose a trip above and they
+          take the trip&rsquo;s buying day instead, and vehicle rent fills in its
+          own transporter.
         </p>
       )}
 
-      {rows.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[560px]">
-            <thead>
-              <tr className="text-muted text-[12px] uppercase tracking-wide">
-                <th className="text-left font-semibold px-2 py-1 w-44">
-                  Category
-                </th>
-                <th className="text-left font-semibold px-2 py-1">Paid to</th>
-                <th className="text-right font-semibold px-2 py-1 w-28">
-                  Amount
-                </th>
-                <th className="w-8" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const rent = isRent(r);
-                return (
-                  <tr key={i} className="border-t border-line">
-                    <td className="px-1 py-1">
-                      <select
-                        name="expCategoryId"
-                        value={r.categoryId}
-                        onChange={(e) =>
-                          set(i, {
-                            categoryId: e.target.value,
-                            // Rent's vendor is the trip's transporter, so a
-                            // half-typed name from the previous choice must not
-                            // survive the switch.
-                            vendorName:
-                              e.target.value === rentCategoryId
-                                ? ""
-                                : r.vendorName,
-                          })
-                        }
-                        className={inputCls}
-                      >
-                        <option value="">Choose…</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-1 py-1">
-                      {rent ? (
-                        <>
-                          {/* Not an input: the transporter comes off the trip,
-                              so there is nothing to type and nothing to spell
-                              differently from last time. */}
-                          <span className="text-[13px]">
-                            {trip?.transporterName ?? (
-                              <span className="text-debit">
-                                Choose a trip first
-                              </span>
-                            )}
-                          </span>
-                          <input
-                            type="hidden"
-                            name="expVendorName"
-                            value={trip?.transporterName ?? ""}
-                          />
-                        </>
-                      ) : (
-                        // Suggests whoever has been paid under this head
-                        // before, so picking Ice offers the ice plant rather
-                        // than every expense vendor in the book. Controlled,
-                        // because removing a row has to move the row below it
-                        // up rather than leave its name in a recycled cell.
-                        <PartyCombobox
-                          name="expVendorName"
-                          label="Paid to"
-                          compact
-                          required={false}
-                          types={["EXPENSE_VENDOR"]}
-                          defaultType="EXPENSE_VENDOR"
-                          expenseCategoryId={r.categoryId || undefined}
-                          value={r.vendorName}
-                          onValueChange={(v) => set(i, { vendorName: v })}
-                          placeholder="Vendor — blank if nobody is owed"
-                        />
-                      )}
-                    </td>
-                    <td className="px-1 py-1">
-                      <input
-                        name="expAmount"
-                        inputMode="decimal"
-                        value={r.amount}
-                        onChange={(e) => set(i, { amount: e.target.value })}
-                        className={inputCls + " num text-right"}
-                      />
-                    </td>
-                    <td className="px-1 py-1 text-center">
-                      <button
-                        type="button"
-                        onClick={() => setRows(rows.filter((_, j) => j !== i))}
-                        className="text-muted hover:text-debit text-lg leading-none"
-                        aria-label="Remove this expense"
-                      >
-                        ×
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+      {rows.map((row, i) =>
+        openAt === i ? (
+          <ExpenseDrawer
+            key={i}
+            row={row}
+            setRow={(r) => setRow(i, r)}
+            categories={categories}
+            rent={rent}
+            onClose={() => setOpenAt(null)}
+            onRemove={() => removeRow(i)}
+          />
+        ) : (
+          <button
+            key={i}
+            type="button"
+            onClick={() => setOpenAt(i)}
+            className="w-full text-left border border-line bg-surface px-3 py-2 mb-2 hover:border-accent flex items-baseline justify-between gap-3 flex-wrap"
+          >
+            <span className="text-[13px]">
+              <span className="font-medium">
+                {summaries[i]?.name ?? "Unfinished expense"}
+              </span>
+              {summaries[i]?.vendor && (
+                <span className="text-muted"> · {summaries[i]!.vendor}</span>
+              )}
+            </span>
+            <span className="num text-[13px] font-semibold text-debit">
+              {summaries[i]?.amount
+                ? fmtMoney(summaries[i]!.amount)
+                : "not filled in"}
+            </span>
+          </button>
+        )
       )}
 
-      <div className="flex items-center justify-between flex-wrap gap-3 mt-2">
+      <div className="flex items-center justify-between flex-wrap gap-3 mt-1">
         <button
           type="button"
-          onClick={() => setRows([...rows, BLANK_EXPENSE])}
+          onClick={() => {
+            setRows([...rows, { ...BLANK_EXPENSE, lines: [{ description: "", amount: "" }] }]);
+            setOpenAt(rows.length);
+          }}
           className="text-accent text-[12px] underline underline-offset-2"
         >
           + add an expense
@@ -239,20 +165,13 @@ export function SaleExpenses({
         )}
       </div>
 
-      {rentTotal > 0 && trip && (
-        <p className="text-muted text-[12px] mt-2">
-          Rent {fmtMoney(rentTotal)} less the {fmtMoney(trip.advancePaid)}{" "}
-          advance leaves{" "}
-          <span className="num font-semibold">{fmtMoney(rentDue)}</span> owed to{" "}
-          {trip.transporterName}. Nothing is paid here — settle it with a
-          Payment voucher.
-        </p>
-      )}
+      {/* What actually posts. One field, because the shape differs per head. */}
+      <input type="hidden" name="expenses" value={JSON.stringify(rows)} />
     </div>
   );
 }
 
-/** The rent on these rows, for the market bill's deduction line. */
+/** The rent among these rows, for the market bill's deduction line. */
 export function rentOn(
   rows: SaleExpenseRow[],
   categories: ExpenseCategoryOption[]
@@ -261,5 +180,5 @@ export function rentOn(
   if (!rentId) return 0;
   return rows
     .filter((r) => r.categoryId === rentId)
-    .reduce((s, r) => s + num(r.amount), 0);
+    .reduce((s, r) => s + (expenseRowSummary(r, categories)?.amount ?? 0), 0);
 }
