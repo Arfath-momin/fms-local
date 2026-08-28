@@ -767,11 +767,38 @@ async function postSaleLedger(
   // credits the transporter what he is owed and debits him the advance and
   // whatever the market handed him, so he closes at zero too.
   //
-  // `rentDeducted` still lives on the sale, as a deduction line off the market's
-  // paper. It buys one thing and only one: revenue is the net PLUS it (see
-  // saleRevenue), because that money did leave the business — through the
-  // driver — and a day whose revenue omitted it would be charged a cost it was
-  // never credited for.
+  // `rentDeducted` does two things, and only these two.
+  //
+  // It grosses the day's REVENUE up (see saleRevenue): that money did leave the
+  // business, through the driver, so a day whose revenue omitted it would carry
+  // a cost it was never credited for.
+  //
+  // And it SETTLES THE TRANSPORTER. The rent voucher credits him the whole
+  // rent; the delivery note debited the advance handed over at loading; this
+  // debits what the market handed him on the road. Without it he closes at
+  // −15,000 on a trip somebody else already paid for — the credit posted and
+  // nothing ever answered it. Removing the market party's wrong CREDIT took
+  // this correct DEBIT with it, which is the half that had to stay.
+  //
+  //   rent 20,000 credited · advance 5,000 debited · market paid 15,000 debited
+  //   → the transporter closes at zero, which is the truth: he has been paid.
+  //
+  // Nothing is posted to the market party. The net this sale debits is off
+  // their own paper and is ALREADY after the deduction; crediting it again is
+  // the double-count that made every market party who paid in full look like a
+  // creditor.
+  if (s.rentDeducted && s.rentDeducted.gt(0) && s.transporterId) {
+    entries.push({
+      companyId: s.companyId,
+      centreId: s.centreId,
+      sourceId: s.id,
+      date: s.date,
+      partyId: s.transporterId,
+      type: "DEBIT" as const,
+      sourceType: "RENT_BY_PARTY" as const,
+      amount: s.rentDeducted,
+    });
+  }
 
   await postLedgerEntries(tx, entries);
 }
