@@ -38,7 +38,11 @@ log() { echo "$*" >> "$LOG_FILE"; }
 # need it. Cron mails whatever a job writes to stderr, so the message goes to
 # the operator as well as the log.
 fail() {
-    log "BACKUP FAILED at line $1. Nothing was uploaded."
+    # Deliberately does NOT claim nothing was uploaded. This trap fires wherever
+    # the failure happened, and the database dump goes up well before the images
+    # do — saying "nothing was uploaded" after a successful dump upload sent the
+    # operator looking for a backup they already had.
+    log "BACKUP FAILED at line $1. Read the lines above to see what completed."
     echo "FMS backup FAILED at line $1 — see $LOG_FILE" >&2
 }
 trap 'fail $LINENO' ERR
@@ -160,7 +164,15 @@ docker run --rm \
 # allowed to perform: a genuine tidy-up of a few files still goes through, a
 # wipe stops and reports.
 LOCAL_FILES=$(find "$UPLOAD_TEMP" -type f | wc -l)
-REMOTE_FILES=$(rclone size --json "$REMOTE/uploads" 2>/dev/null | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
+
+# A remote directory that does not exist yet holds nothing, which is a perfectly
+# ordinary state — it is where every install starts, and where this one started
+# again after the rebuild. `rclone size` reports that as an ERROR, and under
+# `set -o pipefail` that aborted the whole backup at this line, AFTER the
+# database dump had already been made, verified and uploaded. The `:-0` fallback
+# below never got the chance to run.
+REMOTE_JSON=$(rclone size --json "$REMOTE/uploads" 2>/dev/null || echo '{"count":0}')
+REMOTE_FILES=$(printf '%s' "$REMOTE_JSON" | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
 REMOTE_FILES="${REMOTE_FILES:-0}"
 
 log "Uploads: ${LOCAL_FILES} local, ${REMOTE_FILES} already on Drive."
