@@ -186,15 +186,32 @@ export function SaleForm({
    * overwriting rows the clerk has already typed would be its own bug, and the
    * common case — the first bill off a trip — is one click either way.
    */
-  const fillFromTrip = () => {
-    if (!trip || trip.remaining.length === 0) return;
+  /**
+   * Lay out what the truck still has, so the bill starts from the load.
+   *
+   * Naming a trip used to leave the merchant with one blank row and a number in
+   * a dropdown — they retyped particulars the delivery note already held, and a
+   * "Prawns" against the note's "Prawn" was a different fish as far as the box
+   * tally was concerned. Now the rows arrive filled: the particulars, the boxes
+   * still unbilled and the weight that goes with them, ready to be edited down
+   * to whatever this stop actually took.
+   *
+   *   DN     50 box prawns 750 kg · 60 box mackerel 900 kg
+   *   stop 1 edit to 45 / 675 and 50 / 750, save
+   *   stop 2 name the same trip → 5 box prawns 75 kg · 10 box mackerel 150 kg
+   *
+   * Rate and count stay empty — those belong to the bill, not the load.
+   *
+   * `remaining` already excludes the bill being edited, so re-opening one
+   * offers its own boxes back rather than counting them as spoken for.
+   */
+  const fillFromTrip = (from = trip) => {
+    if (!from || from.remaining.length === 0) return;
     setLines(
-      trip.remaining.map((r) => ({
+      from.remaining.map((r) => ({
         particular: r.particular,
         box: r.box ? String(r.box) : "",
-        // No weight or rate: a market line records boxes, and the money comes
-        // from the net the market paid.
-        qtyKg: "",
+        qtyKg: r.kg ? String(r.kg) : "",
         ratePerKg: "",
         count: "",
       }))
@@ -215,6 +232,39 @@ export function SaleForm({
     () => lines.reduce((s, l) => s + rowKg(l) * n(l.ratePerKg), 0),
     [lines]
   );
+  /**
+   * Particulars this bill claims more of than the trip has left.
+   *
+   * The same comparison the action makes, shown while the merchant is still
+   * typing rather than sprung on them at save. Per particular, not on the
+   * total: 30 prawn and 20 mackerel billed as 50 prawn adds up correctly and
+   * is still wrong about where the fish went.
+   *
+   * `trip.remaining` already excludes this bill, so on an edit its own boxes
+   * are available to it and re-saving what was saved before never trips this.
+   */
+  const overBooked = useMemo(() => {
+    if (!trip) return [];
+    const available = new Map(
+      trip.remaining.map((r) => [r.particular.trim().toLowerCase(), r.box])
+    );
+    const billed = new Map<string, { name: string; box: number }>();
+    for (const l of lines) {
+      const box = n(l.box);
+      if (box <= 0 || !l.particular.trim()) continue;
+      const key = l.particular.trim().toLowerCase();
+      const hit = billed.get(key);
+      if (hit) hit.box += box;
+      else billed.set(key, { name: l.particular.trim(), box });
+    }
+    const out: { name: string; billed: number; available: number }[] = [];
+    for (const [key, b] of billed) {
+      const left = available.get(key) ?? 0;
+      if (b.box > left) out.push({ name: b.name, billed: b.box, available: left });
+    }
+    return out;
+  }, [lines, trip]);
+
   const boxTotal = useMemo(
     () => lines.reduce((s, l) => s + n(l.box), 0),
     [lines]
@@ -314,7 +364,14 @@ export function SaleForm({
           id="deliveryNoteId"
           name="deliveryNoteId"
           value={tripId}
-          onChange={(e) => setTripId(e.target.value)}
+          onChange={(e) => {
+            const id = e.target.value;
+            setTripId(id);
+            // Choosing a trip lays out its remaining load. Only on an actual
+            // change, so re-opening a saved bill keeps the rows it was saved
+            // with — this never fires on mount.
+            fillFromTrip(trips.find((t) => t.id === id));
+          }}
           className={inputCls}
         >
           <option value="">No trip — this bill stands on its own</option>
@@ -636,13 +693,13 @@ export function SaleForm({
         <div>
           <div className="flex items-baseline justify-between flex-wrap gap-3">
             <label className={labelCls}>Items</label>
-            {type === "MARKET" && trip && trip.remaining.length > 0 && (
+            {trip && trip.remaining.length > 0 && (
               <button
                 type="button"
-                onClick={fillFromTrip}
+                onClick={() => fillFromTrip()}
                 className="text-accent text-[12px] underline underline-offset-2 mb-1"
               >
-                Fill from trip ({trip.remaining.reduce((a, r) => a + r.box, 0)}{" "}
+                Reset from trip ({trip.remaining.reduce((a, r) => a + r.box, 0)}{" "}
                 boxes still unbilled)
               </button>
             )}
@@ -766,6 +823,33 @@ export function SaleForm({
               </tfoot>
             </table>
           </div>
+          {overBooked.length > 0 && (
+            <div className="border border-debit bg-surface px-3 py-2 mt-2 text-[13px]">
+              <p className="text-debit font-semibold mb-1">
+                More boxes than the trip has left
+              </p>
+              <ul className="text-muted space-y-0.5">
+                {overBooked.map((o) => (
+                  <li key={o.name}>
+                    <span className="font-medium text-foreground">{o.name}</span>
+                    {" — this bill claims "}
+                    <span className="num">{o.billed}</span>
+                    {o.available === 0
+                      ? ", but the trip carried none of it"
+                      : `, and only ${o.available} ${
+                          o.available === 1 ? "box is" : "boxes are"
+                        } still unbilled`}
+                    .
+                  </li>
+                ))}
+              </ul>
+              <p className="text-muted text-[12px] mt-1">
+                Correct the boxes, or correct the delivery note. Saving is
+                refused while this stands.
+              </p>
+            </div>
+          )}
+
           <button type="button" onClick={() => setLines((ls) => [...ls, { ...BLANK_LINE }])} className="mt-2 border border-line-strong bg-surface px-3 py-1.5 text-[12px] font-semibold hover:border-accent">
             + Add item
           </button>
