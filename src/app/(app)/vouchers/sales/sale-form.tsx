@@ -7,6 +7,7 @@ import { businessToday, fmtKg, fmtMoney } from "@/lib/format";
 import type { SaleFormState } from "./actions";
 import type { FormScope } from "@/lib/scope";
 import {
+  paidByMarketOn,
   rentOn,
   SaleExpenses,
   type ExpenseCategoryOption,
@@ -298,7 +299,9 @@ export function SaleForm({
   // less the advance that already went at loading. Derived, never typed — one
   // number does both jobs, so the cost and the deduction cannot disagree.
   const rentTotal = rentOn(expenses, expenseCategories);
-  const rentDeducted = Math.max(0, rentTotal - (trip?.advancePaid ?? 0));
+  // What the market actually handed the driver, off the rent row's own field —
+  // not assumed to be the whole balance after the advance.
+  const rentDeducted = paidByMarketOn(expenses, expenseCategories);
 
   const netBill = n(netBillRaw);
   const otherDeduction =

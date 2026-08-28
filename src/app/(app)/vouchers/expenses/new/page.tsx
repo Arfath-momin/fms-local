@@ -53,6 +53,24 @@ export default async function NewExpensePage() {
     advancePaid: Number(t.advancePaid ?? 0),
   }));
 
+  // The vehicle master, so a rent voucher picks the truck rather than typing a
+  // number that has to match one somewhere else.
+  const vehicles = (
+    await prisma.vehicle.findMany({
+      where: { companyId: company.id, archivedAt: null },
+      orderBy: { number: "asc" },
+      select: {
+        id: true,
+        number: true,
+        transporter: { select: { name: true } },
+      },
+    })
+  ).map((v) => ({
+    id: v.id,
+    number: v.number,
+    transporterName: v.transporter.name,
+  }));
+
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-1">New Expense</h1>
@@ -63,6 +81,7 @@ export default async function NewExpensePage() {
         action={createExpense}
         categories={categories}
         trips={trips}
+        vehicles={vehicles}
         submitLabel="Save Expense"
         scope={scopeFieldValues({ company, centre })}
       />

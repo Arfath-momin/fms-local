@@ -124,6 +124,7 @@ async function writeSaleExpenses(
     /** The trip's buying day, or the bill's own date when it names no trip. */
     date: Date;
     transporterName: string | null;
+    vehicleNumber: string | null;
     /** Already handed to the driver at loading, and already posted on the note. */
     advancePaid: number;
     rows: ParsedExpense[];
@@ -167,6 +168,7 @@ async function writeSaleExpenses(
     const details: Record<string, string> = { ...row.details };
     if (isRent && e.transporterName) {
       details.transporter = e.transporterName;
+      if (e.vehicleNumber) details.vehicleNo = e.vehicleNumber;
       if (e.advancePaid > 0) details.advance = String(e.advancePaid);
     }
 
@@ -227,23 +229,30 @@ async function writeSaleExpenses(
 const RENT_CATEGORY_CODE = "RENT";
 
 /**
- * The rent among a bill's expense rows, in rupees.
+ * What the market handed the driver, off the rent rows on this bill.
  *
- * Read by CODE rather than trusted from the client: the row carries a category
- * id, and only the database can say which id is the rent head for this company.
+ * Read from the rent row's own "Paid to Driver by Market" field rather than
+ * assumed to be the whole balance. A market usually settles what is left after
+ * the advance, but not always — and inferring it as total − advance made a
+ * part payment impossible to record, and silently claimed the driver had been
+ * paid in full when he had not.
  */
-async function rentOnRows(
-  rows: ParsedExpense[],
-  companyId: string
-): Promise<Prisma.Decimal> {
-  if (rows.length === 0) return ZERO;
-  const rent = await prisma.expenseCategory.findUnique({
-    where: { companyId_code: { companyId, code: RENT_CATEGORY_CODE } },
-    select: { id: true },
-  });
-  if (!rent) return ZERO;
+function paidByMarketOn(rows: ParsedExpense[], rentCategoryId: string): Prisma.Decimal {
   return rows
-    .filter((r) => r.categoryId === rent.id)
+    .filter((r) => r.categoryId === rentCategoryId)
+    .reduce(
+      (a, r) => a.add(new Prisma.Decimal(r.details.paidByMarket || 0)),
+      ZERO
+    );
+}
+
+/** The rent among a bill's expense rows, in rupees. */
+function rentOnRows(
+  rows: ParsedExpense[],
+  rentCategoryId: string
+): Prisma.Decimal {
+  return rows
+    .filter((r) => r.categoryId === rentCategoryId)
     .reduce((a, r) => a.add(r.amount), ZERO);
 }
 
@@ -709,23 +718,38 @@ async function parse(
 
     base.deliveryNoteId = trip.id;
 
-    // What THIS market handed the driver: the rent entered in the expenses
-    // panel, less the advance that already went at loading. Derived from the
-    // same row that becomes the expense, so the cost and the deduction are one
-    // number and cannot disagree — which is what the "last stop" tick and its
-    // separately typed total could never guarantee.
+    // What THIS market handed the driver, off the rent row's own field. It is
+    // the same figure twice over: the deduction on the market's bill, and the
+    // debit that settles the transporter. One number, so the two cannot
+    // disagree.
     if (type === "MARKET") {
-      const rentTotal = await rentOnRows(base.expenses, scope.companyId);
-      if (rentTotal.gt(0)) {
+      const rent = await prisma.expenseCategory.findUnique({
+        where: {
+          companyId_code: {
+            companyId: scope.companyId,
+            code: RENT_CATEGORY_CODE,
+          },
+        },
+        select: { id: true },
+      });
+      if (rent) {
+        const rentTotal = rentOnRows(base.expenses, rent.id);
+        const paidByMarket = paidByMarketOn(base.expenses, rent.id);
         const advance = trip.advancePaid ?? ZERO;
-        if (rentTotal.lt(advance))
+
+        // The driver cannot be handed more than he is owed. Advance plus what
+        // the market gave him is capped by the rent itself, or the transporter
+        // finishes the trip in credit — reading as "we have overpaid him",
+        // which is a figure nobody could act on.
+        if (advance.add(paidByMarket).gt(rentTotal))
           return {
             error:
-              `Trip ${trip.billNo} was given an advance of ` +
-              `${advance.toFixed(2)}, so its rent cannot be ` +
-              `${rentTotal.toFixed(2)}.`,
+              `The advance of ${advance.toFixed(2)} and the ` +
+              `${paidByMarket.toFixed(2)} this market paid the driver come to ` +
+              `more than the rent of ${rentTotal.toFixed(2)}.`,
           };
-        base.rentDeducted = rentTotal.sub(advance);
+
+        if (paidByMarket.gt(0)) base.rentDeducted = paidByMarket;
       }
     }
   }
@@ -766,6 +790,19 @@ async function tripTransporterName(
     select: { vehicle: { select: { transporter: { select: { name: true } } } } },
   });
   return trip?.vehicle.transporter.name ?? null;
+}
+
+/** The truck a trip went out on, for the record on a rent row. */
+async function tripVehicleNumber(
+  tx: Prisma.TransactionClient,
+  deliveryNoteId: string | null
+): Promise<string | null> {
+  if (!deliveryNoteId) return null;
+  const trip = await tx.deliveryNote.findUnique({
+    where: { id: deliveryNoteId },
+    select: { vehicle: { select: { number: true } } },
+  });
+  return trip?.vehicle.number ?? null;
 }
 
 /** What already went to the driver at loading, for the record on a rent row. */
@@ -1031,6 +1068,7 @@ export async function createSale(
         deliveryNoteId: d.deliveryNoteId,
         date: d.date,
         transporterName: await tripTransporterName(tx, d.deliveryNoteId),
+        vehicleNumber: await tripVehicleNumber(tx, d.deliveryNoteId),
         advancePaid: await tripAdvance(tx, d.deliveryNoteId),
         rows: d.expenses,
         userId: session.userId,
@@ -1213,6 +1251,7 @@ export async function updateSale(
         deliveryNoteId: d.deliveryNoteId,
         date: d.date,
         transporterName: await tripTransporterName(tx, d.deliveryNoteId),
+        vehicleNumber: await tripVehicleNumber(tx, d.deliveryNoteId),
         advancePaid: await tripAdvance(tx, d.deliveryNoteId),
         rows: d.expenses,
         userId: session.userId,

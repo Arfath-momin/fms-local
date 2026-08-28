@@ -67,7 +67,11 @@ export function SaleExpenses({
   const [openAt, setOpenAt] = useState<number | null>(null);
 
   const rent = trip
-    ? { transporterName: trip.transporterName, advancePaid: trip.advancePaid }
+    ? {
+        vehicleNumber: trip.vehicleNumber,
+        transporterName: trip.transporterName,
+        advancePaid: trip.advancePaid,
+      }
     : null;
 
   const summaries = rows.map((r) => expenseRowSummary(r, categories));
@@ -171,7 +175,7 @@ export function SaleExpenses({
   );
 }
 
-/** The rent among these rows, for the market bill's deduction line. */
+/** The rent among these rows — the whole cost of the journey. */
 export function rentOn(
   rows: SaleExpenseRow[],
   categories: ExpenseCategoryOption[]
@@ -181,4 +185,23 @@ export function rentOn(
   return rows
     .filter((r) => r.categoryId === rentId)
     .reduce((s, r) => s + (expenseRowSummary(r, categories)?.amount ?? 0), 0);
+}
+
+/**
+ * What the market handed the driver, off the rent rows' own field.
+ *
+ * This is the market bill's deduction line, and it is read rather than
+ * inferred. Working it out as "the rent less the advance" assumed the market
+ * always settles the whole balance — which made a part payment impossible to
+ * record and quietly claimed the driver had been paid in full when he had not.
+ */
+export function paidByMarketOn(
+  rows: SaleExpenseRow[],
+  categories: ExpenseCategoryOption[]
+): number {
+  const rentId = categories.find((c) => c.code === "RENT")?.id;
+  if (!rentId) return 0;
+  return rows
+    .filter((r) => r.categoryId === rentId)
+    .reduce((s, r) => s + (Number(r.details.paidByMarket) || 0), 0);
 }

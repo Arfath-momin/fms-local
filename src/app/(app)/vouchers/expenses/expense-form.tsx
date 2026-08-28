@@ -35,6 +35,13 @@ export type ExpenseCategoryOption = {
 /** One row of an itemised expense. */
 export type ExpenseLineInit = { description: string; amount: string };
 
+/** A vehicle from the master, with the transporter it belongs to. */
+export type VehicleOption = {
+  id: string;
+  number: string;
+  transporterName: string;
+};
+
 /** A trip a rent voucher can be filed against. */
 export type RentTripOption = {
   id: string;
@@ -61,6 +68,7 @@ export function ExpenseForm({
   action,
   categories,
   trips = [],
+  vehicles = [],
   initial,
   submitLabel,
   reasonField,
@@ -76,6 +84,8 @@ export function ExpenseForm({
   categories: ExpenseCategoryOption[];
   /** Open trips, so a Vehicle Rent voucher can fill itself in from one. */
   trips?: RentTripOption[];
+  /** The vehicle master, so the truck is chosen rather than typed. */
+  vehicles?: VehicleOption[];
   initial?: ExpenseInit;
   submitLabel: string;
   reasonField?: boolean;
@@ -93,6 +103,19 @@ export function ExpenseForm({
   );
   const category = categories.find((c) => c.id === categoryId);
   const [tripId, setTripId] = useState("");
+  const [vehicleId, setVehicleId] = useState("");
+
+  /** Choosing the truck names its owner; neither is typed. */
+  function applyVehicle(id: string) {
+    setVehicleId(id);
+    const v = vehicles.find((x) => x.id === id);
+    if (!v) return;
+    setDetails((d) => ({
+      ...d,
+      vehicleNo: v.number,
+      transporter: v.transporterName,
+    }));
+  }
   const [tripDate, setTripDate] = useState("");
 
   /**
@@ -109,6 +132,9 @@ export function ExpenseForm({
       transporter: t.transporterName,
       advance: t.advancePaid > 0 ? String(t.advancePaid) : "",
     }));
+    // Keep the two pickers agreeing: a trip names a truck, so the truck box
+    // should show it rather than sitting empty beside a filled-in number.
+    setVehicleId(vehicles.find((v) => v.number === t.vehicleNumber)?.id ?? "");
     setTripDate(t.date);
   }
 
@@ -258,6 +284,34 @@ export function ExpenseForm({
           actually learned: the total. Costs discovered when a BILL comes back
           are better entered on that bill — this is for the rent you agree
           before any bill exists. */}
+      {/* The truck comes off the master, and brings its owner with it. Typing
+          a number meant "KA20B5521" and "KA 20 B 5521" were two trucks, and
+          the transporter behind each was whatever was typed beside it — which
+          is how one man ends up with two ledgers. */}
+      {isRent && vehicles.length > 0 && (
+        <div>
+          <label htmlFor="vehicleId" className={labelCls}>
+            Vehicle
+          </label>
+          <select
+            id="vehicleId"
+            value={vehicleId}
+            onChange={(e) => applyVehicle(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">Choose the truck…</option>
+            {vehicles.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.number} · {v.transporterName}
+              </option>
+            ))}
+          </select>
+          <p className="text-muted text-[12px] mt-1">
+            Its owner fills in below — the rent is owed to him.
+          </p>
+        </div>
+      )}
+
       {isRent && trips.length > 0 && (
         <div>
           <label htmlFor="tripId" className={labelCls}>

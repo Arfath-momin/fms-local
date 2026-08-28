@@ -57,8 +57,9 @@ const inputCls =
 const labelCls =
   "block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1";
 
-/** The prefill a trip gives a Vehicle Rent row: nothing here is typed. */
+/** What a trip tells a Vehicle Rent row. None of it is typed. */
 export type RentPrefill = {
+  vehicleNumber: string;
   transporterName: string;
   advancePaid: number;
 };
@@ -91,9 +92,13 @@ export function ExpenseDrawer({
   // bill saves — it is the only party that can be trusted to say who a trip's
   // transporter is, and a client-sent name would be one more way for one man's
   // account to end up spelled two ways.
+  // The truck, its owner and what has already gone to the driver are all facts
+  // about the TRIP. Asking for any of them again is asking the clerk to retype
+  // something the app is already showing them two inches higher up.
   const rentDetails: Record<string, string> =
     isRent && rent
       ? {
+          vehicleNo: rent.vehicleNumber,
           transporter: rent.transporterName,
           advance: rent.advancePaid > 0 ? String(rent.advancePaid) : "",
         }
@@ -149,8 +154,7 @@ export function ExpenseDrawer({
 
         {spec?.fields.map((f) => {
           // Rent's transporter and advance are the trip's, shown but not typed.
-          const fromTrip =
-            isRent && rent && (f.name === "transporter" || f.name === "advance");
+          const fromTrip = isRent && rent && f.name in rentDetails;
           if (fromTrip) {
             const value = rentDetails[f.name] ?? "";
             return (
