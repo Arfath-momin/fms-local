@@ -26,6 +26,33 @@ export default async function NewExpensePage() {
     select: { id: true, code: true, name: true, allowsLines: true, kind: true },
   });
 
+  // Open trips of every channel, so a Vehicle Rent voucher can fill itself in
+  // from one: the vehicle, the transporter, the buying day and the advance
+  // already handed over at loading. Only the total is left to type.
+  const trips = (
+    await prisma.deliveryNote.findMany({
+      where: { companyId: company.id, centreId: centre.id },
+      orderBy: [{ date: "desc" }, { billNo: "desc" }],
+      take: 60,
+      select: {
+        id: true,
+        billNo: true,
+        date: true,
+        advancePaid: true,
+        vehicle: {
+          select: { number: true, transporter: { select: { name: true } } },
+        },
+      },
+    })
+  ).map((t) => ({
+    id: t.id,
+    billNo: t.billNo,
+    date: t.date.toISOString().slice(0, 10),
+    vehicleNumber: t.vehicle.number,
+    transporterName: t.vehicle.transporter.name,
+    advancePaid: Number(t.advancePaid ?? 0),
+  }));
+
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-1">New Expense</h1>
@@ -35,6 +62,7 @@ export default async function NewExpensePage() {
       <ExpenseForm
         action={createExpense}
         categories={categories}
+        trips={trips}
         submitLabel="Save Expense"
         scope={scopeFieldValues({ company, centre })}
       />

@@ -34,6 +34,16 @@ export type ExpenseCategoryOption = {
 /** One row of an itemised expense. */
 export type ExpenseLineInit = { description: string; amount: string };
 
+/** A trip a rent voucher can be filed against. */
+export type RentTripOption = {
+  id: string;
+  billNo: string;
+  date: string;
+  vehicleNumber: string;
+  transporterName: string;
+  advancePaid: number;
+};
+
 export type ExpenseInit = {
   categoryId: string;
   lines?: ExpenseLineInit[];
@@ -49,6 +59,7 @@ export type ExpenseInit = {
 export function ExpenseForm({
   action,
   categories,
+  trips = [],
   initial,
   submitLabel,
   reasonField,
@@ -62,6 +73,8 @@ export function ExpenseForm({
   ) => Promise<ExpenseFormState>;
   /** Every live category for this company, in display order. */
   categories: ExpenseCategoryOption[];
+  /** Open trips, so a Vehicle Rent voucher can fill itself in from one. */
+  trips?: RentTripOption[];
   initial?: ExpenseInit;
   submitLabel: string;
   reasonField?: boolean;
@@ -78,6 +91,26 @@ export function ExpenseForm({
     initial?.categoryId ?? categories[0]?.id ?? ""
   );
   const category = categories.find((c) => c.id === categoryId);
+  const [tripId, setTripId] = useState("");
+  const [tripDate, setTripDate] = useState("");
+
+  /**
+   * Fill everything the trip already knows. Only the total is left to type,
+   * which is the one number the trip cannot tell us.
+   */
+  function applyTrip(id: string) {
+    setTripId(id);
+    const t = trips.find((x) => x.id === id);
+    if (!t) return;
+    setDetails((d) => ({
+      ...d,
+      vehicleNo: t.vehicleNumber,
+      transporter: t.transporterName,
+      advance: t.advancePaid > 0 ? String(t.advancePaid) : "",
+    }));
+    setTripDate(t.date);
+  }
+
   const [details, setDetails] = useState<Record<string, string>>(
     initial?.details ?? {}
   );
@@ -112,6 +145,7 @@ export function ExpenseForm({
   // Overheads are entered at month end against the whole month's P/L, so they
   // default to the last day of the current month rather than to today.
   const isOverhead = category?.kind === "OVERHEAD";
+  const isRent = category?.code === "RENT";
   const monthEnd = (() => {
     const [y, m] = today.split("-").map(Number);
     return `${y}-${String(m).padStart(2, "0")}-${String(
@@ -187,10 +221,16 @@ export function ExpenseForm({
           {isOverhead ? "Month" : "Purchase Date"}
         </label>
         <DateField
+          // Keyed on the chosen trip so picking one re-mounts the field with
+          // the trip's buying day. DateField owns its own text, so a new
+          // default only lands on a fresh mount.
+          key={tripDate || "own"}
           id="date"
           name="date"
           required
-          defaultValue={initial?.date ?? (isOverhead ? monthEnd : today)}
+          defaultValue={
+            tripDate || initial?.date || (isOverhead ? monthEnd : today)
+          }
           className={inputCls}
         />
         <p className="text-muted text-[12px] mt-1">
@@ -210,6 +250,34 @@ export function ExpenseForm({
         </p>
       </div>
 
+
+      {/* Vehicle rent knows where it came from. Picking the trip fills the
+          vehicle, the transporter, the buying day and the advance already
+          handed over at loading, so the merchant types the one figure they
+          actually learned: the total. Costs discovered when a BILL comes back
+          are better entered on that bill — this is for the rent you agree
+          before any bill exists. */}
+      {isRent && trips.length > 0 && (
+        <div>
+          <label htmlFor="tripId" className={labelCls}>
+            Trip (optional)
+          </label>
+          <select
+            id="tripId"
+            value={tripId}
+            onChange={(e) => applyTrip(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">Not against a particular trip</option>
+            {trips.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.date} · {t.billNo} · {t.vehicleNumber} · {t.transporterName}
+                {t.advancePaid > 0 ? ` · advance ${t.advancePaid}` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {spec.fields.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

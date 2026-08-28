@@ -33,6 +33,7 @@ export type DeliveryInit = {
   channel: string;
   vehicleId: string;
   /** MARKET only — paid to the driver before departure. */
+  advancePaid: string;
   driverName: string;
   mobileNo: string;
   lines: DeliveryLineInit[];
@@ -238,6 +239,22 @@ export function DeliveryForm({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <label htmlFor="advancePaid" className={labelCls}>
+            Advance Paid (₹)
+          </label>
+          <input
+            id="advancePaid"
+            name="advancePaid"
+            inputMode="decimal"
+            defaultValue={initial?.advancePaid ?? ""}
+            className={inputCls + " num text-right"}
+          />
+          <p className="text-muted text-[12px] mt-1">
+            Handed to the driver at loading. The rest of the rent is entered
+            when the bill comes back — this figure fills itself in there.
+          </p>
+        </div>
         <div>
           <label htmlFor="driverName" className={labelCls}>
             Driver Name

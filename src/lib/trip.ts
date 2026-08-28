@@ -200,7 +200,9 @@ export async function openTripsForChannel(
       date: true,
       rentAmount: true,
       advancePaid: true,
-      vehicle: { select: { number: true } },
+      vehicle: {
+        select: { number: true, transporter: { select: { name: true } } },
+      },
       lines: { select: { particulars: true, kg: true, box: true } },
       sales: {
         select: {
@@ -220,9 +222,12 @@ export async function openTripsForChannel(
       billNo: t.billNo,
       date: t.date.toISOString().slice(0, 10),
       vehicleNumber: t.vehicle.number,
+      // Who the rent is owed to. Carried so a bill's expense panel can name
+      // the transporter without the clerk typing — and without two spellings
+      // splitting one man's account in two.
+      transporterName: t.vehicle.transporter.name,
       boxesDispatched: tally.boxesDispatched,
       advancePaid: (t.advancePaid ?? ZERO).toNumber(),
-      rentAlreadyRecorded: t.rentAmount !== null,
       // What is left to bill, by particular. This is what a market bill starts
       // from: the trip went out with 100 bangdha and 50 prawns, an earlier
       // market took 40 bangdha, and this one is offered the remaining 60 and

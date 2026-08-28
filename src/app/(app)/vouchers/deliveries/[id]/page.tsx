@@ -112,6 +112,10 @@ export default async function DeliveryNotePage({
         <Field label="Channel" value={TRIP_CHANNEL_LABELS[note.channel]} />
         <Field label="Status" value={TRIP_STATUS_LABELS[note.status]} />
         <Field label="Vehicle No." value={note.vehicle.number} />
+        <Field
+          label="Advance Paid"
+          value={note.advancePaid ? fmtMoney(note.advancePaid) : "—"}
+        />
         <Field label="Transporter" value={note.vehicle.transporter.name} />
         <Field label="Driver Name" value={note.driverName ?? "—"} />
         <Field label="Mobile No." value={note.mobileNo ?? "—"} />

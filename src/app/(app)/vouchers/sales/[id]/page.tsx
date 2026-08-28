@@ -48,6 +48,17 @@ export default async function SalePage({
       party: { select: { name: true } },
       careOfParty: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
+      // Costs entered on this bill — shown below, and named in the delete
+      // warning so removing the bill is never a surprise.
+      expenses: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          amount: true,
+          category: { select: { name: true } },
+          party: { select: { id: true, name: true } },
+        },
+      },
       createdBy: { select: { name: true } },
       updatedBy: { select: { name: true } },
     },
@@ -196,6 +207,44 @@ export default async function SalePage({
         </div>
       </div>
 
+      {sale.expenses.length > 0 && (
+        <div className="border border-line-strong bg-surface mb-4 overflow-x-auto">
+          <table className="ledger-table">
+            <thead>
+              <tr>
+                <th>Expense entered on this bill</th>
+                <th>Owed to</th>
+                <th className="num-col">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sale.expenses.map((e) => (
+                <tr key={e.id}>
+                  <td className="font-medium">{e.category.name}</td>
+                  <td>
+                    {e.party ? (
+                      <Link
+                        href={`/ledgers/parties/${e.party.id}`}
+                        className="text-accent underline underline-offset-2"
+                      >
+                        {e.party.name}
+                      </Link>
+                    ) : (
+                      <span className="text-muted text-[12px]">
+                        nobody owed
+                      </span>
+                    )}
+                  </td>
+                  <td className="num-col num text-debit">
+                    {fmtMoney(e.amount)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <AttachmentPanel
         attachments={attachments.map((a) => ({
           id: a.id,
@@ -223,11 +272,20 @@ export default async function SalePage({
         <DeleteVoucher
           action={deleteSale.bind(null, sale.id)}
           noun="sale"
-          warning={
-            sale.commission
-              ? "The buyer's ledger entry and the 2% commission entry both go with it, and each affected running balance is rebuilt without them."
-              : undefined
-          }
+          warning={[
+            sale.expenses.length > 0 &&
+              `This also removes ${sale.expenses.length} expense${
+                sale.expenses.length === 1 ? "" : "s"
+              } entered on it, totalling ${fmtMoney(
+                sale.expenses.reduce(
+                  (a, e) => a.add(e.amount),
+                  new Prisma.Decimal(0)
+                )
+              )} — they were recorded here, so they leave with it.`,
+            "The buyer's ledger entry goes too, and every affected running balance is rebuilt without it.",
+          ]
+            .filter(Boolean)
+            .join(" ")}
         />
       )}
     </div>

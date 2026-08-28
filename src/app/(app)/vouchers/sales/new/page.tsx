@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { SaleType } from "@/generated/prisma/enums";
+import { prisma } from "@/lib/db";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { SALE_TYPES, SALE_TYPE_LABELS } from "@/lib/sale";
@@ -65,6 +66,14 @@ export default async function NewSalePage({
           type === "MARKET" ? "MARKET" : type === "FACTORY" ? "FACTORY" : "FISH_MILL"
         );
 
+  // The heads a bill may raise a cost under. Live, like everywhere else:
+  // archived ones drop out, and anything the merchant added shows up.
+  const expenseCategories = await prisma.expenseCategory.findMany({
+    where: { companyId: company.id, archivedAt: null },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: { id: true, code: true, name: true },
+  });
+
   // Only a LOCAL sale takes a number of ours; the rest carry the buyer's.
   const nextNos =
     type === "LOCAL"
@@ -89,6 +98,7 @@ export default async function NewSalePage({
         type={type}
         action={createSale}
         trips={trips}
+        expenseCategories={expenseCategories}
         nextNo={nextNos[SERIES_PREFIX.SALE_LOCAL]}
         submitLabel="Save Sale"
         scope={scopeFieldValues({ company, centre })}

@@ -29,8 +29,17 @@ export default async function EditSalePage({
       party: { select: { name: true } },
       careOfParty: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
-      // The trip carries the rent total this bill recorded.
-      deliveryNote: { select: { rentAmount: true } },
+      // The costs entered on this bill. Ordered so re-opening it shows the rows
+      // in the order they were typed.
+      expenses: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          categoryId: true,
+          amount: true,
+          notes: true,
+          party: { select: { name: true } },
+        },
+      },
     },
   });
   if (!sale) notFound();
@@ -59,6 +68,14 @@ export default async function EditSalePage({
           sale.id
         );
 
+  // The heads a bill may raise a cost under. Live, like everywhere else —
+  // archived ones drop out, and anything the merchant added shows up.
+  const expenseCategories = await prisma.expenseCategory.findMany({
+    where: { companyId: company.id, archivedAt: null },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: { id: true, code: true, name: true },
+  });
+
   return (
     <div>
       <h1 className="heading text-xl font-semibold mb-4">
@@ -72,6 +89,7 @@ export default async function EditSalePage({
       <SaleForm
         type={sale.type}
         trips={trips}
+        expenseCategories={expenseCategories}
         action={updateSale.bind(null, sale.id)}
         initial={{
           billNo: sale.billNo,
@@ -92,7 +110,14 @@ export default async function EditSalePage({
           // only be a second answer that could disagree.
           netBill: sale.type === "MARKET" ? sale.amount.toString() : "",
           deliveryNoteId: sale.deliveryNoteId ?? "",
-          rentDeducted: sale.rentDeducted?.toString() ?? "",
+          // The costs entered on this bill, so re-opening it shows them and a
+          // save rewrites them rather than adding a second set.
+          expenses: sale.expenses.map((e) => ({
+            categoryId: e.categoryId,
+            vendorName: e.party?.name ?? "",
+            amount: e.amount.toString(),
+            notes: e.notes ?? "",
+          })),
           amount: sale.type === "FACTORY" ? sale.amount.toString() : "",
           weight: sale.weight?.toString() ?? "",
           vehicleNo: sale.vehicleNo ?? "",

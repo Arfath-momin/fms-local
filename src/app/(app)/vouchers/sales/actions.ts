@@ -81,6 +81,8 @@ type Parsed = {
    */
   /** What this market actually handed the driver: total − advance. Derived. */
   rentDeducted: Prisma.Decimal | null;
+  /** Costs entered on this bill, each becoming an expense voucher. */
+  expenses: ParsedExpense[];
   weight: Prisma.Decimal | null;
   netWeight: Prisma.Decimal | null;
   vehicleNo: string | null;
@@ -95,6 +97,181 @@ type Parsed = {
 function parseMoney(raw: string): Prisma.Decimal | null {
   if (!DECIMAL2.test(raw)) return null;
   return new Prisma.Decimal(raw);
+}
+
+/**
+ * Turn a bill's expense rows into real expense vouchers, inside its transaction.
+ *
+ * Replaced wholesale rather than diffed, the same discipline the rest of the
+ * voucher actions use: an edit can add a row, change an amount or move a cost
+ * to a different head, and rebuilding is the only version of that which cannot
+ * leave a stale row behind. Their LEDGER entries go first, so the vendors whose
+ * balances change are recomputed whether they gained a row or lost one.
+ *
+ * Dated to the TRIP'S buying day where there is a trip. That is the whole point
+ * of entering them here: the ice and the rent belong to the day the fish was
+ * bought, not to the day the market's bill happened to arrive.
+ */
+async function writeSaleExpenses(
+  tx: Prisma.TransactionClient,
+  e: {
+    saleId: string;
+    companyId: string;
+    centreId: string;
+    deliveryNoteId: string | null;
+    /** The trip's buying day, or the bill's own date when it names no trip. */
+    date: Date;
+    transporterName: string | null;
+    rows: ParsedExpense[];
+    userId: string;
+  }
+) {
+  const existing = await tx.expense.findMany({
+    where: { saleId: e.saleId },
+    select: { id: true },
+  });
+  for (const x of existing) {
+    await removeLedgerEntries(tx, { sourceId: x.id, sourceType: ["EXPENSE"] });
+  }
+  await tx.expense.deleteMany({ where: { saleId: e.saleId } });
+
+  if (e.rows.length === 0) return;
+
+  const rentId = (
+    await tx.expenseCategory.findUnique({
+      where: {
+        companyId_code: { companyId: e.companyId, code: RENT_CATEGORY_CODE },
+      },
+      select: { id: true },
+    })
+  )?.id;
+
+  for (const row of e.rows) {
+    // The head has to belong to this company — the id came from the client.
+    const category = await tx.expenseCategory.findFirst({
+      where: { id: row.categoryId, companyId: e.companyId, archivedAt: null },
+      select: { id: true },
+    });
+    if (!category) throw new Error("That expense head no longer exists.");
+
+    // Vehicle rent is owed to the trip's transporter, never to a typed name:
+    // one spelling difference would split one man's account in two.
+    const isRent = rentId !== undefined && row.categoryId === rentId;
+    const vendor = isRent ? e.transporterName : row.vendorName;
+    const partyId = vendor
+      ? await findOrCreateParty(
+          tx,
+          vendor,
+          isRent ? "TRANSPORTER" : "EXPENSE_VENDOR"
+        )
+      : null;
+
+    const expense = await tx.expense.create({
+      data: {
+        companyId: e.companyId,
+        centreId: e.centreId,
+        categoryId: category.id,
+        partyId,
+        saleId: e.saleId,
+        deliveryNoteId: e.deliveryNoteId,
+        amount: row.amount,
+        date: e.date,
+        spentOn: null,
+        details: {},
+      },
+      select: { id: true },
+    });
+
+    // Nothing is PAID here — the vendor is credited what he is owed, and
+    // settling is a Payment voucher against him, as everywhere else.
+    if (partyId) {
+      await postLedgerEntries(tx, [
+        {
+          companyId: e.companyId,
+          centreId: e.centreId,
+          partyId,
+          type: "CREDIT",
+          sourceType: "EXPENSE",
+          sourceId: expense.id,
+          amount: row.amount,
+          date: e.date,
+        },
+      ]);
+    }
+  }
+}
+
+/** The category a trip's rent is filed under. */
+const RENT_CATEGORY_CODE = "RENT";
+
+/**
+ * The rent among a bill's expense rows, in rupees.
+ *
+ * Read by CODE rather than trusted from the client: the row carries a category
+ * id, and only the database can say which id is the rent head for this company.
+ */
+async function rentOnRows(
+  rows: ParsedExpense[],
+  companyId: string
+): Promise<Prisma.Decimal> {
+  if (rows.length === 0) return ZERO;
+  const rent = await prisma.expenseCategory.findUnique({
+    where: { companyId_code: { companyId, code: RENT_CATEGORY_CODE } },
+    select: { id: true },
+  });
+  if (!rent) return ZERO;
+  return rows
+    .filter((r) => r.categoryId === rent.id)
+    .reduce((a, r) => a.add(r.amount), ZERO);
+}
+
+/** One cost entered on a bill, before it becomes an expense voucher. */
+type ParsedExpense = {
+  categoryId: string;
+  vendorName: string;
+  amount: Prisma.Decimal;
+};
+
+/**
+ * The costs a bill reveals, entered on the bill itself.
+ *
+ * A trip's real costs are not knowable when the truck leaves — the rent depends
+ * on where it ends up going — but they ARE known when the bill comes back, at
+ * which point the merchant is already on this screen with the paper in hand.
+ * Each row here becomes a real expense voucher, dated to the TRIP'S buying day.
+ *
+ * The vendor is optional on purpose, and matches the Expense model: a canteen
+ * bill or a batha has nobody to owe, and forcing a name would only fill the
+ * party master with junk nobody settles against. Vehicle rent is the exception
+ * — its vendor arrives from the trip, so it is never typed.
+ */
+function parseExpenses(
+  formData: FormData
+): { error: string } | { expenses: ParsedExpense[] } {
+  const categoryIds = formData.getAll("expCategoryId").map(String);
+  const vendors = formData.getAll("expVendorName").map(String);
+  const amounts = formData.getAll("expAmount").map(String);
+
+  const expenses: ParsedExpense[] = [];
+  for (let i = 0; i < categoryIds.length; i++) {
+    const categoryId = categoryIds[i].trim();
+    const vendorName = (vendors[i] ?? "").trim().replace(/\s+/g, " ");
+    const raw = (amounts[i] ?? "").trim();
+
+    // A row the clerk added and then left alone is not an error — it is a row
+    // they changed their mind about.
+    if (!categoryId && !raw && !vendorName) continue;
+    if (!categoryId) return { error: "Choose a head for every expense row." };
+    if (!DECIMAL2.test(raw) || Number(raw) <= 0)
+      return { error: "Every expense row needs a positive amount." };
+
+    expenses.push({
+      categoryId,
+      vendorName,
+      amount: new Prisma.Decimal(raw),
+    });
+  }
+  return { expenses };
 }
 
 /** Fish Mill / Local line rows share a shape; box & count are Fish-Mill only. */
@@ -229,6 +406,7 @@ async function parse(
     otherDeduction: null as Prisma.Decimal | null,
     deliveryNoteId: null as string | null,
     rentDeducted: null as Prisma.Decimal | null,
+    expenses: [] as ParsedExpense[],
     weight: null as Prisma.Decimal | null,
     netWeight: null as Prisma.Decimal | null,
     vehicleNo: null as string | null,
@@ -271,19 +449,6 @@ async function parse(
     const reserve = parseMoney(clean(formData.get("reserve")));
     if (reserve && reserve.lt(0)) return { error: "Reserve cannot be negative." };
 
-    // Rent deducted, TYPED, straight off the market's paper — one more
-    // deduction line beside commission and labour, which is exactly how it
-    // appears on the bill the merchant is copying from.
-    //
-    // It used to be derived: tick "last stop", type the trip's whole rent, and
-    // the figure came out as total less the advance. That asked the clerk to
-    // know the truck's whole route before they could enter a bill, and had no
-    // answer at all when one journey ended in a factory bill for the load and a
-    // market bill for the returns. The cost itself is a Vehicle Rent expense
-    // voucher now; this number only grosses the day's revenue back up.
-    const rentDeducted = parseMoney(clean(formData.get("rentDeducted")));
-    if (rentDeducted && rentDeducted.lt(0))
-      return { error: "Rent deducted cannot be negative." };
 
     // Net Bill is TYPED, from the paper the market handed over — it is the
     // figure they actually paid. "Labour / other" is then the balancing item:
@@ -312,7 +477,6 @@ async function parse(
     base.commissionRate = commissionRate;
     base.commission = commission;
     base.reserve = reserve && reserve.gt(0) ? reserve : null;
-    base.rentDeducted = rentDeducted && rentDeducted.gt(0) ? rentDeducted : null;
     // Net Bill is what the seller owes us for the fish. Commission, labour and
     // reserve stay netted inside it and are never posted separately; only the
     // rent is grossed back up at report time (see saleRevenue in lib/sale).
@@ -384,6 +548,10 @@ async function parse(
       };
   }
 
+  const parsedExpenses = parseExpenses(formData);
+  if ("error" in parsedExpenses) return { error: parsedExpenses.error };
+  base.expenses = parsedExpenses.expenses;
+
   // Every sale type carries a remark. Read once here rather than in each
   // branch, because it is the one field that means the same thing on all four.
   base.notes = clean(formData.get("notes")) || null;
@@ -436,6 +604,26 @@ async function parse(
 
 
     base.deliveryNoteId = trip.id;
+
+    // What THIS market handed the driver: the rent entered in the expenses
+    // panel, less the advance that already went at loading. Derived from the
+    // same row that becomes the expense, so the cost and the deduction are one
+    // number and cannot disagree — which is what the "last stop" tick and its
+    // separately typed total could never guarantee.
+    if (type === "MARKET") {
+      const rentTotal = await rentOnRows(base.expenses, scope.companyId);
+      if (rentTotal.gt(0)) {
+        const advance = trip.advancePaid ?? ZERO;
+        if (rentTotal.lt(advance))
+          return {
+            error:
+              `Trip ${trip.billNo} was given an advance of ` +
+              `${advance.toFixed(2)}, so its rent cannot be ` +
+              `${rentTotal.toFixed(2)}.`,
+          };
+        base.rentDeducted = rentTotal.sub(advance);
+      }
+    }
   }
 
   // "Labour / other" is the BALANCING item on a market bill, derived last
@@ -483,6 +671,19 @@ async function parse(
  * Read from the trip rather than passed in, so the sale action never has to
  * carry a transporter around that only one branch uses.
  */
+/** The transporter behind a trip's vehicle, by name — rent's vendor. */
+async function tripTransporterName(
+  tx: Prisma.TransactionClient,
+  deliveryNoteId: string | null
+): Promise<string | null> {
+  if (!deliveryNoteId) return null;
+  const trip = await tx.deliveryNote.findUnique({
+    where: { id: deliveryNoteId },
+    select: { vehicle: { select: { transporter: { select: { name: true } } } } },
+  });
+  return trip?.vehicle.transporter.name ?? null;
+}
+
 async function tripTransporterId(
   tx: Prisma.TransactionClient,
   deliveryNoteId: string | null
@@ -696,6 +897,19 @@ export async function createSale(
         transporterId: await tripTransporterId(tx, d.deliveryNoteId),
         date: d.date,
       });
+      // The costs this bill revealed, as real expense vouchers dated to the
+      // trip's buying day.
+      await writeSaleExpenses(tx, {
+        saleId: sale.id,
+        companyId: company.id,
+        centreId: centre.id,
+        deliveryNoteId: d.deliveryNoteId,
+        date: d.date,
+        transporterName: await tripTransporterName(tx, d.deliveryNoteId),
+        rows: d.expenses,
+        userId: session.userId,
+      });
+
       // The trip moves DISPATCHED → PART_BILLED → CLOSED as its bills land.
       // Derived from the boxes actually billed, not set by hand — a status
       // somebody has to remember to change is one that goes stale.
@@ -746,9 +960,25 @@ export async function deleteSale(
       if (!existing) throw new Error("Sale not found.");
 
       await removeLedgerEntries(tx, { sourceId: saleId });
-      // If this was the bill that recorded the trip's rent, the rent goes with
-      // it: the expense is cleared and the trip's total returns to unknown,
-      // which is honest — nothing has reported the kilometres any more.
+
+      // The costs entered ON this bill go with it, and their ledger entries go
+      // first so the vendors they credited are recomputed. Done explicitly here
+      // rather than by a database cascade: a cascade would drop the expense and
+      // leave its ledger entry behind, which is exactly the orphan a running
+      // balance cannot survive. The confirmation on screen names what will go,
+      // so this is never a surprise.
+      const raised = await tx.expense.findMany({
+        where: { saleId },
+        select: { id: true },
+      });
+      for (const x of raised) {
+        await removeLedgerEntries(tx, {
+          sourceId: x.id,
+          sourceType: ["EXPENSE"],
+        });
+      }
+      await tx.expense.deleteMany({ where: { saleId } });
+
       await unlinkAttachments(tx, "SALE", saleId);
       // Removing the voucher answers any request against it. The request rows
       // themselves survive — they record that a correction was asked for.
@@ -848,6 +1078,19 @@ export async function updateSale(
         transporterId: await tripTransporterId(tx, d.deliveryNoteId),
         date: d.date,
       });
+      // The costs this bill revealed, as real expense vouchers dated to the
+      // trip's buying day.
+      await writeSaleExpenses(tx, {
+        saleId: saleId,
+        companyId: company.id,
+        centreId: centre.id,
+        deliveryNoteId: d.deliveryNoteId,
+        date: d.date,
+        transporterName: await tripTransporterName(tx, d.deliveryNoteId),
+        rows: d.expenses,
+        userId: session.userId,
+      });
+
       // Both trips, because an edit can move a bill from one to another: the
       // trip it left may fall back to PART_BILLED, and the one it joined may
       // now close.

@@ -6,7 +6,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { TripChannel } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { nextDocumentNo, SERIES_PREFIX } from "@/lib/document-series";
-import { removeLedgerEntries } from "@/lib/ledger";
+import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { resolveReviews } from "@/lib/review-db";
@@ -60,6 +60,7 @@ type Parsed = {
   recipient: string;
   channel: TripChannel;
   vehicleId: string;
+  advancePaid: Prisma.Decimal | null;
   driverName: string | null;
   mobileNo: string | null;
   /** Free-form remark. Posts to nothing; prints on the note. */
@@ -67,6 +68,50 @@ type Parsed = {
   lines: ParsedLine[];
   file: unknown;
 };
+
+/**
+ * What a trip posts at loading: the advance to the driver, and nothing else.
+ *
+ * The advance is the one rent figure that IS known when the truck leaves — the
+ * total depends on where it ends up going, and is entered when the bill comes
+ * back. Recording it here is what lets the rent entry pre-fill it later, so the
+ * merchant only ever types the total.
+ *
+ * It posts as a DEBIT, leaving the transporter's balance POSITIVE until the
+ * rent lands: we have prepaid him, which is exactly what has happened. When the
+ * total is entered the credit lands and the balance tells the truth again.
+ *
+ * Deliberately no expense row. Rent is expensed once, at the total; charging
+ * the advance as well is the double-count invariant 2 exists to prevent.
+ */
+async function postTripAdvance(
+  tx: Prisma.TransactionClient,
+  t: {
+    companyId: string;
+    centreId: string;
+    transporterId: string;
+    id: string;
+    advancePaid: Prisma.Decimal | null;
+    date: Date;
+  }
+) {
+  if (!t.advancePaid || t.advancePaid.lte(0)) return;
+
+  await postLedgerEntries(tx, [
+    {
+      companyId: t.companyId,
+      centreId: t.centreId,
+      partyId: t.transporterId,
+      type: "DEBIT" as const,
+      sourceType: "PAYMENT" as const,
+      sourceId: t.id,
+      amount: t.advancePaid,
+      date: t.date,
+    },
+  ]);
+}
+
+const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
 
 const clean = (v: FormDataEntryValue | null) =>
   String(v ?? "").trim().replace(/\s+/g, " ");
@@ -89,6 +134,14 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const channel = channelRaw as TripChannel;
 
 
+
+  const advanceRaw = clean(formData.get("advancePaid"));
+  let advancePaid: Prisma.Decimal | null = null;
+  if (advanceRaw) {
+    if (!DECIMAL2.test(advanceRaw))
+      return { error: "Advance paid must be a number (up to 2 decimals)." };
+    advancePaid = new Prisma.Decimal(advanceRaw);
+  }
 
   const badFile = validateImageFile(file);
   if (badFile) return { error: badFile };
@@ -155,6 +208,7 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
       recipient,
       channel,
       vehicleId,
+      advancePaid,
       driverName: driverName || null,
       mobileNo: mobileNo || null,
       notes: notes || null,
@@ -205,10 +259,11 @@ export async function createDelivery(
           recipient: d.recipient,
           channel: d.channel,
           vehicleId: vehicle.id,
-          // Rent lives on its own expense voucher now, entered when the truck
-          // is loaded. Neither figure belongs on the note.
+          // The TOTAL rent is not known here — it is entered when the bill
+          // comes back. The advance is, so it lives on the note where it
+          // actually happens.
           rentAmount: null,
-          advancePaid: null,
+          advancePaid: d.advancePaid,
           driverName: d.driverName,
           mobileNo: d.mobileNo,
           notes: d.notes,
@@ -224,6 +279,15 @@ export async function createDelivery(
             })),
           },
         },
+      });
+
+      await postTripAdvance(tx, {
+        companyId: company.id,
+        centreId: centre.id,
+        transporterId: vehicle.transporterId,
+        id: note.id,
+        advancePaid: d.advancePaid,
+        date: d.date,
       });
 
       await linkStagedAttachment(tx, staged, {
@@ -353,9 +417,9 @@ export async function updateDelivery(
           recipient: d.recipient,
           channel: d.channel,
           vehicleId: updVehicle.id,
-          // rentAmount and advancePaid are deliberately absent: rent is an
-          // expense voucher now, and an edit here must not disturb what is
-          // already recorded on old notes.
+          // rentAmount is deliberately absent: the total belongs to whatever
+          // recorded it, and editing the note must not wipe it.
+          advancePaid: d.advancePaid,
           driverName: d.driverName,
           mobileNo: d.mobileNo,
           notes: d.notes,
@@ -372,6 +436,17 @@ export async function updateDelivery(
             })),
           },
         },
+      });
+
+      // Reposted after the update, because an edit can change the advance, the
+      // date or the truck — and each moves a different transporter's balance.
+      await postTripAdvance(tx, {
+        companyId: existing.companyId,
+        centreId: existing.centreId,
+        transporterId: updVehicle.transporterId,
+        id: deliveryNoteId,
+        advancePaid: d.advancePaid,
+        date: d.date,
       });
 
       // A newly chosen image replaces the old bill rather than piling up

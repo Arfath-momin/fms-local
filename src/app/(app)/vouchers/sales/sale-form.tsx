@@ -6,6 +6,12 @@ import type { SaleType } from "@/generated/prisma/enums";
 import { businessToday, fmtKg, fmtMoney } from "@/lib/format";
 import type { SaleFormState } from "./actions";
 import type { FormScope } from "@/lib/scope";
+import {
+  rentOn,
+  SaleExpenses,
+  type ExpenseCategoryOption,
+  type SaleExpenseRow,
+} from "./sale-expenses";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
 import { DateField } from "../../date-field";
@@ -51,8 +57,8 @@ export type SaleInit = {
   netBill: string;
   /** The trip this bill came off. Required on MARKET/FACTORY/FISH_MILL. */
   deliveryNoteId: string;
-  /** What the market deducted for the driver, off their own paper. */
-  rentDeducted: string;
+  /** Costs entered on this bill, which become expense vouchers. */
+  expenses?: SaleExpenseRow[];
   amount: string; // factory bill amount total
   weight: string;
   vehicleNo: string;
@@ -79,11 +85,11 @@ export type TripOption = {
   /** Buying day, "YYYY-MM-DD" — the sale copies it rather than typing one. */
   date: string;
   vehicleNumber: string;
+  /** Who the rent is owed to. Taken from the trip, never typed. */
+  transporterName: string;
   boxesDispatched: number;
   /** Already handed to the driver at departure. Total rent − this = deducted. */
   advancePaid: number;
-  /** True when another bill on this trip already recorded the rent. */
-  rentAlreadyRecorded: boolean;
   /** What is still unbilled on this trip, by particular. */
   remaining: { particular: string; box: number; kg: number }[];
 };
@@ -92,6 +98,7 @@ export function SaleForm({
   type,
   action,
   trips,
+  expenseCategories,
   nextNo,
   initial,
   submitLabel,
@@ -103,6 +110,8 @@ export function SaleForm({
   action: (prev: SaleFormState, formData: FormData) => Promise<SaleFormState>;
   /** Open trips for this company, centre and channel. Empty for LOCAL. */
   trips: TripOption[];
+  /** Live expense heads, for the costs this bill reveals. */
+  expenseCategories: ExpenseCategoryOption[];
   /** The number a LOCAL sale will take — a preview, confirmed on save. */
   nextNo?: string;
   initial?: SaleInit;
@@ -148,7 +157,9 @@ export function SaleForm({
   );
   const [totalBill, setTotalBill] = useState(initial?.totalBill ?? "");
   const [netBillRaw, setNetBillRaw] = useState(initial?.netBill ?? "");
-  const [rentDeducted, setRentDeducted] = useState(initial?.rentDeducted ?? "");
+  const [expenses, setExpenses] = useState<SaleExpenseRow[]>(
+    initial?.expenses?.length ? initial.expenses : []
+  );
   const [tripId, setTripId] = useState(initial?.deliveryNoteId ?? "");
   // Pre-filled rather than fixed: most bills are still 2%, but the clerk can
   // type whatever this one was agreed at. An existing sale keeps its own rate.
@@ -216,9 +227,15 @@ export function SaleForm({
   // actually paid. "Labour / other" is then the BALANCING item: the market
   // lists two or three sundry charges nobody itemises, and what is left after
   // the named deductions is exactly what those came to.
+  // What THIS market handed the driver: the rent entered in the expenses panel
+  // less the advance that already went at loading. Derived, never typed — one
+  // number does both jobs, so the cost and the deduction cannot disagree.
+  const rentTotal = rentOn(expenses, expenseCategories);
+  const rentDeducted = Math.max(0, rentTotal - (trip?.advancePaid ?? 0));
+
   const netBill = n(netBillRaw);
   const otherDeduction =
-    n(totalBill) - commission - n(reserve) - n(rentDeducted) - netBill;
+    n(totalBill) - commission - n(reserve) - rentDeducted - netBill;
 
   // The sale amount (what posts to the ledger) depends on the type.
   const amount =
@@ -291,14 +308,11 @@ export function SaleForm({
           <select
             id="deliveryNoteId"
             name="deliveryNoteId"
-            required
             value={tripId}
             onChange={(e) => setTripId(e.target.value)}
             className={inputCls}
           >
-            <option value="" disabled>
-              Choose the trip this bill came off…
-            </option>
+            <option value="">No trip — this bill stands on its own</option>
             {trips.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.date} · {t.billNo} · {t.vehicleNumber}
@@ -461,30 +475,6 @@ export function SaleForm({
             </div>
           </div>
 
-          {/* One more deduction off the market's paper, typed like the rest.
-              It used to be a "last stop" tick plus the trip's whole rent, which
-              asked the clerk to know the truck's route before they could enter
-              a bill. The COST is a Vehicle Rent expense voucher now; this
-              figure only tells the report that the money left through the
-              driver, so the day's revenue is not short by it. */}
-          <div>
-            <label htmlFor="rentDeducted" className={labelCls}>
-              Vehicle rent deducted (₹)
-            </label>
-            <input
-              id="rentDeducted"
-              name="rentDeducted"
-              inputMode="decimal"
-              value={rentDeducted}
-              onChange={(e) => setRentDeducted(e.target.value)}
-              className={inputCls + " num text-right max-w-xs"}
-            />
-            <p className="text-muted text-[12px] mt-1">
-              What this market handed the driver, if any. Enter the rent itself
-              under Expenses → Vehicle Rent.
-            </p>
-          </div>
-
           {/* The bill's working, read top to bottom the way the market's paper
               reads it. Labour / other is the BALANCING item — everything else
               is either typed or a percentage, and what is left between the
@@ -494,8 +484,8 @@ export function SaleForm({
             <Row label="Total bill" value={n(totalBill)} />
             <Row label="Less commission" value={-commission} />
             <Row label="Less reserve" value={-n(reserve)} />
-            {n(rentDeducted) > 0 && (
-              <Row label="Less vehicle rent" value={-n(rentDeducted)} />
+            {rentDeducted > 0 && (
+              <Row label="Less vehicle rent" value={-rentDeducted} />
             )}
             <div
               className={
@@ -520,11 +510,12 @@ export function SaleForm({
                 negative.
               </p>
             )}
-            {n(rentDeducted) > 0 && (
+            {rentDeducted > 0 && (
               <p className="text-muted text-[12px] mt-2">
-                Revenue recognised is {fmtMoney(netBill + n(rentDeducted))} —
-                the net plus the rent this market paid the driver on your
-                behalf. The rent itself is expensed once, on its own voucher.
+                Revenue recognised is {fmtMoney(netBill + rentDeducted)} — the
+                net plus the {fmtMoney(rentDeducted)} this market handed the
+                driver on your behalf. The rent itself is expensed once, at its
+                full {fmtMoney(rentTotal)}, to the trip&rsquo;s buying day.
               </p>
             )}
           </div>
@@ -546,12 +537,28 @@ export function SaleForm({
             </label>
             <input id="netWeight" name="netWeight" inputMode="decimal" defaultValue={initial?.netWeight ?? ""} className={inputCls + " num text-right"} />
           </div>
-          <div>
-            <label htmlFor="vehicleNo" className={labelCls}>
-              Vehicle No.
-            </label>
-            <input id="vehicleNo" name="vehicleNo" defaultValue={initial?.vehicleNo ?? ""} className={inputCls} />
-          </div>
+          {/* The trip already names the truck — the dropdown above prints it —
+              so asking again was asking the clerk to type something the app
+              knows. The field survives only for a bill with no trip. */}
+          {trip ? (
+            <div>
+              <span className={labelCls}>Vehicle No.</span>
+              <p className="text-[14px] font-medium py-2">
+                {trip.vehicleNumber}
+                <span className="text-muted font-normal">
+                  {" "}
+                  · {trip.transporterName}
+                </span>
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label htmlFor="vehicleNo" className={labelCls}>
+                Vehicle No.
+              </label>
+              <input id="vehicleNo" name="vehicleNo" defaultValue={initial?.vehicleNo ?? ""} className={inputCls} />
+            </div>
+          )}
           <div>
             <label htmlFor="placeOfLoading" className={labelCls}>
               Place of Loading
@@ -564,12 +571,28 @@ export function SaleForm({
       {/* ---- Factory ---- */}
       {type === "FACTORY" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="vehicleNo" className={labelCls}>
-              Vehicle No.
-            </label>
-            <input id="vehicleNo" name="vehicleNo" defaultValue={initial?.vehicleNo ?? ""} className={inputCls} />
-          </div>
+          {/* The trip already names the truck — the dropdown above prints it —
+              so asking again was asking the clerk to type something the app
+              knows. The field survives only for a bill with no trip. */}
+          {trip ? (
+            <div>
+              <span className={labelCls}>Vehicle No.</span>
+              <p className="text-[14px] font-medium py-2">
+                {trip.vehicleNumber}
+                <span className="text-muted font-normal">
+                  {" "}
+                  · {trip.transporterName}
+                </span>
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label htmlFor="vehicleNo" className={labelCls}>
+                Vehicle No.
+              </label>
+              <input id="vehicleNo" name="vehicleNo" defaultValue={initial?.vehicleNo ?? ""} className={inputCls} />
+            </div>
+          )}
           {/* Only on a bill that predates itemisation — see factoryLumpSum.
               New factory bills take their total from the rows below. */}
           {factoryLumpSum && (
@@ -751,6 +774,26 @@ export function SaleForm({
       {/* Free-form remark, on every voucher type. Read by no ledger, no
           balance and no report — it is what the entering clerk wanted the next
           person to know, and it prints on the document. */}
+      {/* The costs this bill reveals. Placed here, after the money, because
+          that is the order the paper is read in: what they paid, then what it
+          cost to get it there. */}
+      <SaleExpenses
+        rows={expenses}
+        setRows={setExpenses}
+        categories={expenseCategories}
+        trip={
+          trip
+            ? {
+                billNo: trip.billNo,
+                date: trip.date,
+                vehicleNumber: trip.vehicleNumber,
+                transporterName: trip.transporterName,
+                advancePaid: trip.advancePaid,
+              }
+            : null
+        }
+      />
+
       <div>
         <label htmlFor="notes" className={labelCls}>
           Notes (optional)
