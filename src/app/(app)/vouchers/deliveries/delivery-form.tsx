@@ -1,9 +1,11 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import type { DeliveryFormState } from "./actions";
 import { businessToday } from "@/lib/format";
+import type { PackType } from "@/generated/prisma/enums";
+import { PACK_LABELS, PACK_TYPES } from "@/lib/pack";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
@@ -15,11 +17,12 @@ const labelCls =
   "block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1";
 
 export type DeliveryLineInit = {
+  /** Box, big box or loose — see PackType. */
+  pack: PackType;
   particulars: string;
-  kg: string;
+  /** The weight of ONE box. Loose rows carry the whole weight here. */
+  kgPerBox: string;
   box: string;
-  bigBox: string;
-  loose: string;
   pcs: string;
 };
 
@@ -38,11 +41,10 @@ export type DeliveryInit = {
 };
 
 const BLANK_LINE: DeliveryLineInit = {
+  pack: "BOX",
   particulars: "",
-  kg: "",
+  kgPerBox: "",
   box: "",
-  bigBox: "",
-  loose: "",
   pcs: "",
 };
 
@@ -90,28 +92,28 @@ export function DeliveryForm({
   // Controlled: the advance field exists only on a market trip, because on
   const today = businessToday();
 
-  // The line's TOTAL weight, as typed. At dispatch the merchant weighs the
-  // consignment, not a sample box, so the total is what is actually known —
-  // and the per-box average is what gets worked out from it.
-  const rowKg = (l: DeliveryLineInit) => num(l.kg);
-  const rowKgPerBox = (l: DeliveryLineInit) => {
-    const boxes = num(l.box);
-    return boxes > 0 ? num(l.kg) / boxes : 0;
+  // The crates on a line — none at all when it is loose, which is why a loose
+  // row cannot be counted as zero crates and quietly balance.
+  const rowBox = (l: DeliveryLineInit) =>
+    l.pack === "LOOSE" ? 0 : num(l.box);
+
+  // The line's weight, worked out from what the merchant actually knows at
+  // loading: what ONE box weighs, times how many went. A loose row has no boxes
+  // to multiply, so its weight counts once.
+  const rowTotalKg = (l: DeliveryLineInit) => {
+    const boxes = rowBox(l);
+    return boxes > 0 ? num(l.kgPerBox) * boxes : num(l.kgPerBox);
   };
 
-  const totals = useMemo(
-    () =>
-      lines.reduce(
-        (acc, l) => ({
-          totalKg: acc.totalKg + rowKg(l),
-          box: acc.box + num(l.box),
-          bigBox: acc.bigBox + num(l.bigBox),
-          loose: acc.loose + num(l.loose),
-          pcs: acc.pcs + num(l.pcs),
-        }),
-        { totalKg: 0, box: 0, bigBox: 0, loose: 0, pcs: 0 }
-      ),
-    [lines]
+  // Summing a handful of rows costs nothing, and hand-memoising it only earned
+  // a stale-dependency warning. The compiler memoises it better than the hint.
+  const totals = lines.reduce(
+    (acc, l) => ({
+      totalKg: acc.totalKg + rowTotalKg(l),
+      box: acc.box + rowBox(l),
+      pcs: acc.pcs + num(l.pcs),
+    }),
+    { totalKg: 0, box: 0, pcs: 0 }
   );
 
   const setLine = (i: number, patch: Partial<DeliveryLineInit>) =>
@@ -259,12 +261,11 @@ export function DeliveryForm({
           <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr className="text-muted text-[12px] uppercase tracking-wide">
+                <th className="text-left font-semibold px-2 py-2 w-28">Pack</th>
                 <th className="text-left font-semibold px-3 py-2">Particulars</th>
-                <th className="text-right font-semibold px-2 py-2 w-24">Total Kg</th>
                 <th className="text-right font-semibold px-2 py-2 w-20">Box</th>
                 <th className="text-right font-semibold px-2 py-2 w-24">Kg / Box</th>
-                <th className="text-right font-semibold px-2 py-2 w-24">Big Box</th>
-                <th className="text-right font-semibold px-2 py-2 w-20">Loose</th>
+                <th className="text-right font-semibold px-2 py-2 w-24">Total Kg</th>
                 <th className="text-right font-semibold px-2 py-2 w-20">Pcs</th>
                 <th className="w-8"></th>
               </tr>
@@ -272,6 +273,28 @@ export function DeliveryForm({
             <tbody>
               {lines.map((l, i) => (
                 <tr key={i} className="border-t border-line">
+                  <td className="px-1 py-1">
+                    <select
+                      name="pack"
+                      value={l.pack}
+                      onChange={(e) =>
+                        setLine(i, {
+                          pack: e.target.value as PackType,
+                          // Loose fish goes straight onto the truck bed, so a
+                          // box count left over from the previous choice would
+                          // be counted as crates that never existed.
+                          box: e.target.value === "LOOSE" ? "" : l.box,
+                        })
+                      }
+                      className={inputCls}
+                    >
+                      {PACK_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {PACK_LABELS[t]}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="px-2 py-1">
                     <input
                       name="particulars"
@@ -282,46 +305,35 @@ export function DeliveryForm({
                     />
                   </td>
                   <td className="px-1 py-1">
+                    {l.pack === "LOOSE" ? (
+                      <span className="block text-center text-muted text-[12px] py-2">
+                        —
+                      </span>
+                    ) : (
+                      <input
+                        name="box"
+                        inputMode="numeric"
+                        value={l.box}
+                        onChange={(e) => setLine(i, { box: e.target.value })}
+                        className={cell}
+                      />
+                    )}
+                  </td>
+                  <td className="px-1 py-1">
                     <input
-                      name="kg"
+                      name="kgPerBox"
                       inputMode="decimal"
-                      value={l.kg}
-                      onChange={(e) => setLine(i, { kg: e.target.value })}
+                      value={l.kgPerBox}
+                      onChange={(e) => setLine(i, { kgPerBox: e.target.value })}
                       className={cell}
                     />
                   </td>
-                  <td className="px-1 py-1">
-                    <input
-                      name="box"
-                      inputMode="numeric"
-                      value={l.box}
-                      onChange={(e) => setLine(i, { box: e.target.value })}
-                      className={cell}
-                    />
-                  </td>
-                  {/* Derived from the two cells beside it — total ÷ boxes —
-                      so the average can never be typed out of agreement with
-                      the weight actually dispatched. */}
+                  {/* Derived: the per-box weight times the boxes. At loading the
+                      merchant knows what one box weighs, so that is what is
+                      typed and the consignment total follows. A loose row has no
+                      boxes to multiply, so its weight counts once. */}
                   <td className="px-2 py-1 num text-right text-muted">
-                    {rowKgPerBox(l) ? rowKgPerBox(l).toFixed(2) : ""}
-                  </td>
-                  <td className="px-1 py-1">
-                    <input
-                      name="bigBox"
-                      inputMode="numeric"
-                      value={l.bigBox}
-                      onChange={(e) => setLine(i, { bigBox: e.target.value })}
-                      className={cell}
-                    />
-                  </td>
-                  <td className="px-1 py-1">
-                    <input
-                      name="loose"
-                      inputMode="numeric"
-                      value={l.loose}
-                      onChange={(e) => setLine(i, { loose: e.target.value })}
-                      className={cell}
-                    />
+                    {rowTotalKg(l) ? rowTotalKg(l).toFixed(3) : ""}
                   </td>
                   <td className="px-1 py-1">
                     <input
@@ -355,9 +367,10 @@ export function DeliveryForm({
                   Total
                 </td>
                 <td className="px-2 py-2 num text-right">{totals.box || ""}</td>
-                <td className="px-2 py-2 num text-right">{totals.totalKg || ""}</td>
-                <td className="px-2 py-2 num text-right">{totals.bigBox || ""}</td>
-                <td className="px-2 py-2 num text-right">{totals.loose || ""}</td>
+                <td />
+                <td className="px-2 py-2 num text-right">
+                  {totals.totalKg ? totals.totalKg.toFixed(3) : ""}
+                </td>
                 <td className="px-2 py-2 num text-right">{totals.pcs || ""}</td>
                 <td></td>
               </tr>

@@ -13,8 +13,6 @@ export type DeliveryLine = {
    */
   kg: Prisma.Decimal | number | string;
   box: number;
-  bigBox: number;
-  loose: number;
   pcs: number;
 };
 
@@ -22,8 +20,6 @@ export type DeliveryTotals = {
   /** Total weight dispatched — the sum of the line totals. */
   totalKg: Prisma.Decimal;
   box: number;
-  bigBox: number;
-  loose: number;
   pcs: number;
   /** totalKg / box, for the whole note. Zero when nothing is boxed. */
   avgKgPerBox: Prisma.Decimal;
@@ -61,11 +57,9 @@ export function sumDeliveryLines(lines: DeliveryLine[]): DeliveryTotals {
     (acc, l) => ({
       totalKg: acc.totalKg.add(new Prisma.Decimal(l.kg)),
       box: acc.box + l.box,
-      bigBox: acc.bigBox + l.bigBox,
-      loose: acc.loose + l.loose,
       pcs: acc.pcs + l.pcs,
     }),
-    { totalKg: ZERO, box: 0, bigBox: 0, loose: 0, pcs: 0 }
+    { totalKg: ZERO, box: 0, pcs: 0 }
   );
 
   return {

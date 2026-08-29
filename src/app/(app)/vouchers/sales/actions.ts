@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
-import type { SaleType } from "@/generated/prisma/enums";
+import type { PackType, SaleType } from "@/generated/prisma/enums";
+import { PACK_TYPES } from "@/lib/pack";
 import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
@@ -44,6 +45,7 @@ const clean = (v: FormDataEntryValue | null) =>
   String(v ?? "").trim().replace(/\s+/g, " ");
 
 type ParsedLine = {
+  pack: PackType;
   particular: string;
   box: number | null;
   qtyKg: Prisma.Decimal;
@@ -458,6 +460,7 @@ function parseLines(
    */
   boxesOnly = false
 ): { error: string } | { lines: ParsedLine[] } {
+  const packs = formData.getAll("pack").map(String);
   const particulars = formData.getAll("particular").map(String);
   const qtys = formData.getAll("qtyKg").map(String);
   const rates = formData.getAll("ratePerKg").map(String);
@@ -471,6 +474,9 @@ function parseLines(
     const rateRaw = (rates[i] ?? "").trim();
     const boxRaw = (boxes[i] ?? "").trim();
     const countRaw = (counts[i] ?? "").trim();
+    const pack = PACK_TYPES.includes(packs[i] as PackType)
+      ? (packs[i] as PackType)
+      : "BOX";
 
     if (!p && !qtyRaw && !rateRaw && !boxRaw && !countRaw) continue;
     if (!p) return { error: "Every line needs a particular." };
@@ -486,6 +492,9 @@ function parseLines(
     if (rateRaw && !DECIMAL2.test(rateRaw))
       return { error: `Rate for “${p}” must be a number.` };
 
+    // Loose fish never went into a crate, so it carries none however many the
+    // form happens to have sent — and it must stay out of every box tally
+    // rather than count as zero and appear to balance.
     let box: number | null = null;
     let count: number | null = null;
     if (withBoxCount) {
@@ -508,8 +517,9 @@ function parseLines(
     // shown from these two numbers rather than being the input to them.
     const totalKg = qtyKg;
     lines.push({
+      pack,
       particular: p,
-      box,
+      box: pack === "LOOSE" ? null : box,
       qtyKg,
       ratePerKg,
       count,
@@ -1010,6 +1020,7 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
     returnNote: d.returnNote,
     lines: {
       create: d.lines.map((l) => ({
+        pack: l.pack,
         particular: l.particular,
         box: l.box,
         qtyKg: l.qtyKg,

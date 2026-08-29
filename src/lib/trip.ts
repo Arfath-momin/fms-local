@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import type { TripChannel, TripStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
+import type { PackType } from "@/generated/prisma/enums";
 
 export const TRIP_CHANNEL_LABELS: Record<TripChannel, string> = {
   MARKET: "Market",
@@ -212,13 +213,13 @@ export async function openTrips(
       vehicle: {
         select: { number: true, transporter: { select: { name: true } } },
       },
-      lines: { select: { particulars: true, kg: true, box: true } },
+      lines: { select: { pack: true, particulars: true, kg: true, box: true } },
       sales: {
         select: {
           id: true,
           amount: true,
           rentDeducted: true,
-          lines: { select: { particular: true, qtyKg: true, box: true } },
+          lines: { select: { pack: true, particular: true, qtyKg: true, box: true } },
         },
       },
     },
@@ -255,30 +256,51 @@ export async function openTrips(
  */
 function remainingByParticular(
   trip: {
-    lines: { particulars: string; kg: Prisma.Decimal; box: number }[];
+    lines: {
+      pack: PackType;
+      particulars: string;
+      kg: Prisma.Decimal;
+      box: number;
+    }[];
     sales: {
       id: string;
-      lines: { particular: string; qtyKg: Prisma.Decimal; box: number | null }[];
+      lines: {
+        pack: PackType;
+        particular: string;
+        qtyKg: Prisma.Decimal;
+        box: number | null;
+      }[];
     }[];
   },
   excludeSaleId?: string | null
 ) {
-  const out = new Map<string, { particular: string; box: number; kg: Prisma.Decimal }>();
+  const out = new Map<
+    string,
+    { pack: PackType; particular: string; box: number; kg: Prisma.Decimal }
+  >();
   for (const l of trip.lines) {
-    const key = l.particulars.trim().toLowerCase();
+    // Keyed by particular AND pack. The same fish sent loose and in boxes on
+    // one note is two things to account for, and merging them would put crates
+    // against a consignment that never had any.
+    const key = `${l.particulars.trim().toLowerCase()}|${l.pack}`;
     const hit = out.get(key);
     if (hit) {
       hit.box += l.box;
       hit.kg = hit.kg.add(l.kg);
     } else {
-      out.set(key, { particular: l.particulars, box: l.box, kg: l.kg });
+      out.set(key, {
+        pack: l.pack,
+        particular: l.particulars,
+        box: l.box,
+        kg: l.kg,
+      });
     }
   }
 
   for (const sale of trip.sales) {
     if (excludeSaleId && sale.id === excludeSaleId) continue;
     for (const l of sale.lines) {
-      const key = l.particular.trim().toLowerCase();
+      const key = `${l.particular.trim().toLowerCase()}|${l.pack}`;
       const hit = out.get(key);
       if (!hit) continue;
       hit.box -= l.box ?? 0;
@@ -290,6 +312,7 @@ function remainingByParticular(
     // A particular already fully billed drops off rather than showing zero.
     .filter((r) => r.box > 0 || r.kg.gt(0))
     .map((r) => ({
+      pack: r.pack,
       particular: r.particular,
       box: Math.max(0, r.box),
       kg: r.kg.gt(0) ? r.kg.toNumber() : 0,

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { getActiveScope } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
+import { PACK_LABELS } from "@/lib/pack";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { getAttachments } from "@/lib/attachments";
 import { uploadAttachment } from "../../../attachments/actions";
@@ -163,6 +164,7 @@ export default async function SalePage({
             <thead>
               {/* The same five columns the form takes, on every channel. */}
               <tr>
+                <th>Pack</th>
                 <th className="num-col">Box</th>
                 <th>Particular</th>
                 <th className="num-col">Kgs</th>
@@ -173,6 +175,7 @@ export default async function SalePage({
             <tbody>
               {sale.lines.map((l) => (
                 <tr key={l.id}>
+                  <td>{PACK_LABELS[l.pack]}</td>
                   <td className="num-col num">{l.box ?? "—"}</td>
                   <td className="font-medium">{l.particular}</td>
                   <td className="num-col num">{l.qtyKg.toString()}</td>

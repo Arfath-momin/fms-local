@@ -150,8 +150,6 @@ export default async function DeliveryNotePrintPage({
               <th>Particulars</th>
               <th className="r">Kg / box</th>
               <th className="r">Box</th>
-              <th className="r">Big Box</th>
-              <th className="r">Loose</th>
               <th className="r">Pcs</th>
               <th className="r">Total Kg</th>
             </tr>
@@ -163,8 +161,6 @@ export default async function DeliveryNotePrintPage({
                 <td className="font-medium">{l.particulars}</td>
                 <td className="r num">{fmtKg(l.kg)}</td>
                 <td className="r num">{l.box || "—"}</td>
-                <td className="r num">{l.bigBox || "—"}</td>
-                <td className="r num">{l.loose || "—"}</td>
                 <td className="r num">{l.pcs || "—"}</td>
                 {/* kg is the weight of ONE box, so the row's real weight is
                     kg × boxes — see lineTotalKg. Printing the per-box figure as
@@ -179,8 +175,6 @@ export default async function DeliveryNotePrintPage({
                 Total
               </td>
               <td className="r num">{totals.box || "—"}</td>
-              <td className="r num">{totals.bigBox || "—"}</td>
-              <td className="r num">{totals.loose || "—"}</td>
               <td className="r num">{totals.pcs || "—"}</td>
               <td className="r num">{fmtKg(totals.totalKg)}</td>
             </tr>

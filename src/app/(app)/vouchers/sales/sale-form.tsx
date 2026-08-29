@@ -4,6 +4,8 @@ import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { SaleType } from "@/generated/prisma/enums";
 import { businessToday, fmtKg, fmtMoney } from "@/lib/format";
+import type { PackType } from "@/generated/prisma/enums";
+import { PACK_LABELS, PACK_TYPES } from "@/lib/pack";
 import type { SaleFormState } from "./actions";
 import type { FormScope } from "@/lib/scope";
 import {
@@ -34,6 +36,8 @@ const cell =
   "w-full border border-line-strong bg-surface px-2 py-1 text-sm outline-none focus:border-accent num text-right";
 
 export type SaleLineInit = {
+  /** Box, big box or loose — see PackType. */
+  pack: PackType;
   particular: string;
   box: string;
   qtyKg: string;
@@ -72,6 +76,7 @@ export type SaleInit = {
 };
 
 const BLANK_LINE: SaleLineInit = {
+  pack: "BOX",
   particular: "",
   box: "",
   qtyKg: "",
@@ -94,7 +99,7 @@ export type TripOption = {
   /** Already handed to the driver at departure. Total rent − this = deducted. */
   advancePaid: number;
   /** What is still unbilled on this trip, by particular. */
-  remaining: { particular: string; box: number; kg: number }[];
+  remaining: { pack: PackType; particular: string; box: number; kg: number }[];
 };
 
 export function SaleForm({
@@ -225,6 +230,7 @@ export function SaleForm({
     if (!from || from.remaining.length === 0) return;
     setLines(
       from.remaining.map((r) => ({
+        pack: r.pack,
         particular: r.particular,
         box: r.box ? String(r.box) : "",
         qtyKg: r.kg ? String(r.kg) : "",
@@ -278,7 +284,7 @@ export function SaleForm({
   }, [lines, trip]);
 
   const boxTotal = useMemo(
-    () => lines.reduce((s, l) => s + n(l.box), 0),
+    () => lines.reduce((s, l) => s + (l.pack === "LOOSE" ? 0 : n(l.box)), 0),
     [lines]
   );
   const kgTotal = useMemo(() => lines.reduce((s, l) => s + rowKg(l), 0), [lines]);
@@ -744,6 +750,7 @@ export function SaleForm({
             <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="text-muted text-[12px] uppercase tracking-wide">
+                  <th className="text-left font-semibold px-2 py-2 w-28">Pack</th>
                   <th className="text-right font-semibold px-2 py-2 w-16">Box</th>
                   <th className="text-left font-semibold px-3 py-2">Particular</th>
                   {/* A market line carries no weight or rate: the money on a
@@ -768,7 +775,35 @@ export function SaleForm({
                   return (
                     <tr key={i} className="border-t border-line">
                       <td className="px-1 py-1">
-                        <input name="box" inputMode="numeric" value={l.box} onChange={(e) => setLine(i, { box: e.target.value })} className={cell} />
+                        <select
+                          name="pack"
+                          value={l.pack}
+                          onChange={(e) =>
+                            setLine(i, {
+                              pack: e.target.value as PackType,
+                              // Loose fish never went into a crate, so a count
+                              // left from the previous choice would be crates
+                              // that do not exist.
+                              box: e.target.value === "LOOSE" ? "" : l.box,
+                            })
+                          }
+                          className={inputCls}
+                        >
+                          {PACK_TYPES.map((t) => (
+                            <option key={t} value={t}>
+                              {PACK_LABELS[t]}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-1 py-1">
+                        {l.pack === "LOOSE" ? (
+                          <span className="block text-center text-muted text-[12px] py-2">
+                            —
+                          </span>
+                        ) : (
+                          <input name="box" inputMode="numeric" value={l.box} onChange={(e) => setLine(i, { box: e.target.value })} className={cell} />
+                        )}
                       </td>
                       <td className="px-2 py-1">
                         <input name="particular" value={l.particular} onChange={(e) => setLine(i, { particular: e.target.value })} className={inputCls} placeholder="e.g. Prawn" />
@@ -802,6 +837,7 @@ export function SaleForm({
                     colSpan arithmetic — the columns moved once and the totals
                     silently landed under the wrong headings. */}
                 <tr className="border-t border-line-strong font-semibold">
+                  <td />
                   <td className="px-2 py-2 num text-right">{boxTotal || ""}</td>
                   <td className="px-3 py-2 text-right">Total</td>
                   {type !== "MARKET" && (

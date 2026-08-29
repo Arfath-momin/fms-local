@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
+import type { PackType } from "@/generated/prisma/enums";
+import { PACK_TYPES } from "@/lib/pack";
 import { prisma } from "@/lib/db";
 import { nextDocumentNo, SERIES_PREFIX } from "@/lib/document-series";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
@@ -39,11 +41,11 @@ const DECIMAL3 = /^\d+(\.\d{1,3})?$/;
 const INT = /^\d+$/;
 
 type ParsedLine = {
+  pack: PackType;
   particulars: string;
+  /** The line's TOTAL weight, worked out from the per-box figure typed. */
   kg: Prisma.Decimal;
   box: number;
-  bigBox: number;
-  loose: number;
   pcs: number;
 };
 
@@ -133,11 +135,10 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const badFile = validateImageFile(file);
   if (badFile) return { error: badFile };
 
+  const packs = formData.getAll("pack").map(String);
   const particulars = formData.getAll("particulars").map(String);
-  const kgs = formData.getAll("kg").map(String);
+  const kgsPerBox = formData.getAll("kgPerBox").map(String);
   const boxes = formData.getAll("box").map(String);
-  const bigBoxes = formData.getAll("bigBox").map(String);
-  const looses = formData.getAll("loose").map(String);
   const pcses = formData.getAll("pcs").map(String);
 
   const intField = (raw: string, label: string): number | { error: string } => {
@@ -150,32 +151,39 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   const lines: ParsedLine[] = [];
   for (let i = 0; i < particulars.length; i++) {
     const p = particulars[i].trim().replace(/\s+/g, " ");
-    const kgRaw = (kgs[i] ?? "").trim();
+    const kgRaw = (kgsPerBox[i] ?? "").trim();
     const boxRaw = (boxes[i] ?? "").trim();
-    const bigRaw = (bigBoxes[i] ?? "").trim();
-    const looseRaw = (looses[i] ?? "").trim();
     const pcsRaw = (pcses[i] ?? "").trim();
+    const pack = PACK_TYPES.includes(packs[i] as PackType)
+      ? (packs[i] as PackType)
+      : "BOX";
 
     // Skip fully-blank rows.
-    if (!p && !kgRaw && !boxRaw && !bigRaw && !looseRaw && !pcsRaw) continue;
+    if (!p && !kgRaw && !boxRaw && !pcsRaw) continue;
     if (!p) return { error: "Every line needs a particular." };
 
-    let kg = new Prisma.Decimal(0);
+    let kgPerBox = new Prisma.Decimal(0);
     if (kgRaw) {
       if (!DECIMAL3.test(kgRaw))
-        return { error: `Kg for “${p}” must be a number.` };
-      kg = new Prisma.Decimal(kgRaw);
+        return { error: `Kg / Box for “${p}” must be a number.` };
+      kgPerBox = new Prisma.Decimal(kgRaw);
     }
-    const box = intField(boxRaw, `Box for “${p}”`);
-    if (typeof box === "object") return box;
-    const bigBox = intField(bigRaw, `Big Box for “${p}”`);
-    if (typeof bigBox === "object") return bigBox;
-    const loose = intField(looseRaw, `Loose for “${p}”`);
-    if (typeof loose === "object") return loose;
+
+    const parsedBox = intField(boxRaw, `Box for “${p}”`);
+    if (typeof parsedBox === "object") return parsedBox;
+    // Loose fish goes straight onto the truck bed. There is no crate to send
+    // and none to come back, so a count here would be crates that never were.
+    const box = pack === "LOOSE" ? 0 : parsedBox;
+
     const pcs = intField(pcsRaw, `Pcs for “${p}”`);
     if (typeof pcs === "object") return pcs;
 
-    lines.push({ particulars: p, kg, box, bigBox, loose, pcs });
+    // Stored as the line's own weight, derived from what the merchant knows at
+    // loading: what ONE box weighs, times how many went. A loose row has no
+    // boxes to multiply by, so its weight counts once.
+    const kg = box > 0 ? kgPerBox.mul(box) : kgPerBox;
+
+    lines.push({ pack, particulars: p, kg, box, pcs });
   }
 
   if (lines.length === 0) return { error: "Add at least one line item." };
@@ -255,11 +263,10 @@ export async function createDelivery(
           createdById: session.userId,
           lines: {
             create: d.lines.map((l) => ({
+              pack: l.pack,
               particulars: l.particulars,
               kg: l.kg,
               box: l.box,
-              bigBox: l.bigBox,
-              loose: l.loose,
               pcs: l.pcs,
             })),
           },
@@ -411,11 +418,10 @@ export async function updateDelivery(
           updatedAt: new Date(),
           lines: {
             create: d.lines.map((l) => ({
+              pack: l.pack,
               particulars: l.particulars,
               kg: l.kg,
               box: l.box,
-              bigBox: l.bigBox,
-              loose: l.loose,
               pcs: l.pcs,
             })),
           },

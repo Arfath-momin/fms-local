@@ -477,6 +477,19 @@ model Expense {
 
 // ---------- Delivery Notes (record only) ----------
 
+/// How a line is packed, and therefore whether it is trackable as crates.
+///
+/// The merchant's own three words. A BOX is the ordinary crate. A BIG_BOX holds
+/// the heavier fish — two kilos apiece — and is still a crate that goes out and
+/// comes back. LOOSE is fish too big to box at all: it goes straight onto the
+/// truck bed, so there is no crate to send, none to return, and it must stay
+/// out of every box tally or the day will never balance.
+enum PackType {
+  BOX
+  BIG_BOX
+  LOOSE
+}
+
 // A delivery note is a pure dispatch record — no ledger, no settlement, no
 // money movement. Header fields + line items + an optional bill image. Column
 // totals (box / big box / loose / pcs) are summed on the fly for display; the
@@ -575,6 +588,10 @@ model DeliveryNoteLine {
   id             String  @id @default(uuid())
   deliveryNoteId String  @map("delivery_note_id")
   particulars    String
+  /// How this line is packed — see PackType. The note and the bills it feeds
+  /// have to agree about this, or a loose consignment counts as crates on one
+  /// document and not the other.
+  pack           PackType @default(BOX)
   kg             Decimal @default(0) @db.Decimal(12, 3)
   box            Int     @default(0)
   bigBox         Int     @default(0) @map("big_box")
@@ -747,9 +764,10 @@ model SaleLine {
   id         String  @id @default(uuid())
   saleId     String  @map("sale_id")
   particular String
-  /// Box count. Fish Mill and MARKET both use it — a market bill is counted in
-  /// boxes, and that count is what the trip reconciliation tallies against the
-  /// boxes dispatched (spec §3.3).
+  /// How this line is packed. LOOSE rows carry no crates, so they are left out
+  /// of every box tally rather than counted as zero and quietly balancing.
+  pack       PackType @default(BOX)
+  /// Crate count. Zero on a LOOSE row, which has none by definition.
   box        Int?
   /// On a FACTORY line this is the ACCEPTED weight, not the weight sent.
   /// Factories reweigh on arrival and pay for less; the gap against the trip's

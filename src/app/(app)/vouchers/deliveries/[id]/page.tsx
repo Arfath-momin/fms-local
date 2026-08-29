@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getActiveScope } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
-import { lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
+import { lineKgPerBox, lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
+import { PACK_LABELS } from "@/lib/pack";
 import {
   tallyTrip,
   TRIP_CHANNEL_LABELS,
@@ -246,44 +247,46 @@ export default async function DeliveryNotePage({
         <table className="ledger-table">
           <thead>
             <tr>
+              <th>Pack</th>
               <th>Particulars</th>
-              <th className="num-col">Kg / Box</th>
               <th className="num-col">Box</th>
+              <th className="num-col">Kg / box</th>
               <th className="num-col">Total Kg</th>
-              <th className="num-col">Big Box</th>
-              <th className="num-col">Loose</th>
               <th className="num-col">Pcs</th>
             </tr>
           </thead>
           <tbody>
             {note.lines.map((l) => (
               <tr key={l.id}>
+                <td>{PACK_LABELS[l.pack]}</td>
                 <td className="font-medium">{l.particulars}</td>
-                <td className="num-col num">{l.kg.toString()}</td>
-                <td className="num-col num">{l.box}</td>
+                <td className="num-col num">{l.box || "—"}</td>
+                {/* The per-box figure that was typed, worked back out of the
+                    weight stored against the boxes it was spread over. */}
+                <td className="num-col num text-muted">
+                  {lineKgPerBox(l).toString()}
+                </td>
                 <td className="num-col num font-semibold">
                   {lineTotalKg(l).toString()}
                 </td>
-                <td className="num-col num">{l.bigBox}</td>
-                <td className="num-col num">{l.loose}</td>
                 <td className="num-col num">{l.pcs}</td>
               </tr>
             ))}
             <tr className="border-t border-line-strong font-semibold">
+              <td />
               <td className="text-right">Total</td>
-              <td className="num-col num"></td>
               <td className="num-col num">{totals.box}</td>
+              <td className="num-col num" />
               <td className="num-col num">{totals.totalKg.toString()}</td>
-              <td className="num-col num">{totals.bigBox}</td>
-              <td className="num-col num">{totals.loose}</td>
               <td className="num-col num">{totals.pcs}</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p className="text-muted text-[12px] mt-2">
-        Kg is the weight of one box; Total Kg is that multiplied by the number of
-        boxes. A row shipped loose, with no boxes, counts its kg once.
+        Kg / box is what one box weighs; Total Kg is that multiplied by the
+        boxes. A LOOSE row is fish too big to box — it goes straight onto the
+        truck, carries no crates, and stays out of every box tally.
       </p>
 
       <AttachmentPanel

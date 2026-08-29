@@ -76,8 +76,6 @@ export default async function DeliveriesPage({
                 <th>Vehicle</th>
                 <th className="num-col">Box</th>
                 <th className="num-col">Total Kg</th>
-                <th className="num-col">Big Box</th>
-                <th className="num-col">Loose</th>
                 <th className="num-col">Pcs</th>
                 <th className="num-col">Advance</th>
                 <th className="num-col">Rent</th>
@@ -97,8 +95,6 @@ export default async function DeliveriesPage({
                     <td className="num-col num">
                       {t.totalKg.isZero() ? "—" : t.totalKg.toString()}
                     </td>
-                    <td className="num-col num">{t.bigBox || "—"}</td>
-                    <td className="num-col num">{t.loose || "—"}</td>
                     {/* The advance handed to the driver at departure, and the
                         trip's total rent once a bill has reported it. Without
                         these on the list, an advance could only be found by

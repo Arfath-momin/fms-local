@@ -147,6 +147,7 @@ export default async function EditSalePage({
           placeOfLoading: sale.placeOfLoading ?? "",
           returnNote: sale.returnNote ?? "",
           lines: sale.lines.map((l) => ({
+            pack: l.pack,
             particular: l.particular,
             box: l.box != null ? String(l.box) : "",
             qtyKg: l.qtyKg.toString(),

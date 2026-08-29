@@ -73,12 +73,17 @@ export default async function EditDeliveryPage({
           driverName: note.driverName ?? "",
           mobileNo: note.mobileNo ?? "",
           notes: note.notes ?? "",
+          // `kg` is stored as the line's TOTAL weight; the form now takes the
+          // per-box figure, so it is divided back out on the way in. A loose
+          // row has no boxes to divide by and carries its weight whole.
           lines: note.lines.map((l) => ({
+            pack: l.pack,
             particulars: l.particulars,
-            kg: l.kg.toString(),
+            kgPerBox:
+              l.pack !== "LOOSE" && l.box > 0
+                ? (Number(l.kg) / l.box).toFixed(3)
+                : l.kg.toString(),
             box: l.box ? String(l.box) : "",
-            bigBox: l.bigBox ? String(l.bigBox) : "",
-            loose: l.loose ? String(l.loose) : "",
             pcs: l.pcs ? String(l.pcs) : "",
           })),
         }}
