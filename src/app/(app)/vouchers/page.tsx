@@ -58,13 +58,24 @@ export default function VouchersPage() {
           </div>
         </Link>
         <Link
+          href="/vouchers/crates/new"
+          className="block px-4 py-3 hover:bg-background border-b border-line"
+        >
+          <div className="font-semibold text-[14px]">Crates</div>
+          <div className="text-muted text-[12px]">
+            Empty boxes out to a market and back again. Counted by hand against
+            a trip — a crate can come back on a different load, or not at all.
+          </div>
+        </Link>
+        <Link
           href="/vouchers/reserve-collections/new"
           className="block px-4 py-3 hover:bg-background border-b border-line"
         >
           <div className="font-semibold text-[14px]">Collect Reserve</div>
           <div className="text-muted text-[12px]">
-            Money a market party withheld and is now paying back. Clears what
-            they hold; recognised as income on the day it arrived.
+            Money a market party withheld — reserve or cutting — and is now
+            paying back. Clears what they hold; recognised as income on the day
+            it arrived.
           </div>
         </Link>
         <Link

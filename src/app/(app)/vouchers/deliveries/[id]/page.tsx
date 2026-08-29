@@ -142,7 +142,7 @@ export default async function DeliveryNotePage({
           <h2 className="heading text-[15px] font-semibold">
             Reconciliation{" "}
             <Link
-              href="/ledgers/boxes"
+              href="/ledgers/crates"
               className="text-accent text-[12px] font-normal underline underline-offset-2"
             >
               box statement

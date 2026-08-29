@@ -9,14 +9,22 @@ import { fmtDate } from "@/lib/format";
 import { parseListWindow, type SearchParams } from "@/lib/paging";
 import { DateWindow } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
+import { BoxTabs } from "./tabs";
 
 /**
- * Where every box went.
+ * Where every box of FISH went, on each trip.
  *
  * A hundred boxes leave on a truck, three markets unload them, and it has to
  * come back to nothing. The reconciliation panel on a trip answers "does it add
  * up"; this answers "where did they go" across every trip at once — the
  * question when a market claims it received less than it was billed for.
+ *
+ * A different question from the CRATE account next door, and the two are worth
+ * keeping apart. This one is derived entirely from the bills and covers one
+ * trip at a time. The crate account is what each market is still holding in
+ * empty boxes, across every trip, counted by hand — because a crate can come
+ * back on a different load, come back broken, or not come back, and none of
+ * that reaches a bill.
  *
  * Nothing here is stored. A drop is a sale's box lines against the trip it came
  * off, so the statement cannot drift from the bills it is built from.
@@ -48,11 +56,13 @@ export default async function BoxLedgerPage({
 
   return (
     <div className="max-w-3xl">
-      <h1 className="heading text-xl font-semibold mt-1">Box Statement</h1>
+      <h1 className="heading text-xl font-semibold mt-1">Boxes by trip</h1>
       <p className="text-muted text-[13px] mb-4">
-        {company.name} · {centre.name} · what went out on each truck, and who
+        {company.name} · {centre.name} · what went out on each truck and who
         unloaded it. Every load should come back to nothing.
       </p>
+
+      <BoxTabs active="trips" />
 
       <DateWindow basePath="/ledgers/boxes" window={listWindow} />
 

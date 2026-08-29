@@ -37,14 +37,14 @@ const ITEMS = [
     desc: "Every buyer and what they owe us, grouped by sale category.",
   },
   {
-    href: "/ledgers/boxes",
+    href: "/ledgers/crates",
     label: "Box Statement",
-    desc: "What went out on each truck and who unloaded it — every load reconciled back to nothing.",
+    desc: "Your crates, on loan to the markets. What each one is still holding, with the trip, the vehicle and the line man on every row.",
   },
   {
     href: "/ledgers/reserve",
-    label: "Reserve",
-    desc: "What each market party withheld and still holds. Derived per party from their bills less what has been collected — never pooled.",
+    label: "Reserve & Cutting",
+    desc: "What each market party withheld and still holds, under either name. Derived per party from their bills less what has been collected — never pooled.",
   },
   // The old Commission & Reserve ledger was removed here (spec §3.7).
   //

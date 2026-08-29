@@ -48,6 +48,7 @@ const NAMES: Record<string, { plural: string; singular: string }> = {
   expenses: { plural: "Expenses", singular: "Expense" },
   payments: { plural: "Payments", singular: "Payment" },
   receipts: { plural: "Receipts", singular: "Receipt" },
+  crates: { plural: "Crates", singular: "Crate Entry" },
   "reserve-collections": {
     plural: "Reserve Collections",
     singular: "Reserve Collection",
@@ -59,7 +60,7 @@ const NAMES: Record<string, { plural: string; singular: string }> = {
     singular: "Purchase Party",
   },
   "day-book": { plural: "Day Book", singular: "Day Book" },
-  boxes: { plural: "Box Statement", singular: "Box Statement" },
+  boxes: { plural: "Boxes by Trip", singular: "Boxes by Trip" },
   outstanding: { plural: "Outstanding", singular: "Outstanding" },
   reserve: { plural: "Reserve", singular: "Reserve" },
   masters: { plural: "Masters", singular: "Master" },

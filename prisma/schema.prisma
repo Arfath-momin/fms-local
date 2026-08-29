@@ -53,6 +53,8 @@ model User {
   reviewsRequested     ReviewRequest[] @relation("ReviewRequestedBy")
   reviewsResolved      ReviewRequest[] @relation("ReviewResolvedBy")
   companies            UserCompany[]
+  crateEntriesCreated  CrateEntry[]    @relation("CrateEntryCreatedBy")
+  crateEntriesUpdated  CrateEntry[]    @relation("CrateEntryUpdatedBy")
 
   @@map("users")
 }
@@ -137,6 +139,7 @@ model Company {
   documentSeries     DocumentSeries[]
   expenseCategories  ExpenseCategory[]
   reserveCollections ReserveCollection[]
+  crateEntries       CrateEntry[]
 
   @@map("companies")
 }
@@ -168,6 +171,7 @@ model Centre {
   settlements        Settlement[]
   reviewRequests     ReviewRequest[]
   reserveCollections ReserveCollection[]
+  crateEntries       CrateEntry[]
 
   @@unique([companyId, name])
   @@map("centres")
@@ -252,6 +256,7 @@ model Party {
   settlements         Settlement[]
   vehicles            Vehicle[]           @relation("VehicleTransporter")
   reserveCollections  ReserveCollection[]
+  crateEntries        CrateEntry[]
 
   @@unique([name, type])
   @@map("parties")
@@ -587,14 +592,15 @@ model DeliveryNote {
   createdById String?   @map("created_by_id")
   updatedById String?   @map("updated_by_id")
 
-  company   Company            @relation(fields: [companyId], references: [id])
-  centre    Centre             @relation(fields: [centreId], references: [id])
-  vehicle   Vehicle            @relation(fields: [vehicleId], references: [id])
-  createdBy User?              @relation("DeliveryNoteCreatedBy", fields: [createdById], references: [id])
-  updatedBy User?              @relation("DeliveryNoteUpdatedBy", fields: [updatedById], references: [id])
-  lines     DeliveryNoteLine[]
-  sales     Sale[]
-  expenses  Expense[]
+  company      Company            @relation(fields: [companyId], references: [id])
+  centre       Centre             @relation(fields: [centreId], references: [id])
+  vehicle      Vehicle            @relation(fields: [vehicleId], references: [id])
+  createdBy    User?              @relation("DeliveryNoteCreatedBy", fields: [createdById], references: [id])
+  updatedBy    User?              @relation("DeliveryNoteUpdatedBy", fields: [updatedById], references: [id])
+  lines        DeliveryNoteLine[]
+  sales        Sale[]
+  expenses     Expense[]
+  crateEntries CrateEntry[]
 
   @@index([companyId, centreId, date])
   @@index([status])
@@ -885,6 +891,77 @@ model Settlement {
 }
 
 // ---------- Ledger ----------
+
+/// One line of a market party's EMPTY CRATE account.
+///
+/// Crates are BFM's property. They leave on a truck full of fish, the market
+/// keeps them while it sells, and it hands the empties back on a later trip —
+/// so at any moment a market is holding some number of them, and that number is
+/// a debt in wood rather than in rupees. It is the only thing in this system
+/// tracked in a unit other than money.
+///
+/// ENTERED BY HAND, one row per market per trip. The bills already know how
+/// many boxes of fish were dropped, and an earlier attempt derived the whole
+/// account from them. It was abandoned deliberately: a crate can come back on a
+/// different trip from the one it left on, come back broken, or not come back
+/// at all, and none of that appears on any bill. A count on the ground is the
+/// only truthful source, so this records the count and does not second-guess it.
+/// The `boxesOut` figure is prefilled from the market's bill on that trip as a
+/// convenience, and is freely overridden.
+///
+/// The BALANCE is derived — never stored — as the running total of
+/// (out − returned) over a party's own rows in order, exactly as a money ledger
+/// derives its running balance. See crateBalances() in src/lib/crate.ts.
+model CrateEntry {
+  id        String @id @default(uuid())
+  companyId String @map("company_id")
+  centreId  String @map("centre_id")
+  /// The market holding the crates.
+  partyId   String @map("party_id")
+
+  /// Monotonic insertion order, for the same reason LedgerEntry has one: two
+  /// rows entered on one day tie on `date` alone, and a tie makes a running
+  /// total non-deterministic. (date, seq) is a total order.
+  seq Int @unique @default(autoincrement())
+
+  /// THE ACCOUNTING DATE — the trip's buying day when there is a trip.
+  date DateTime @db.Date
+
+  /// The trip these crates went out on.
+  ///
+  /// Nullable, and the null case is the useful one: a market already holding
+  /// crates on the day the books open gets a single opening row with no trip.
+  /// That needs no special mechanism — an opening balance is just the first
+  /// row — and it is why the vehicle and the line man are read THROUGH the trip
+  /// rather than stored here, where an opening row would have to invent them.
+  deliveryNoteId String? @map("delivery_note_id")
+
+  /// Where they were dropped. Copied from the bill's own Place, or typed.
+  place String?
+
+  /// Crates that went out to this market.
+  boxesOut      Int @default(0) @map("boxes_out")
+  /// Empty crates handed back. NOT rejected fish — that is the bill's business.
+  boxesReturned Int @default(0) @map("boxes_returned")
+
+  notes String?
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime? @map("updated_at")
+  createdById String?   @map("created_by_id")
+  updatedById String?   @map("updated_by_id")
+
+  company      Company       @relation(fields: [companyId], references: [id])
+  centre       Centre        @relation(fields: [centreId], references: [id])
+  party        Party         @relation(fields: [partyId], references: [id])
+  deliveryNote DeliveryNote? @relation(fields: [deliveryNoteId], references: [id])
+  createdBy    User?         @relation("CrateEntryCreatedBy", fields: [createdById], references: [id])
+  updatedBy    User?         @relation("CrateEntryUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([companyId, centreId, partyId, date, seq])
+  @@index([deliveryNoteId])
+  @@map("crate_entries")
+}
 
 /// Reserve money actually collected back from a market party.
 ///
