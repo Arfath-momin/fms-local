@@ -18,6 +18,8 @@ const labelCls =
 export type ReserveHolding = { partyName: string; outstanding: number };
 
 export function ReserveCollectionForm({
+  kind,
+  label,
   action,
   holdings,
   scope,
@@ -27,6 +29,9 @@ export function ReserveCollectionForm({
     formData: FormData
   ) => Promise<ReserveFormState>;
   holdings: ReserveHolding[];
+  /** Which balance this clears — travels to the server in a hidden field. */
+  kind: "RESERVE" | "CUTTING";
+  label: string;
   scope: FormScope;
 }) {
   const [state, formAction, pending] = useActionState<
@@ -45,6 +50,7 @@ export function ReserveCollectionForm({
   return (
     <form action={formAction} className="max-w-lg space-y-4">
       <ScopeFields scope={scope} />
+      <input type="hidden" name="kind" value={kind} />
 
       <div>
         <PartyCombobox
@@ -53,7 +59,7 @@ export function ReserveCollectionForm({
           types={["MARKET_BUYER"]}
           value={partyName}
           onValueChange={setPartyName}
-          placeholder="Who is paying the reserve back"
+          placeholder={`Who is paying the ${label.toLowerCase()} back`}
         />
         {partyName.trim() !== "" && (
           <p
@@ -62,8 +68,8 @@ export function ReserveCollectionForm({
             }
           >
             {held
-              ? `Holds ${fmtMoney(held.outstanding)} of reserve.`
-              : "No reserve recorded against this party yet."}
+              ? `Holds ${fmtMoney(held.outstanding)} of ${label.toLowerCase()}.`
+              : `No ${label.toLowerCase()} recorded against this party yet.`}
           </p>
         )}
       </div>

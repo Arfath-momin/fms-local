@@ -26,6 +26,27 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** One line of a market bill's working. */
+function Money({
+  label,
+  value,
+  negative,
+}: {
+  label: string;
+  value: unknown;
+  negative?: boolean;
+}) {
+  return (
+    <div className="flex justify-between">
+      <span className="text-muted">{label}</span>
+      <span className="num">
+        {negative ? "−" : ""}
+        {fmtMoney(value as never)}
+      </span>
+    </div>
+  );
+}
+
 export default async function SalePage({
   params,
 }: {
@@ -150,13 +171,66 @@ export default async function SalePage({
           <Field label="Place of Loading" value={sale.placeOfLoading} />
         )}
         {sale.returnNote && <Field label="Return" value={sale.returnNote} />}
-        {sale.totalBill && (
-          <Field label="Total Bill" value={fmtMoney(sale.totalBill)} />
-        )}
-        {sale.commission && (
-          <Field label="Commission (2%)" value={fmtMoney(sale.commission)} />
-        )}
       </div>
+
+      {/* A market bill's working, exactly as the entry form showed it and as
+          the market's own paper reads. The commission line used to be labelled
+          "(2%)" whatever rate the bill was actually struck at, from back when
+          the rate was fixed — the stored rate is printed now, and a bill struck
+          at 2.5% keeps saying 2.5% however the terms change later. */}
+      {sale.type === "MARKET" && sale.totalBill && (
+        <div className="border border-line-strong bg-surface px-4 py-3 text-[13px] mb-4">
+          <Money label="Total bill" value={sale.totalBill} />
+          {sale.commission && (
+            <Money
+              label={`Less commission${
+                sale.commissionRate ? ` (${sale.commissionRate}%)` : ""
+              }`}
+              value={sale.commission}
+              negative
+            />
+          )}
+          {sale.cutting && (
+            <Money
+              label={`Less cutting${
+                sale.cuttingRate ? ` (${sale.cuttingRate}%)` : ""
+              }`}
+              value={sale.cutting}
+              negative
+            />
+          )}
+          {sale.reserve && (
+            <Money label="Less reserve" value={sale.reserve} negative />
+          )}
+          {sale.otherDeduction && (
+            <Money
+              label="Less labour / other"
+              value={sale.otherDeduction}
+              negative
+            />
+          )}
+          <div className="flex justify-between border-t border-line-strong mt-1 pt-1 font-semibold">
+            <span>Net bill</span>
+            <span className="num">{fmtMoney(sale.amount)}</span>
+          </div>
+          {sale.rentDeducted && Number(sale.rentDeducted) > 0 && (
+            <>
+              <div className="flex justify-between border-t border-line mt-1 pt-1">
+                <span className="text-muted">Less receipt — paid the driver</span>
+                <span className="num">{fmtMoney(sale.rentDeducted)}</span>
+              </div>
+              <div className="flex justify-between font-semibold">
+                <span>Still owed on this bill</span>
+                <span className="num">
+                  {fmtMoney(
+                    Number(sale.amount) - Number(sale.rentDeducted)
+                  )}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {sale.lines.length > 0 && (
         <div className="border border-line-strong bg-surface mb-4 overflow-x-auto">

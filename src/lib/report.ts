@@ -106,10 +106,7 @@ export async function computeProfit(
         ...centreWhere,
         date: dateRange,
       },
-      // rentDeducted comes back with the amount because market revenue is
-      // `net bill + rent deducted` (spec §2). It is null on every non-market
-      // bill, so summing it unconditionally adds nothing there.
-      _sum: { amount: true, rentDeducted: true },
+      _sum: { amount: true },
     }),
   ]);
 
@@ -156,15 +153,16 @@ export async function computeProfit(
     .filter((r) => r.kind === "OVERHEAD")
     .reduce((a, r) => a.add(r.amount), ZERO);
 
-  // Revenue, not the bill total: the market rent is grossed back up here,
-  // because that money left the business through the transporter's account and
-  // is already carried as a cost on the trip. Leaving it out would understate
-  // the day twice over.
+  // The bill amount IS the revenue, on every channel.
+  //
+  // Market used to be the exception: the net was struck after deducting the
+  // rent the market paid the driver, so the rent had to be added back here or
+  // the day carried a cost it was never credited for. Rent is no longer
+  // deducted from the net — the market owes the whole net and its payment to
+  // the driver is a receipt against it — so adding it back now would count the
+  // same 15,000 twice.
   const saleByType = saleGroups
-    .map((g) => ({
-      type: g.type,
-      amount: (g._sum.amount ?? ZERO).add(g._sum.rentDeducted ?? ZERO),
-    }))
+    .map((g) => ({ type: g.type, amount: g._sum.amount ?? ZERO }))
     .sort((a, b) => a.type.localeCompare(b.type));
   const sale = saleByType.reduce((a, r) => a.add(r.amount), ZERO);
 
@@ -691,12 +689,13 @@ export async function getTransactionRegister(
       amount: e.amount,
       href: `/vouchers/expenses/${e.id}`,
     })),
-    // The rent a market party settled on BFM's behalf. Like the advance it is
-    // money that left the business against the trip's rent, and like the
-    // advance it is not a Settlement voucher — it is netted inside the market
-    // bill. Naming the payer keeps it honest: BFM did not hand this over, the
-    // market did, which is why it appears against their name and not as cash
-    // going out of the till.
+    // The rent a market party handed the driver. It settles part of what that
+    // market owes on its bill, so it belongs here as a RECEIPT — which is
+    // exactly what the party's statement now calls it, and two names for one
+    // movement is how a register stops being reconcilable.
+    //
+    // It is not a Settlement voucher and never was: no cash crossed BFM's
+    // counter. Naming the payer keeps that honest.
     ...sales
       .filter((sale) => sale.rentDeducted && sale.rentDeducted.greaterThan(0))
       .map((sale) => ({
@@ -704,7 +703,7 @@ export async function getTransactionRegister(
         date: sale.date,
         createdAt: sale.createdAt,
         centreName: sale.centre.name,
-        kind: "PAYMENT" as const,
+        kind: "RECEIPT" as const,
         subtype: "RENT_BY_PARTY",
         partyName: `${sale.party.name} paid the driver`,
         amount: sale.rentDeducted ?? ZERO,

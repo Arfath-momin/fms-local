@@ -9,36 +9,23 @@ import { profitTiers, saleRevenue } from "@/lib/sale";
  * and nothing failed when it was.
  */
 describe("revenue recognition", () => {
-  it("market revenue is the net bill plus the rent deducted on it", () => {
-    // The last market stop paid the driver ₹15,000 on BFM's behalf, so that
-    // money left the business even though the party never handed it over.
-    expect(
-      saleRevenue({ type: "MARKET", amount: 100_000, rentDeducted: 15_000 })
-    ).toBe(115_000);
-  });
-
-  it("a market bill that carried no rent recognises just the net", () => {
-    // Only ONE bill per trip carries the rent — the others are plain nets.
-    expect(saleRevenue({ type: "MARKET", amount: 60_000 })).toBe(60_000);
-    expect(
-      saleRevenue({ type: "MARKET", amount: 60_000, rentDeducted: null })
-    ).toBe(60_000);
-  });
-
-  it("factory, fish mill and local revenue is the bill amount, full stop", () => {
-    // These channels pay in full: BFM pays the driver on his return, so there
-    // is never a rent deduction to gross back up.
-    for (const type of ["FACTORY", "FISH_MILL", "LOCAL"] as const) {
+  it("revenue is the bill amount on every channel, market included", () => {
+    for (const type of ["MARKET", "FACTORY", "FISH_MILL", "LOCAL"] as const) {
       expect(saleRevenue({ type, amount: 70_000 })).toBe(70_000);
     }
   });
 
-  it("ignores a rent deduction wrongly set on a non-market bill", () => {
-    // Belt and braces: the action rejects deductions on non-market sales, but
-    // if one ever slipped through it must not inflate revenue.
-    expect(
-      saleRevenue({ type: "FACTORY", amount: 70_000, rentDeducted: 8_000 })
-    ).toBe(70_000);
+  it("does not gross a market bill up by the rent the market paid", () => {
+    // This is the regression that matters. Market revenue USED to be
+    // `net + rentDeducted`, because the net was struck after deducting what the
+    // market handed the driver. Rent is no longer deducted from the net — the
+    // bill is the whole net and the payment is a receipt against it — so adding
+    // it back now would count the same 15,000 twice.
+    //
+    // The bill below is one where a market paid the driver 15,000: total 45,000
+    // less commission 900, reserve 1,500 and labour 500 comes to 42,100, and
+    // 42,100 is what the day earned. Not 57,100.
+    expect(saleRevenue({ type: "MARKET", amount: 42_100 })).toBe(42_100);
   });
 });
 

@@ -22,6 +22,7 @@ import { DateField } from "../../date-field";
 import { PartyCombobox } from "../../masters/party-combobox";
 import {
   commissionAmount,
+  marketOtherDeduction,
   DEFAULT_MARKET_COMMISSION_RATE,
   SALE_BUYER_TYPE,
   SALE_TYPE_LABELS,
@@ -58,6 +59,7 @@ export type SaleInit = {
   place: string;
   totalBill: string;
   commissionRate: string;
+  cuttingRate: string;
   reserve: string;
   /** Typed from the market's paper bill; labour/other balances against it. */
   netBill: string;
@@ -191,6 +193,7 @@ export function SaleForm({
     initial?.commissionRate ?? String(DEFAULT_MARKET_COMMISSION_RATE)
   );
   const [reserve, setReserve] = useState(initial?.reserve ?? "");
+  const [cuttingRate, setCuttingRate] = useState(initial?.cuttingRate ?? "");
   const [factoryAmount, setFactoryAmount] = useState(initial?.amount ?? "");
 
   // LOCAL is the one channel with no truck behind it — a local buyer collects.
@@ -326,6 +329,10 @@ export function SaleForm({
   // the figure written to the database are never two calculations.
   const commission =
     type === "MARKET" ? commissionAmount(n(totalBill), n(commissionRate)) : 0;
+  // Cutting is struck the same way commission is — a percentage of the total —
+  // and withheld the way reserve is. Same helper, because it is the same sum.
+  const cutting =
+    type === "MARKET" ? commissionAmount(n(totalBill), n(cuttingRate)) : 0;
 
 
   // Net is TYPED from the paper the market handed over — it is what they
@@ -341,8 +348,15 @@ export function SaleForm({
   const rentDeducted = paidByMarketOn(expenses, expenseCategories);
 
   const netBill = n(netBillRaw);
-  const otherDeduction =
-    n(totalBill) - commission - n(reserve) - rentDeducted - netBill;
+  // Same helper the server derives and stores with, so the figure shown while
+  // typing and the figure saved can never be two calculations.
+  const otherDeduction = marketOtherDeduction({
+    totalBill: n(totalBill),
+    commission,
+    cutting,
+    reserve: n(reserve),
+    netBill,
+  });
 
   // The sale amount (what posts to the ledger) depends on the type.
   const amount =
@@ -536,7 +550,7 @@ export function SaleForm({
                   total − commission − labour − reserve − rent = net
               and a typed net can disagree with its own working — which the
               ledger would then post as the seller's debt. */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <label htmlFor="commissionRate" className={labelCls}>
                 Commission %
@@ -554,6 +568,25 @@ export function SaleForm({
                 {n(commissionRate) > 0 && n(totalBill) > 0
                   ? `${commissionRate}% = ${fmtMoney(commission)}`
                   : "A cost the market charges us."}
+              </p>
+            </div>
+            <div>
+              <label htmlFor="cuttingRate" className={labelCls}>
+                Cutting %
+              </label>
+              <input
+                id="cuttingRate"
+                name="cuttingRate"
+                inputMode="decimal"
+                value={cuttingRate}
+                onChange={(e) => setCuttingRate(e.target.value)}
+                className={inputCls + " num text-right"}
+                placeholder="0"
+              />
+              <p className="text-muted text-[12px] mt-1">
+                {n(cuttingRate) > 0 && n(totalBill) > 0
+                  ? `${cuttingRate}% = ${fmtMoney(cutting)}`
+                  : "Withheld, like reserve. Collected later."}
               </p>
             </div>
             <div>
@@ -600,10 +633,8 @@ export function SaleForm({
           <div className="border border-line-strong bg-surface px-4 py-3 text-[13px]">
             <Row label="Total bill" value={n(totalBill)} />
             <Row label="Less commission" value={-commission} />
+            {cutting > 0 && <Row label="Less cutting" value={-cutting} />}
             <Row label="Less reserve" value={-n(reserve)} />
-            {rentDeducted > 0 && (
-              <Row label="Less vehicle rent" value={-rentDeducted} />
-            )}
             <div
               className={
                 "flex justify-between " +
@@ -622,18 +653,35 @@ export function SaleForm({
             </div>
             {otherDeduction < 0 && (
               <p className="text-debit text-[12px] mt-1">
-                Commission, reserve, rent and the net come to more than the
+                Commission, cutting, reserve and the net come to more than the
                 total bill. Check the figures — labour / other cannot be
-                negative.
+                negative, and the bill will not save while it is.
               </p>
             )}
             {rentDeducted > 0 && (
-              <p className="text-muted text-[12px] mt-2">
-                Revenue recognised is {fmtMoney(netBill + rentDeducted)} — the
-                net plus the {fmtMoney(rentDeducted)} this market handed the
-                driver on your behalf. The rent itself is expensed once, at its
-                full {fmtMoney(rentTotal)}, to the trip&rsquo;s buying day.
-              </p>
+              <>
+                <div className="flex justify-between border-t border-line mt-1 pt-1">
+                  <span className="text-muted">
+                    Less receipt — paid your driver{" "}
+                    <span className="text-[11px]">(from the rent below)</span>
+                  </span>
+                  <span className="num">{fmtMoney(rentDeducted)}</span>
+                </div>
+                <div className="flex justify-between font-semibold">
+                  <span>This market still owes</span>
+                  <span className="num">
+                    {fmtMoney(netBill - rentDeducted)}
+                  </span>
+                </div>
+                <p className="text-muted text-[12px] mt-2">
+                  The bill is the full {fmtMoney(netBill)} and that is the
+                  revenue. The {fmtMoney(rentDeducted)} they handed the driver
+                  is a receipt against it, not a smaller bill — so what you
+                  billed and what they have paid stay separate figures. The rent
+                  itself is expensed once, at its full {fmtMoney(rentTotal)}, to
+                  the trip&rsquo;s buying day.
+                </p>
+              </>
             )}
           </div>
         </>

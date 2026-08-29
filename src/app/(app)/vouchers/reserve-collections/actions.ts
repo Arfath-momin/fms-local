@@ -9,7 +9,8 @@ import { prisma } from "@/lib/db";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
 import { findOrCreateParty } from "@/lib/party-db";
-import { reserveOutstandingFor } from "@/lib/reserve";
+import { reserveOutstandingFor, WITHHOLDING_LABELS } from "@/lib/reserve";
+import type { WithholdingKind } from "@/generated/prisma/enums";
 
 export type ReserveFormState = { error: string } | null;
 
@@ -80,17 +81,24 @@ export async function createReserveCollection(
   const { company, centre } = scoped.scope;
   const scope = { companyId: company.id, centreId: centre.id };
 
+  // Which of the two a market is handing over. They are separate balances, so
+  // collecting cutting against the reserve figure would clear the wrong one and
+  // leave both wrong.
+  const kind: WithholdingKind =
+    formData.get("kind") === "CUTTING" ? "CUTTING" : "RESERVE";
+  const label = WITHHOLDING_LABELS[kind].toLowerCase();
+
   try {
     await prisma.$transaction(async (tx) => {
       const partyId = await findOrCreateParty(tx, d.partyName, "MARKET_BUYER");
 
       // Never collect more than was withheld. Overshooting would drive the
-      // derived balance negative, which reads as the merchant owing reserve
+      // derived balance negative, which reads as the merchant owing money
       // back to a party who never had it withheld in the first place.
-      const outstanding = await reserveOutstandingFor(scope, partyId);
+      const outstanding = await reserveOutstandingFor(scope, partyId, kind);
       if (d.amount.gt(outstanding)) {
         throw new Error(
-          `${d.partyName} holds ${outstanding.toFixed(2)} of reserve, so ` +
+          `${d.partyName} holds ${outstanding.toFixed(2)} of ${label}, so ` +
             `${d.amount.toFixed(2)} cannot be collected. Check the figure.`
         );
       }
@@ -98,6 +106,7 @@ export async function createReserveCollection(
       await tx.reserveCollection.create({
         data: {
           ...scope,
+          kind,
           partyId,
           amount: d.amount,
           date: d.date,
@@ -117,7 +126,7 @@ export async function createReserveCollection(
 
   revalidatePath("/ledgers/reserve");
   revalidatePath("/vouchers/reserve-collections");
-  redirect("/ledgers/reserve");
+  redirect(kind === "RESERVE" ? "/ledgers/reserve" : "/ledgers/reserve?kind=CUTTING");
 }
 
 /**

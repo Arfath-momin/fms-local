@@ -23,6 +23,7 @@ import {
   SALE_BUYER_TYPE,
   SALE_TYPE_ALLOWS_CARE_OF,
   commissionAmount,
+  marketOtherDeduction,
   MAX_COMMISSION_RATE,
 } from "@/lib/sale";
 import { resolveReviews } from "@/lib/review-db";
@@ -72,6 +73,8 @@ type Parsed = {
   commissionRate: Prisma.Decimal | null;
   /** Withheld from a Market seller. Never netted against `amount`. */
   reserve: Prisma.Decimal | null;
+  cutting: Prisma.Decimal | null;
+  cuttingRate: Prisma.Decimal | null;
   /** Labour and sundry deductions on a market bill. */
   otherDeduction: Prisma.Decimal | null;
   /** The trip this bill came off. Required for MARKET/FACTORY/FISH_MILL. */
@@ -654,6 +657,8 @@ async function parse(
     commission: null as Prisma.Decimal | null,
     commissionRate: null as Prisma.Decimal | null,
     reserve: null as Prisma.Decimal | null,
+    cutting: null as Prisma.Decimal | null,
+    cuttingRate: null as Prisma.Decimal | null,
     otherDeduction: null as Prisma.Decimal | null,
     deliveryNoteId: null as string | null,
     rentDeducted: null as Prisma.Decimal | null,
@@ -702,11 +707,34 @@ async function parse(
     const reserve = parseMoney(clean(formData.get("reserve")));
     if (reserve && reserve.lt(0)) return { error: "Reserve cannot be negative." };
 
+    // Cutting — the market's second withholding, struck as a percentage of the
+    // total the way commission is. Same shape as the commission rate above,
+    // including that blank means none rather than zero.
+    const cutRaw = clean(formData.get("cuttingRate"));
+    let cuttingRate: Prisma.Decimal | null = null;
+    if (cutRaw) {
+      const parsed = parseMoney(cutRaw);
+      if (!parsed || parsed.lt(0) || parsed.gt(MAX_COMMISSION_RATE))
+        return {
+          error: `Cutting rate must be between 0 and ${MAX_COMMISSION_RATE}%.`,
+        };
+      cuttingRate = parsed;
+    }
+    const cutting =
+      cuttingRate && cuttingRate.gt(0)
+        ? new Prisma.Decimal(
+            commissionAmount(totalBill.toNumber(), cuttingRate.toNumber())
+          ).toDecimalPlaces(2)
+        : null;
 
-    // Net Bill is TYPED, from the paper the market handed over — it is the
-    // figure they actually paid. "Labour / other" is then the balancing item:
-    // the market lists two or three sundry charges nobody itemises, and what
-    // is left after the named deductions is exactly what they came to.
+    // Net Bill is TYPED, from the paper the market handed over. "Labour /
+    // other" is then the balancing item: the market lists two or three sundry
+    // charges nobody itemises, and what is left after the named deductions is
+    // exactly what they came to.
+    //
+    // Rent is NOT among the named deductions any more. What the market handed
+    // the driver settles part of this bill rather than shrinking it, so the net
+    // typed here is the whole net and the rent comes off as a receipt.
     const netBill = parseMoney(clean(formData.get("netBill")));
     if (!netBill || netBill.lte(0))
       return { error: "Net Bill must be a positive number." };
@@ -715,6 +743,29 @@ async function parse(
         error:
           `Net Bill (${netBill.toFixed(2)}) cannot be more than Total Bill ` +
           `(${totalBill.toFixed(2)}).`,
+      };
+
+    // The balancing item, DERIVED and then stored.
+    //
+    // It was derived in the form and shown to the clerk, but never written —
+    // so the column sat null on every bill entered through the app while the
+    // screen displayed a figure. Storing it means the bill can be read back the
+    // way it was approved.
+    const other = new Prisma.Decimal(
+      marketOtherDeduction({
+        totalBill: totalBill.toNumber(),
+        commission: commission?.toNumber() ?? 0,
+        cutting: cutting?.toNumber() ?? 0,
+        reserve: reserve?.toNumber() ?? 0,
+        netBill: netBill.toNumber(),
+      })
+    ).toDecimalPlaces(2);
+    if (other.lt(0))
+      return {
+        error:
+          `Commission, cutting, reserve and the net bill come to ` +
+          `${totalBill.sub(other).toFixed(2)}, which is more than the total ` +
+          `bill (${totalBill.toFixed(2)}). Check the figures.`,
       };
 
     // Market bills are itemised in BOXES — this is what the trip reconciles
@@ -730,9 +781,12 @@ async function parse(
     base.commissionRate = commissionRate;
     base.commission = commission;
     base.reserve = reserve && reserve.gt(0) ? reserve : null;
-    // Net Bill is what the seller owes us for the fish. Commission, labour and
-    // reserve stay netted inside it and are never posted separately; only the
-    // rent is grossed back up at report time (see saleRevenue in lib/sale).
+    base.cuttingRate = cuttingRate;
+    base.cutting = cutting;
+    base.otherDeduction = other.gt(0) ? other : null;
+    // What the market owes us for the fish, in full. Commission, cutting,
+    // reserve and labour stay netted inside it and are never posted separately.
+    // Nothing is grossed back up at report time any more — this IS the revenue.
     amount = netBill;
   } else if (type === "FACTORY") {
     const slip = readWeighingSlip(formData, base);
@@ -791,7 +845,13 @@ async function parse(
   // buyer owes.
   if (type !== "MARKET") {
     const stray = (
-      ["commissionRate", "otherDeduction", "reserve", "rentDeducted"] as const
+      [
+        "commissionRate",
+        "cuttingRate",
+        "otherDeduction",
+        "reserve",
+        "rentDeducted",
+      ] as const
     ).filter((f) => {
       const v = parseMoney(clean(formData.get(f)));
       return v !== null && v.gt(0);
@@ -993,57 +1053,63 @@ async function postSaleLedger(
   // party as SUM(sales.reserve) − SUM(reserve collections), which is what
   // keeps it per-party instead of pooled into one meaningless figure.
 
-  // Rent posts NOTHING here either, and that is a correction as much as a
-  // simplification.
+  // Rent posts TWICE, to two different parties, and neither is a deduction.
   //
-  // A market bill used to credit the market party the rent it had deducted, on
-  // the reasoning that they were not out of pocket. But the NET this sale
-  // DEBITs is the figure off the market's own paper, and that net is ALREADY
-  // after the rent deduction. Crediting it again subtracted the same rupee
-  // twice, so every market party who paid their bill in full ended up looking
-  // like a creditor. Traced on a real bill:
+  // What the market handed the driver settles part of what the market owes.
+  // The bill DEBITs the whole net; this CREDITs back what they already paid,
+  // as a receipt against that bill:
   //
-  //   total 45,000 − commission 900 − reserve 1,500 − labour 500
-  //                − rent 15,000  =  net 27,100
-  //   DEBIT 27,100, CREDIT 15,000  →  balance 12,100
-  //   they pay the 27,100 printed on the bill  →  balance −15,000  ✗
+  //   total 45,000 − commission 900 − reserve 1,500 − labour 500 = net 42,100
+  //   DEBIT 42,100 · RECEIPT CREDIT 15,000  →  they owe 27,100
   //
-  // With nothing posted, the market owes exactly the net they will pay, and
-  // closes at zero. The rent itself is a Vehicle Rent expense voucher: it
-  // credits the transporter what he is owed and debits him the advance and
-  // whatever the market handed him, so he closes at zero too.
+  // which is the 27,100 printed on their paper. Same balance the old netting
+  // arrived at — but "what did we bill them" and "what have they paid" are now
+  // two questions with two answers, instead of one figure that had quietly been
+  // reduced by a payment.
   //
-  // `rentDeducted` does two things, and only these two.
+  // The receipt is sourced from the SALE, so it carries no Settlement voucher.
+  // That is deliberate: no cash crossed BFM's counter. It still drills through
+  // to the bill on the party's statement, because source links resolve by id
+  // across every voucher type.
   //
-  // It grosses the day's REVENUE up (see saleRevenue): that money did leave the
-  // business, through the driver, so a day whose revenue omitted it would carry
-  // a cost it was never credited for.
+  // History worth keeping, since this looks like the bug that was fixed here
+  // before: the old code CREDITed this amount against a net that was ALREADY
+  // struck after the rent, which subtracted the same rupee twice and left every
+  // market party who paid in full looking like a creditor. The credit is right
+  // now only because the debit above grew by the same amount.
   //
   // And it SETTLES THE TRANSPORTER. The rent voucher credits him the whole
   // rent; the delivery note debited the advance handed over at loading; this
   // debits what the market handed him on the road. Without it he closes at
-  // −15,000 on a trip somebody else already paid for — the credit posted and
-  // nothing ever answered it. Removing the market party's wrong CREDIT took
-  // this correct DEBIT with it, which is the half that had to stay.
+  // −15,000 on a trip somebody else already paid for.
   //
   //   rent 20,000 credited · advance 5,000 debited · market paid 15,000 debited
   //   → the transporter closes at zero, which is the truth: he has been paid.
-  //
-  // Nothing is posted to the market party. The net this sale debits is off
-  // their own paper and is ALREADY after the deduction; crediting it again is
-  // the double-count that made every market party who paid in full look like a
-  // creditor.
-  if (s.rentDeducted && s.rentDeducted.gt(0) && s.transporterId) {
+  if (s.rentDeducted && s.rentDeducted.gt(0)) {
     entries.push({
       companyId: s.companyId,
       centreId: s.centreId,
       sourceId: s.id,
       date: s.date,
-      partyId: s.transporterId,
-      type: "DEBIT" as const,
-      sourceType: "RENT_BY_PARTY" as const,
+      partyId: s.ledgerPartyId,
+      type: "CREDIT" as const,
+      sourceType: "RECEIPT" as const,
       amount: s.rentDeducted,
     });
+    // Only when the trip names a transporter. Off-trip there is nobody to
+    // settle, and the market's own credit above still stands on its own.
+    if (s.transporterId) {
+      entries.push({
+        companyId: s.companyId,
+        centreId: s.centreId,
+        sourceId: s.id,
+        date: s.date,
+        partyId: s.transporterId,
+        type: "DEBIT" as const,
+        sourceType: "RENT_BY_PARTY" as const,
+        amount: s.rentDeducted,
+      });
+    }
   }
 
   await postLedgerEntries(tx, entries);
@@ -1083,6 +1149,8 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
     commission: d.commission,
     commissionRate: d.commissionRate,
     reserve: d.reserve,
+    cutting: d.cutting,
+    cuttingRate: d.cuttingRate,
     otherDeduction: d.otherDeduction,
     deliveryNoteId: d.deliveryNoteId,
     rentDeducted: d.rentDeducted,

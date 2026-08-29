@@ -29,17 +29,27 @@ const TOTAL = 45_000;
 const COMMISSION = 900;
 const RESERVE = 1_500;
 const LABOUR = 500;
-const NET = TOTAL - COMMISSION - RESERVE - PAID_BY_MARKET - LABOUR;
+// Rent is NOT among these. What the market handed the driver settles part of
+// what it owes on this bill; it does not make the bill smaller.
+const NET = TOTAL - COMMISSION - RESERVE - LABOUR;
 
 // Another cost the same bill revealed
 const ICE = 1_200;
 
 describe("the market bill", () => {
-  it("nets down to what the market actually hands over", () => {
-    expect(NET).toBe(27_100);
+  it("nets down to the whole net, before anything the market has paid", () => {
+    expect(NET).toBe(42_100);
   });
 
-  it("takes the deduction from what the market PAID, not what was left owing", () => {
+  it("still leaves the market handing over 27,100", () => {
+    // The figure printed on their paper is unchanged. What changed is how it is
+    // arrived at: the bill is the full 42,100 and the 15,000 they gave the
+    // driver comes off as a receipt, instead of the bill being written down to
+    // 27,100 in the first place. Same money, two answerable questions.
+    expect(NET - PAID_BY_MARKET).toBe(27_100);
+  });
+
+  it("takes the receipt from what the market PAID, not what was left owing", () => {
     // Inferring it as rent − advance assumed the market always settles the
     // whole balance. It usually does. When it does not, that assumption made a
     // part payment impossible to record and claimed the driver had been paid
@@ -47,7 +57,8 @@ describe("the market bill", () => {
     expect(PAID_BY_MARKET).toBe(RENT - ADVANCE);
     const partPayment = 9_000;
     expect(partPayment).not.toBe(RENT - ADVANCE);
-    expect(TOTAL - COMMISSION - RESERVE - partPayment - LABOUR).toBe(33_100);
+    // The bill is the same 42,100 either way — only what is still owed moves.
+    expect(NET - partPayment).toBe(33_100);
   });
 });
 
@@ -58,11 +69,24 @@ describe("the three ledgers", () => {
     expect(sum([debit(ADVANCE), credit(RENT), debit(PAID_BY_MARKET)])).toBe(0);
   });
 
-  it("leaves the market owing the net and nothing else", () => {
-    // Nothing is posted to them for the rent: the net is off their own paper
-    // and is ALREADY after that deduction.
-    expect(sum([debit(NET)])).toBe(NET);
-    expect(sum([debit(NET), credit(NET)])).toBe(0);
+  it("leaves the market owing the net less what it paid the driver", () => {
+    // The bill DEBITs the whole net; the money they handed the driver CREDITs
+    // back as a receipt against it.
+    expect(sum([debit(NET), credit(PAID_BY_MARKET)])).toBe(27_100);
+    // And they close at zero when they hand over what their paper says.
+    expect(sum([debit(NET), credit(PAID_BY_MARKET), credit(27_100)])).toBe(0);
+  });
+
+  it("does not credit the market twice for the same rent", () => {
+    // The bug this replaced. The old code credited the 15,000 against a net
+    // that had ALREADY been reduced by it, so a market that paid its bill in
+    // full came out looking like a creditor for exactly the rent.
+    const oldNet = TOTAL - COMMISSION - RESERVE - LABOUR - PAID_BY_MARKET;
+    expect(sum([debit(oldNet), credit(PAID_BY_MARKET), credit(oldNet)])).toBe(
+      -PAID_BY_MARKET
+    );
+    // The credit is right only because the debit grew by the same amount.
+    expect(NET).toBe(oldNet + PAID_BY_MARKET);
   });
 
   it("leaves the ice plant owed its own bill", () => {
@@ -73,30 +97,24 @@ describe("the three ledgers", () => {
 });
 
 describe("the day's profit", () => {
-  it("recognises the net plus what the market paid the driver", () => {
-    const revenue = saleRevenue({
-      type: "MARKET",
-      amount: NET,
-      rentDeducted: PAID_BY_MARKET,
-    });
+  it("recognises the bill, with nothing added back", () => {
+    const revenue = saleRevenue({ type: "MARKET", amount: NET });
     expect(revenue).toBe(42_100);
-    // Which is the bill less the market's OWN charges — commission, reserve and
-    // labour are theirs and stay netted inside it. The rent is not: that money
-    // left through the driver and is a cost of ours.
+    // The bill less the market's OWN charges. Commission, reserve and labour
+    // are theirs and stay netted inside it; the rent never came out of it, so
+    // there is nothing to gross back up.
     expect(revenue).toBe(TOTAL - COMMISSION - RESERVE - LABOUR);
   });
 
   it("charges each cost exactly once", () => {
-    // The rent at its FULL total, not the deducted part: the advance was a
-    // settlement, never a second cost.
+    // The rent at its FULL total, not the part the market paid: the advance was
+    // a settlement, never a second cost.
     expect(RENT + ICE).toBe(21_200);
   });
 
-  it("nets the rent to nothing, because the market paid it", () => {
-    // +15,000 of revenue against 20,000 of cost, less the 5,000 we had already
-    // handed over ourselves. The day is charged only what BFM actually bore.
-    const revenue = saleRevenue({ type: "MARKET", amount: NET, rentDeducted: PAID_BY_MARKET });
-    expect(revenue - NET - PAID_BY_MARKET).toBe(0);
+  it("charges the day only what BFM actually bore of the rent", () => {
+    // 20,000 of cost against a receipt of 15,000 the market settled, leaving
+    // the 5,000 advance BFM handed over itself.
     expect(RENT - PAID_BY_MARKET).toBe(ADVANCE);
   });
 });

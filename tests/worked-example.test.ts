@@ -24,25 +24,27 @@ describe("16 Aug worked example", () => {
   // The last market paid the driver the rent balance on BFM's behalf.
   const rentOnLastBill = rents.market;
 
-  const netMarketBill =
-    marketTotalBills - commission - labour - reserve - rentOnLastBill;
+  // Rent is not a deduction: it settles part of the bill rather than shrinking
+  // it, so the net is struck on the market's own charges alone.
+  const netMarketBill = marketTotalBills - commission - labour - reserve;
 
   it("nets the market bill down the way the bill reads", () => {
-    expect(netMarketBill).toBe(148_400);
+    expect(netMarketBill).toBe(168_400);
+  });
+
+  it("leaves the market owing the net less what it paid the driver", () => {
+    expect(netMarketBill - rentOnLastBill).toBe(148_400);
   });
 
   it("recognises ₹31,400 gross profit for the day", () => {
     const revenue =
-      saleRevenue({
-        type: "MARKET",
-        amount: netMarketBill,
-        rentDeducted: rentOnLastBill,
-      }) +
+      saleRevenue({ type: "MARKET", amount: netMarketBill }) +
       saleRevenue({ type: "FACTORY", amount: 70_000 }) +
       saleRevenue({ type: "FISH_MILL", amount: 25_000 });
 
-    // Market revenue grosses the rent back up but NOT the commission, labour
-    // or reserve — those were never BFM's money.
+    // The market bill IS the revenue. Commission, labour and reserve were never
+    // BFM's money and stay netted out; the rent never came out, so there is
+    // nothing to add back — the total is the same 263,400 either way.
     expect(revenue).toBe(263_400);
 
     const { gross } = profitTiers({ revenue, purchases, directExpenses });

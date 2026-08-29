@@ -117,6 +117,7 @@ export default async function EditSalePage({
           // — a historic 2% bill must keep editing as 2% after the house
           // changes its terms.
           commissionRate: sale.commissionRate?.toString() ?? "",
+          cuttingRate: sale.cuttingRate?.toString() ?? "",
           reserve: sale.reserve?.toString() ?? "",
           totalBill: sale.totalBill?.toString() ?? "",
           // Labour / other is not carried back — it is the balancing item,

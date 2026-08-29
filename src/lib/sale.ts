@@ -61,6 +61,45 @@ export function commissionAmount(totalBill: number, ratePercent: number): number
 }
 
 /**
+ * The balancing item on a market bill — labour and the sundries nobody itemises.
+ *
+ *     total − commission − cutting − reserve − net = labour / other
+ *
+ * DERIVED, because everything else on the bill is either typed off the market's
+ * paper or struck as a percentage of the total, and what is left between the
+ * total and the net they actually paid is by definition what those sundry
+ * charges came to. Asking a clerk to type it as well would give the bill two
+ * figures that can disagree.
+ *
+ * Rent is deliberately absent. What a market handed the driver settles part of
+ * this bill rather than shrinking it — subtracting it here would understate the
+ * bill by exactly the amount the receipt then credits, and the market would end
+ * up owing 15,000 less than it does.
+ *
+ * Negative means the named deductions and the net come to more than the total,
+ * which is a bill that does not add up. The caller decides what to do about it:
+ * the form shows it in red while typing, the action refuses to save it.
+ *
+ * Pure and shared, so the figure the clerk approves and the figure stored are
+ * never two calculations — the same reason commissionAmount above is shared.
+ */
+export function marketOtherDeduction(bill: {
+  totalBill: number;
+  commission: number;
+  cutting: number;
+  reserve: number;
+  netBill: number;
+}): number {
+  return (
+    bill.totalBill -
+    bill.commission -
+    bill.cutting -
+    bill.reserve -
+    bill.netBill
+  );
+}
+
+/**
  * The weight one sale line represents.
  *
  * Now simply what was entered. `qtyKg` used to be the weight of a SINGLE box,
@@ -99,21 +138,23 @@ export function saleLineKgPerBox(line: {
 }
 
 /**
- * Revenue recognised for one bill (spec §2).
+ * Revenue recognised for one bill (spec §2) — the bill amount, whatever the
+ * channel.
  *
- *   MARKET                     net bill + rent deducted on that bill
- *   FACTORY / FISH_MILL / LOCAL   the bill amount
+ * This used to gross a market bill back up by the rent deducted on it, and the
+ * reason is worth recording now that it is gone. A market bill read
  *
- * The market case is the one worth explaining. A market bill reads:
+ *     total − commission − cutting − reserve − labour − RENT = net
  *
- *     total − commission − labour − reserve − rent = net
+ * so a market that paid the driver 15,000 was billed 15,000 less, and revenue
+ * had to add the 15,000 back or the day would carry a cost it was never
+ * credited for. Two steps in opposite directions to arrive where it started.
  *
- * Commission, labour and reserve stay netted inside the net bill and are never
- * posted separately — they are what the market charged, and the money never
- * belonged to BFM. Rent is different: the last market paid the driver on BFM's
- * behalf, so that money DID leave the business, through the transporter's
- * account. Grossing it back up is what stops the day's revenue being understated
- * by a cost that is already counted as an expense on the trip.
+ * Rent is no longer deducted from the net at all. The market owes the whole
+ * net; paying the driver is a RECEIPT against it (see the Sale model's
+ * rentDeducted). So the amount is already the full revenue and there is nothing
+ * to gross up — the deduction that made this function necessary no longer
+ * happens.
  *
  * Pure and total: no database, no Decimal, so the money tests can call it
  * directly and the arithmetic is checkable in isolation.
@@ -122,11 +163,8 @@ export function saleRevenue(sale: {
   type: SaleType;
   /** The net bill for MARKET; the bill amount otherwise. */
   amount: number;
-  /** Only ever set on the market bill that carried the trip's rent. */
-  rentDeducted?: number | null;
 }): number {
-  if (sale.type !== "MARKET") return sale.amount;
-  return sale.amount + (sale.rentDeducted ?? 0);
+  return sale.amount;
 }
 
 /**

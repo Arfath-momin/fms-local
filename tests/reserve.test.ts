@@ -38,11 +38,12 @@ beforeAll(async () => {
   centreId = centre.id;
   scope = { companyId, centreId };
 
-  // Three market parties on one day, each withholding a different reserve.
-  for (const [name, total, reserve] of [
-    ["Kondatty", 80_000, 2_500],
-    ["City Market", 55_000, 2_000],
-    ["Malpe Market", 45_000, 1_500],
+  // Three market parties on one day, each withholding a different reserve —
+  // and a different cutting, so the two can be told apart.
+  for (const [name, total, reserve, cutting] of [
+    ["Kondatty", 80_000, 2_500, 800],
+    ["City Market", 55_000, 2_000, 550],
+    ["Malpe Market", 45_000, 1_500, 450],
   ] as const) {
     const party = await prisma.party.create({
       data: { name: `${name} ${SUFFIX}`, type: "MARKET_BUYER" },
@@ -59,6 +60,7 @@ beforeAll(async () => {
         amount: D(total - reserve),
         totalBill: D(total),
         reserve: D(reserve),
+        cutting: D(cutting),
       },
     });
   }
@@ -116,6 +118,46 @@ describe("reserve balances", () => {
   it("reports what one party still holds, for capping a collection", async () => {
     const held = await reserveOutstandingFor(scope, partyIds["City Market"]);
     expect(held.toNumber()).toBe(800);
+  });
+
+  it("counts cutting as its own balance, not as more reserve", async () => {
+    // The two are separate figures against the same party. Reading one off the
+    // other would let a market's cutting be cleared by collecting its reserve.
+    const cut = await reserveBalances(scope, "CUTTING");
+    const byName = Object.fromEntries(
+      cut.map((b) => [b.partyName.replace(` ${SUFFIX}`, ""), b])
+    );
+    expect(byName["Kondatty"].outstanding.toNumber()).toBe(800);
+    expect(byName["City Market"].outstanding.toNumber()).toBe(550);
+    expect(byName["Malpe Market"].outstanding.toNumber()).toBe(450);
+
+    // The 1,200 collected above was RESERVE. Cutting is untouched by it.
+    expect(
+      (await reserveOutstandingFor(scope, partyIds["City Market"], "CUTTING"))
+        .toNumber()
+    ).toBe(550);
+  });
+
+  it("collecting cutting leaves the reserve balance alone", async () => {
+    await prisma.reserveCollection.create({
+      data: {
+        ...scope,
+        kind: "CUTTING",
+        partyId: partyIds["Kondatty"],
+        amount: D(300),
+        date: new Date("2027-03-31T00:00:00.000Z"),
+        mode: "CASH",
+      },
+    });
+
+    expect(
+      (await reserveOutstandingFor(scope, partyIds["Kondatty"], "CUTTING"))
+        .toNumber()
+    ).toBe(500);
+    // Untouched, which is the point: one party, two balances, two collections.
+    expect(
+      (await reserveOutstandingFor(scope, partyIds["Kondatty"])).toNumber()
+    ).toBe(2_500);
   });
 
   it("collecting is recognised on its own date, not the buying day", async () => {
