@@ -15,6 +15,7 @@ const tally = (dispatched: number, billed: number, bills: number) => ({
   kgBilled: D(0),
   kgGap: D(0),
   gapValue: D(0),
+  weighedOnly: false,
   billCount: bills,
   billedAmount: D(0),
 });

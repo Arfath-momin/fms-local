@@ -1,6 +1,6 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
-import type { TripChannel, TripStatus } from "@/generated/prisma/enums";
+import type { SaleType, TripChannel, TripStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import type { PackType } from "@/generated/prisma/enums";
 
@@ -40,6 +40,19 @@ export type TripTally = {
   kgGap: Prisma.Decimal;
   /** kgGap valued at the average rate actually billed. Zero when nothing is. */
   gapValue: Prisma.Decimal;
+  /**
+   * Whether the kilo comparison means anything on this trip.
+   *
+   * True only when EVERY bill off it is a factory or fish mill bill — the ones
+   * that reweigh on arrival and pay by weight. A market bill is itemised in
+   * boxes and carries no kilos at all, so a trip with even one of them has a
+   * kgBilled that is short by whatever those markets took, and reporting the
+   * difference as "rejected" invents a rejection out of a unit mismatch.
+   *
+   * A real trip did exactly that: 500 kg out, one market bill and one mill
+   * bill, and the panel claimed 1,400 kg rejected worth −₹87,315.
+   */
+  weighedOnly: boolean;
   billCount: number;
   billedAmount: Prisma.Decimal;
 };
@@ -51,6 +64,7 @@ export function tallyTrip(trip: {
   sales: {
     amount: Prisma.Decimal;
     rentDeducted: Prisma.Decimal | null;
+    type: SaleType;
     lines: { qtyKg: Prisma.Decimal; box: number | null }[];
   }[];
 }): TripTally {
@@ -61,17 +75,14 @@ export function tallyTrip(trip: {
     (a, s) => a + s.lines.reduce((b, l) => b + (l.box ?? 0), 0),
     0
   );
-  // A fish-mill line's kgs is the weight of ONE box, so the row's real weight
-  // is box × kgs — the same rule saleLineTotalKg applies. A line with no boxes
-  // counts once.
+  // `qtyKg` IS the row's weight. It used to be the weight of a single box, to
+  // be multiplied up by the box count, and this multiplied — long after that
+  // stopped being true. A mill bill of 5 boxes weighing 380 kg was counted as
+  // 1,900, so a 500 kg load read as 1,400 kg rejected: more fish came back than
+  // ever went out. Same rule as saleLineTotalKg, which is the helper the rest
+  // of the system reads weights through.
   const kgBilled = trip.sales.reduce(
-    (a, s) =>
-      a.add(
-        s.lines.reduce(
-          (b, l) => b.add(l.box && l.box > 0 ? l.qtyKg.mul(l.box) : l.qtyKg),
-          ZERO
-        )
-      ),
+    (a, s) => a.add(s.lines.reduce((b, l) => b.add(l.qtyKg), ZERO)),
     ZERO
   );
 
@@ -91,6 +102,9 @@ export function tallyTrip(trip: {
     kgBilled,
     kgGap,
     gapValue,
+    weighedOnly:
+      trip.sales.length > 0 &&
+      trip.sales.every((s) => s.type === "FACTORY" || s.type === "FISH_MILL"),
     billCount: trip.sales.length,
     billedAmount,
   };
@@ -152,6 +166,7 @@ export async function refreshTripStatus(
       sales: {
         select: {
           amount: true,
+          type: true,
           rentDeducted: true,
           lines: { select: { qtyKg: true, box: true } },
         },
@@ -218,6 +233,7 @@ export async function openTrips(
         select: {
           id: true,
           amount: true,
+          type: true,
           rentDeducted: true,
           lines: { select: { pack: true, particular: true, qtyKg: true, box: true } },
         },

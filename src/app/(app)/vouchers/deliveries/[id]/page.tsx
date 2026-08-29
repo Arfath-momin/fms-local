@@ -59,10 +59,11 @@ export default async function DeliveryNotePage({
         select: {
           id: true,
           billNo: true,
+          type: true,
           amount: true,
           rentDeducted: true,
           party: { select: { name: true } },
-          lines: { select: { qtyKg: true, box: true } },
+          lines: { select: { qtyKg: true, box: true, pack: true } },
         },
       },
       createdBy: { select: { name: true } },
@@ -155,40 +156,52 @@ export default async function DeliveryNotePage({
           </span>
         </div>
 
+        {/* BOXES, on every trip.
+            
+            This used to switch on the note's channel — boxes for a market
+            trip, kilos for anything else. Channel was retired because one
+            truck serves several channels, so it now reads null on every new
+            trip and every one of them got the kilo view. A trip whose bills
+            were one market and one mill then showed "Kg accepted 1,900"
+            against 500 kg out, because a market bill carries no kilos at all
+            and the mill's were being multiplied by their own box count.
+            
+            Boxes are the one unit every channel itemises, so they are the
+            reconciliation. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-[13px]">
-          {note.channel === "MARKET" ? (
-            <>
-              <Field
-                label="Boxes out"
-                value={String(tally.boxesDispatched)}
-              />
-              <Field label="Boxes billed" value={String(tally.boxesBilled)} />
-              <Field
-                label="Unbilled"
-                value={String(
-                  Math.max(0, tally.boxesDispatched - tally.boxesBilled)
-                )}
-              />
-              <Field
-                label="Crates back"
-                value={
-                  note.cratesReturned == null
-                    ? "—"
-                    : String(note.cratesReturned)
-                }
-              />
-            </>
-          ) : (
-            <>
-              <Field label="Kg out" value={fmtKg(tally.kgDispatched)} />
-              <Field label="Kg accepted" value={fmtKg(tally.kgBilled)} />
-              <Field label="Rejected" value={fmtKg(tally.kgGap)} />
-              {/* Valued at what the accepted fish actually fetched — a
-                  rejection is worth what the rest of the load sold for. */}
-              <Field label="Gap value" value={fmtMoney(tally.gapValue)} />
-            </>
-          )}
+          <Field label="Boxes out" value={String(tally.boxesDispatched)} />
+          <Field label="Boxes billed" value={String(tally.boxesBilled)} />
+          <Field
+            label="Unbilled"
+            value={String(
+              Math.max(0, tally.boxesDispatched - tally.boxesBilled)
+            )}
+          />
+          <Field
+            label="Crates back"
+            value={
+              note.cratesReturned == null ? "—" : String(note.cratesReturned)
+            }
+          />
         </div>
+
+        {/* The kilo gap, only where it is a real one.
+        
+            A factory or mill reweighs on arrival and pays for what it accepts,
+            so the shortfall against what went out IS the rejection. That only
+            holds when every bill off the trip works that way — one market bill
+            among them and the gap is just the boxes the market took, measured
+            in a unit it never used. */}
+        {tally.weighedOnly && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-[13px] mt-3 pt-3 border-t border-line">
+            <Field label="Kg out" value={fmtKg(tally.kgDispatched)} />
+            <Field label="Kg accepted" value={fmtKg(tally.kgBilled)} />
+            <Field label="Rejected" value={fmtKg(tally.kgGap)} />
+            {/* Valued at what the accepted fish actually fetched — a
+                rejection is worth what the rest of the load sold for. */}
+            <Field label="Gap value" value={fmtMoney(tally.gapValue)} />
+          </div>
+        )}
 
 
         {note.sales.length > 0 && (
@@ -197,9 +210,8 @@ export default async function DeliveryNotePage({
               <tr>
                 <th>Bill</th>
                 <th>Party</th>
-                <th className="num-col">
-                  {note.channel === "MARKET" ? "Boxes" : "Kg"}
-                </th>
+                <th className="num-col">Boxes</th>
+                <th className="num-col">Kg</th>
                 <th className="num-col">Amount</th>
               </tr>
             </thead>
@@ -221,19 +233,25 @@ export default async function DeliveryNotePage({
                     )}
                   </td>
                   <td>{sale.party.name}</td>
+                  {/* Both columns, and each bill fills in the one it keeps.
+                      A market bill is itemised in boxes and has no weight; a
+                      mill bill has both. Showing one column headed by the
+                      trip's channel meant a market bill read "0 kg", which
+                      looked like nothing was delivered. */}
                   <td className="num-col num">
-                    {note.channel === "MARKET"
-                      ? sale.lines.reduce((a, l) => a + (l.box ?? 0), 0)
-                      : fmtKg(
-                          sale.lines.reduce(
-                            (a, l) =>
-                              a +
-                              (l.box && l.box > 0
-                                ? Number(l.qtyKg) * l.box
-                                : Number(l.qtyKg)),
-                            0
-                          )
-                        )}
+                    {sale.lines.reduce(
+                      (a, l) => a + (l.pack === "LOOSE" ? 0 : (l.box ?? 0)),
+                      0
+                    ) || "—"}
+                  </td>
+                  <td className="num-col num">
+                    {(() => {
+                      const kg = sale.lines.reduce(
+                        (a, l) => a + Number(l.qtyKg),
+                        0
+                      );
+                      return kg > 0 ? fmtKg(kg) : "—";
+                    })()}
                   </td>
                   <td className="num-col num">{fmtMoney(sale.amount)}</td>
                 </tr>
