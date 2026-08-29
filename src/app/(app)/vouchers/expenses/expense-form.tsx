@@ -62,6 +62,8 @@ export type ExpenseInit = {
   spentOn: string;
   notes: string | null;
   details: Record<string, string>;
+  /** The trip this cost was filed against, so an edit keeps it. */
+  deliveryNoteId?: string | null;
 };
 
 export function ExpenseForm({
@@ -102,7 +104,7 @@ export function ExpenseForm({
     initial?.categoryId ?? categories[0]?.id ?? ""
   );
   const category = categories.find((c) => c.id === categoryId);
-  const [tripId, setTripId] = useState("");
+  const [tripId, setTripId] = useState(initial?.deliveryNoteId ?? "");
   const [vehicleId, setVehicleId] = useState("");
 
   /** Choosing the truck names its owner; neither is typed. */
@@ -126,15 +128,23 @@ export function ExpenseForm({
     setTripId(id);
     const t = trips.find((x) => x.id === id);
     if (!t) return;
-    setDetails((d) => ({
-      ...d,
-      vehicleNo: t.vehicleNumber,
-      transporter: t.transporterName,
-      advance: t.advancePaid > 0 ? String(t.advancePaid) : "",
-    }));
-    // Keep the two pickers agreeing: a trip names a truck, so the truck box
-    // should show it rather than sitting empty beside a filled-in number.
-    setVehicleId(vehicles.find((v) => v.number === t.vehicleNumber)?.id ?? "");
+    // The vehicle, transporter and advance are the RENT head's own fields.
+    // Writing them under any other head would leave keys in its details JSON
+    // that its form never shows and nothing ever reads.
+    if (isRent) {
+      setDetails((d) => ({
+        ...d,
+        vehicleNo: t.vehicleNumber,
+        transporter: t.transporterName,
+        advance: t.advancePaid > 0 ? String(t.advancePaid) : "",
+      }));
+      // Keep the two pickers agreeing: a trip names a truck, so the truck box
+      // should show it rather than sitting empty beside a filled-in number.
+      setVehicleId(vehicles.find((v) => v.number === t.vehicleNumber)?.id ?? "");
+    }
+    // The date, though, is the point of picking a trip on ANY head: the cost
+    // belongs to the buying day the fish was bought on, not to the day the
+    // voucher was typed (invariant 1).
     setTripDate(t.date);
   }
 
@@ -173,6 +183,9 @@ export function ExpenseForm({
   // default to the last day of the current month rather than to today.
   const isOverhead = category?.kind === "OVERHEAD";
   const isRent = category?.code === "RENT";
+  // Which heads are entered against a trip. Driven by the spec rather than by
+  // "is this the rent", which was true only until a second head needed it.
+  const isTripLinked = spec.tripLinked === true;
   const monthEnd = (() => {
     const [y, m] = today.split("-").map(Number);
     return `${y}-${String(m).padStart(2, "0")}-${String(
@@ -312,13 +325,14 @@ export function ExpenseForm({
         </div>
       )}
 
-      {isRent && trips.length > 0 && (
+      {isTripLinked && trips.length > 0 && (
         <div>
           <label htmlFor="tripId" className={labelCls}>
             Trip (optional)
           </label>
           <select
             id="tripId"
+            name="tripId"
             value={tripId}
             onChange={(e) => applyTrip(e.target.value)}
             className={inputCls}
@@ -348,8 +362,8 @@ export function ExpenseForm({
                 name={f.name}
                 label={f.label}
                 required={f.required}
-                types={[spec.vendorType === "TRANSPORTER" ? "TRANSPORTER" : "EXPENSE_VENDOR"]}
-                defaultType={spec.vendorType === "TRANSPORTER" ? "TRANSPORTER" : "EXPENSE_VENDOR"}
+                types={[spec.vendorType ?? "EXPENSE_VENDOR"]}
+                defaultType={spec.vendorType ?? "EXPENSE_VENDOR"}
                 expenseCategoryId={category?.id}
                 value={details[f.name] ?? ""}
                 onValueChange={(v) => setField(f.name, v)}

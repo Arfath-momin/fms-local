@@ -31,7 +31,13 @@ const ZERO = new Prisma.Decimal(0);
 const GROUPS: { key: string; label: string; types: PartyType[] }[] = [
   { key: "purchase", label: "Purchase Parties", types: PURCHASE_LEDGER_TYPES },
   { key: "sale", label: "Sale Ledgers", types: SALE_LEDGER_TYPES },
-  { key: "expense", label: "Expense Vendors", types: EXPENSE_LEDGER_TYPES },
+  // Vendors and line men together: both are people BFM owes for work done or
+  // goods supplied, and "who do we still owe" is one question.
+  {
+    key: "expense",
+    label: "Expense Vendors & Line Men",
+    types: EXPENSE_LEDGER_TYPES,
+  },
   // Transporters carry a real balance: rent is credited when a trip is
   // created and settled by the advance and by whatever a market party paid the
   // driver. A balance that does not close at zero means something is genuinely

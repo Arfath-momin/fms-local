@@ -7,6 +7,7 @@ export const PARTY_TYPE_LABELS: Record<PartyType, string> = {
   FISH_MILL: "Fish Mill",
   LOCAL_BUYER: "Local Buyer",
   EXPENSE_VENDOR: "Expense Vendor",
+  LINE_MAN: "Line Man",
   CARE_OF: "CareOf",
   PURCHASE_GROUP: "Purchase Party",
   TRANSPORTER: "Transporter",
@@ -19,6 +20,7 @@ export const PARTY_TYPE_PLURALS: Record<PartyType, string> = {
   FISH_MILL: "Fish Mills",
   LOCAL_BUYER: "Local Buyers",
   EXPENSE_VENDOR: "Expense Vendors",
+  LINE_MAN: "Line Men",
   CARE_OF: "CareOf Agents",
   PURCHASE_GROUP: "Purchase Parties",
   TRANSPORTER: "Transporters",
@@ -56,7 +58,10 @@ export const LEDGER_PARTY_TYPES = PARTY_TYPES.filter(isLedgerPartyType);
  */
 export const PURCHASE_LEDGER_TYPES: PartyType[] = ["PURCHASE_GROUP"];
 
-export const EXPENSE_LEDGER_TYPES: PartyType[] = ["EXPENSE_VENDOR"];
+// The people BFM pays for services. A line man sits here rather than in his own
+// section: the question "what do we owe the people who worked for us" is one
+// question, and splitting him out would make it two screens with one name each.
+export const EXPENSE_LEDGER_TYPES: PartyType[] = ["EXPENSE_VENDOR", "LINE_MAN"];
 
 export const SALE_LEDGER_TYPES: PartyType[] = [
   "MARKET_BUYER",

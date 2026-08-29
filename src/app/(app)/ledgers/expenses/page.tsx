@@ -55,7 +55,8 @@ export default async function ExpenseLedgersPage() {
         <div>
           <h1 className="heading text-xl font-semibold">Expense Ledgers</h1>
           <p className="text-muted text-[13px]">
-            {company.name} · {centre.name} · by category, then by vendor.
+            {company.name} · {centre.name} · by category, then by whoever was
+            paid — a vendor, or a line man.
           </p>
         </div>
         <div className="text-right">

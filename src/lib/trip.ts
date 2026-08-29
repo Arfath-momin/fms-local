@@ -331,6 +331,57 @@ function remainingByParticular(
  * Broken down by particular as well as by party, because a truck carries two or
  * three varieties and "sixty boxes" is not an answer when forty were bangdha.
  */
+
+/**
+ * The trips a cost can be entered against, newest first.
+ *
+ * Every trip, not just the open ones: a bill or a line man's payment often
+ * turns up days after the load was closed, and offering only open trips would
+ * leave the clerk with nowhere to file a cost that plainly belongs to one.
+ *
+ * Shared because both the new-expense screen and the edit screen need the same
+ * list. The edit screen having no list at all was a quiet data-loss bug: the
+ * picker never rendered, so saving an edit submitted no trip and cleared the
+ * link the voucher already had.
+ */
+export type TripOption = {
+  id: string;
+  billNo: string;
+  /** yyyy-mm-dd, ready for a date input. */
+  date: string;
+  vehicleNumber: string;
+  transporterName: string;
+  advancePaid: number;
+};
+
+export async function tripOptions(scope: {
+  companyId: string;
+  centreId: string;
+}): Promise<TripOption[]> {
+  const trips = await prisma.deliveryNote.findMany({
+    where: scope,
+    orderBy: [{ date: "desc" }, { billNo: "desc" }],
+    take: 60,
+    select: {
+      id: true,
+      billNo: true,
+      date: true,
+      advancePaid: true,
+      vehicle: {
+        select: { number: true, transporter: { select: { name: true } } },
+      },
+    },
+  });
+  return trips.map((t) => ({
+    id: t.id,
+    billNo: t.billNo,
+    date: t.date.toISOString().slice(0, 10),
+    vehicleNumber: t.vehicle.number,
+    transporterName: t.vehicle.transporter.name,
+    advancePaid: Number(t.advancePaid ?? 0),
+  }));
+}
+
 export type BoxStatementDrop = {
   saleId: string;
   billNo: string;

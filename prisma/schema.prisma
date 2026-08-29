@@ -196,6 +196,10 @@ enum PartyType {
   // of their own so payments settle against the right person. The individual
   // boat is recorded on the line, never as a ledger. See src/lib/party.ts
   // (FIXED_PURCHASE_PARTY).
+  LINE_MAN // unloads the fish at the market. Paid per trip, on his own expense
+  // voucher, and given a ledger rather than being lumped in with expense
+  // vendors: he is a person the business owes money to trip by trip, and the
+  // box statement names whoever unloaded a given load.
   TRANSPORTER // owns the vehicles. Rent for a trip is credited here and
   // settled by the advance and by whatever a market party paid the driver on
   // BFM's behalf; a balance that does not close at zero means something is

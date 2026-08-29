@@ -44,8 +44,17 @@ type Parsed = {
   notes: string | null;
   details: Record<string, string>;
   vendorName: string;
-  /** EXPENSE_VENDOR for most heads; TRANSPORTER for vehicle rent. */
+  /** EXPENSE_VENDOR for most heads; TRANSPORTER for rent, LINE_MAN for a line man. */
   vendorType: PartyType;
+  /**
+   * The trip this cost belongs to, when the head is entered against one.
+   *
+   * Invariant 8: a cost links to its trip by id, never by matching a date and a
+   * scrap of vehicle text. The picker on this form used to fill the date and
+   * then throw the trip away, so a rent voucher and its delivery note were
+   * related only by looking alike.
+   */
+  deliveryNoteId: string | null;
   file: unknown;
 };
 
@@ -152,6 +161,21 @@ async function parse(
         `total of ${amount.toFixed(2)}. Check the figures.`,
     };
 
+  // The trip, checked against this company rather than trusted from the form —
+  // a tampered id must not attach this company's cost to another's trip. Only
+  // heads that ask for a trip may carry one; anything else is a stale field
+  // from a category switch and is dropped rather than stored.
+  const tripIdRaw = String(formData.get("tripId") ?? "").trim();
+  let deliveryNoteId: string | null = null;
+  if (tripIdRaw && EXPENSE_SPECS[category.code]?.tripLinked) {
+    const trip = await prisma.deliveryNote.findFirst({
+      where: { id: tripIdRaw, companyId },
+      select: { id: true },
+    });
+    if (!trip) return { error: "That trip could not be found." };
+    deliveryNoteId = trip.id;
+  }
+
   return {
     data: {
       categoryId: category.id,
@@ -166,6 +190,7 @@ async function parse(
       details,
       vendorName: expenseVendorName(category.code, category.name, details),
       vendorType: EXPENSE_SPECS[category.code]?.vendorType ?? "EXPENSE_VENDOR",
+      deliveryNoteId,
       file,
     },
   };
@@ -243,6 +268,7 @@ export async function createExpense(
           centreId: centre.id,
           partyId,
           categoryId: d.categoryId,
+          deliveryNoteId: d.deliveryNoteId,
           amount: d.amount,
           date: d.date,
           spentOn: d.spentOn,
@@ -349,6 +375,7 @@ export async function updateExpense(
         data: {
           partyId,
           categoryId: d.categoryId,
+          deliveryNoteId: d.deliveryNoteId,
           lines: { create: d.lines },
           amount: d.amount,
           date: d.date,

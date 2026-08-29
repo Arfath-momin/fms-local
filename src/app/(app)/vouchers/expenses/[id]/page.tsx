@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { tripOptions } from "@/lib/trip";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
@@ -118,8 +119,14 @@ export default async function ExpenseDetailPage({
     select: { id: true, code: true, name: true, allowsLines: true, kind: true },
   });
 
+  // The same list the new-expense screen offers. Without it the trip picker
+  // never rendered here, so saving an edit submitted no trip and cleared a link
+  // the voucher already had.
+  const trips = await tripOptions({ companyId: company.id, centreId: centre.id });
+
   const initial = {
     categoryId: expense.categoryId,
+    deliveryNoteId: expense.deliveryNoteId,
     lines: expense.lines.map((l) => ({
       description: l.description,
       amount: l.amount.toString(),
@@ -141,6 +148,7 @@ export default async function ExpenseDetailPage({
         categories={categories}
         action={updateExpense.bind(null, expense.id)}
         initial={initial}
+        trips={trips}
         submitLabel="Save Changes"
         scope={scopeFieldValues({ company, centre })}
         // The Attachments panel below is the single place images are managed

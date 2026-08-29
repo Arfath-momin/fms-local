@@ -17,6 +17,7 @@ export const DIRECT_CODES = [
   "BATHA",
   "CANTEEN",
   "RENT",
+  "LINE_MAN",
 ] as const;
 export const OVERHEAD_CODES = ["SALARY", "OFFICE_RENT", "OTHER"] as const;
 
@@ -50,6 +51,7 @@ export const DEFAULT_EXPENSE_CATEGORIES: readonly {
   { code: "BATHA", name: "Batha", kind: "DIRECT", allowsLines: false },
   { code: "CANTEEN", name: "Canteen", kind: "DIRECT", allowsLines: false },
   { code: "RENT", name: "Vehicle Rent", kind: "DIRECT", allowsLines: false },
+  { code: "LINE_MAN", name: "Line Man", kind: "DIRECT", allowsLines: false },
   { code: "SALARY", name: "Salaries", kind: "OVERHEAD", allowsLines: false },
   { code: "OFFICE_RENT", name: "Office Rent", kind: "OVERHEAD", allowsLines: false },
   { code: "OTHER", name: "Other", kind: "OVERHEAD", allowsLines: true },
@@ -80,7 +82,16 @@ export type ExpenseCategorySpec = {
    * split one man's account in two — the rent on one ledger, the trips he ran
    * on another.
    */
-  vendorType?: "EXPENSE_VENDOR" | "TRANSPORTER";
+  vendorType?: "EXPENSE_VENDOR" | "TRANSPORTER" | "LINE_MAN";
+  /**
+   * Whether this head is entered against a TRIP.
+   *
+   * Was hardcoded to "is this the rent", which was true right up until a second
+   * head needed the same picker. A line man unloads one particular load, so
+   * naming the trip is the whole point of the voucher: it dates the cost to
+   * that trip's buying day and lets the box statement say who unloaded it.
+   */
+  tripLinked?: boolean;
   /**
    * Detail keys holding money already handed over against this total.
    *
@@ -178,6 +189,24 @@ export const EXPENSE_SPECS: Record<string, ExpenseCategorySpec> = {
     vendorFrom: "transporter",
     vendorType: "TRANSPORTER",
     prepaidFrom: ["advance", "paidByMarket"],
+    tripLinked: true,
+  },
+  // The man who unloads at the market.
+  //
+  // One voucher per trip: pick the load, name him, enter what he was paid. The
+  // trip is what makes it a cost of that buying day rather than of the day
+  // somebody got round to entering it — the same rule every other trip cost
+  // follows (invariant 1).
+  //
+  // He is a LINE_MAN party, not an expense vendor, so what he is owed across
+  // several trips reads as one man's account.
+  LINE_MAN: {
+    label: "Line Man",
+    fields: [t("lineManName", "Line Man Name")],
+    amountEntered: true,
+    vendorFrom: "lineManName",
+    vendorType: "LINE_MAN",
+    tripLinked: true,
   },
 };
 

@@ -5,6 +5,7 @@ import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { createExpense } from "../actions";
 import { ExpenseForm } from "../expense-form";
 import { NoCentreNotice } from "../../../no-centre";
+import { tripOptions } from "@/lib/trip";
 
 export default async function NewExpensePage() {
   const session = await requireSession();
@@ -26,32 +27,10 @@ export default async function NewExpensePage() {
     select: { id: true, code: true, name: true, allowsLines: true, kind: true },
   });
 
-  // Open trips of every channel, so a Vehicle Rent voucher can fill itself in
-  // from one: the vehicle, the transporter, the buying day and the advance
-  // already handed over at loading. Only the total is left to type.
-  const trips = (
-    await prisma.deliveryNote.findMany({
-      where: { companyId: company.id, centreId: centre.id },
-      orderBy: [{ date: "desc" }, { billNo: "desc" }],
-      take: 60,
-      select: {
-        id: true,
-        billNo: true,
-        date: true,
-        advancePaid: true,
-        vehicle: {
-          select: { number: true, transporter: { select: { name: true } } },
-        },
-      },
-    })
-  ).map((t) => ({
-    id: t.id,
-    billNo: t.billNo,
-    date: t.date.toISOString().slice(0, 10),
-    vehicleNumber: t.vehicle.number,
-    transporterName: t.vehicle.transporter.name,
-    advancePaid: Number(t.advancePaid ?? 0),
-  }));
+  // Every trip, so a head entered against one — vehicle rent, a line man —
+  // can fill in the buying day from it and be LINKED to it by id rather than
+  // by resembling it (invariant 8).
+  const trips = await tripOptions({ companyId: company.id, centreId: centre.id });
 
   // The vehicle master, so a rent voucher picks the truck rather than typing a
   // number that has to match one somewhere else.
