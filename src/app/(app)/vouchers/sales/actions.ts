@@ -88,7 +88,8 @@ type Parsed = {
   expenses: ParsedExpense[];
   weight: Prisma.Decimal | null;
   netWeight: Prisma.Decimal | null;
-  returnKg: Prisma.Decimal | null;
+  waterLess: Prisma.Decimal | null;
+  totalBox: number | null;
   vehicleNo: string | null;
   placeOfLoading: string | null;
   returnNote: string | null;
@@ -219,6 +220,51 @@ async function writeSaleExpenses(
 }
 
 
+/**
+ * Give every Items row the weight the weighing slip implies.
+ *
+ * The buyer weighs the CONSIGNMENT on arrival — nobody weighs a single box — so
+ * a per-row weight was a figure the paper never broke down and the clerk had to
+ * apportion by hand. The average falls out of the slip (net ÷ total box) and
+ * each row takes it times its own boxes.
+ *
+ * A LOOSE row keeps the weight that was typed: it never went into a box, so
+ * there is no average that applies to it.
+ *
+ * The rows have to add up to the boxes the bill unloaded, or the average is
+ * being spread over a count that does not match what was counted.
+ */
+function applyWeighingSlip(
+  base: {
+    lines: ParsedLine[];
+    netWeight: Prisma.Decimal | null;
+    totalBox: number | null;
+  }
+): { error: string } | null {
+  const totalBox = base.totalBox ?? 0;
+  if (totalBox <= 0) return null;
+
+  const boxed = base.lines.reduce(
+    (a, l) => a + (l.pack === "LOOSE" ? 0 : l.box ?? 0),
+    0
+  );
+  if (boxed !== totalBox)
+    return {
+      error:
+        `The items come to ${boxed} box${boxed === 1 ? "" : "es"}, but this ` +
+        `bill unloaded ${totalBox}. They have to agree before the weights ` +
+        `mean anything.`,
+    };
+
+  const avg = (base.netWeight ?? ZERO).div(totalBox);
+  for (const l of base.lines) {
+    if (l.pack === "LOOSE") continue;
+    l.qtyKg = avg.mul(l.box ?? 0).toDecimalPlaces(3);
+    l.total = l.qtyKg.mul(l.ratePerKg);
+  }
+  return null;
+}
+
 /** The category a trip's rent is filed under. */
 const RENT_CATEGORY_CODE = "RENT";
 
@@ -265,12 +311,34 @@ function readWeighingSlip(
   base: {
     weight: Prisma.Decimal | null;
     netWeight: Prisma.Decimal | null;
-    returnKg: Prisma.Decimal | null;
+    waterLess: Prisma.Decimal | null;
+    totalBox: number | null;
   }
-) {
+): { error: string } | null {
   base.weight = parseMoney(clean(formData.get("weight"))) ?? null;
-  base.netWeight = parseMoney(clean(formData.get("netWeight"))) ?? null;
-  base.returnKg = parseMoney(clean(formData.get("returnKg"))) ?? null;
+  base.waterLess = parseMoney(clean(formData.get("waterLess"))) ?? null;
+
+  if (base.waterLess && base.weight && base.waterLess.gt(base.weight))
+    return {
+      error:
+        `They cannot have taken off ${base.waterLess.toFixed(3)} kg for water ` +
+        `from a load of ${base.weight.toFixed(3)} kg.`,
+    };
+
+  // Derived, never read from the form. Three figures a clerk can type
+  // independently are three figures that can disagree, and the net is the one
+  // the money hangs off.
+  base.netWeight = base.weight
+    ? base.weight.sub(base.waterLess ?? ZERO)
+    : null;
+
+  const boxRaw = clean(formData.get("totalBox"));
+  if (boxRaw) {
+    if (!INT.test(boxRaw))
+      return { error: "Total box must be a whole number." };
+    base.totalBox = Number(boxRaw);
+  }
+  return null;
 }
 
 /**
@@ -592,7 +660,8 @@ async function parse(
     expenses: [] as ParsedExpense[],
     weight: null as Prisma.Decimal | null,
     netWeight: null as Prisma.Decimal | null,
-    returnKg: null as Prisma.Decimal | null,
+    waterLess: null as Prisma.Decimal | null,
+    totalBox: null as number | null,
     vehicleNo: null as string | null,
     placeOfLoading: null as string | null,
     returnNote: null as string | null,
@@ -666,7 +735,8 @@ async function parse(
     // rent is grossed back up at report time (see saleRevenue in lib/sale).
     amount = netBill;
   } else if (type === "FACTORY") {
-    readWeighingSlip(formData, base);
+    const slip = readWeighingSlip(formData, base);
+    if (slip) return slip;
     base.returnNote = clean(formData.get("returnNote")) || null;
 
     // Factory bills are itemised now, the same shape as a fish mill bill: the
@@ -678,7 +748,9 @@ async function parse(
 
     if (parsedLines.lines.length > 0) {
       base.lines = parsedLines.lines;
-      amount = parsedLines.lines.reduce((a, l) => a.add(l.total), ZERO);
+      const applied = applyWeighingSlip(base);
+      if (applied) return applied;
+      amount = base.lines.reduce((a, l) => a.add(l.total), ZERO);
     } else {
       // A bill entered before itemisation existed keeps its single figure.
       // Re-pricing one to zero because it has no rows would quietly rewrite a
@@ -694,9 +766,12 @@ async function parse(
     if ("error" in parsedLines) return { error: parsedLines.error };
     if (parsedLines.lines.length === 0) return { error: "Add at least one line item." };
     base.lines = parsedLines.lines;
-    readWeighingSlip(formData, base);
+    const slip = readWeighingSlip(formData, base);
+    if (slip) return slip;
     base.placeOfLoading = clean(formData.get("placeOfLoading")) || null;
-    amount = parsedLines.lines.reduce((a, l) => a.add(l.total), ZERO);
+    const applied = applyWeighingSlip(base);
+    if (applied) return applied;
+    amount = base.lines.reduce((a, l) => a.add(l.total), ZERO);
   } else {
     // LOCAL
     const parsedLines = parseLines(formData, false);
@@ -1014,7 +1089,8 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
     notes: d.notes,
     weight: d.weight,
     netWeight: d.netWeight,
-    returnKg: d.returnKg,
+    waterLess: d.waterLess,
+    totalBox: d.totalBox,
     vehicleNo: d.vehicleNo,
     placeOfLoading: d.placeOfLoading,
     returnNote: d.returnNote,

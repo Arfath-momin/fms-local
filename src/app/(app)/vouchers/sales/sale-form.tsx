@@ -66,9 +66,11 @@ export type SaleInit = {
   /** Costs entered on this bill, which become expense vouchers. */
   expenses?: SaleExpenseRow[];
   amount: string; // factory bill amount total
-  /** The buyer's weighing slip: as loaded, after water and ice, handed back. */
+  /** The buyer's weighing slip. Net is derived from these two. */
   weight: string;
-  returnKg: string;
+  waterLess: string;
+  /** The boxes this bill unloaded; the Items rows must add up to it. */
+  totalBox: string;
   netWeight: string;
   placeOfLoading: string;
   returnNote: string;
@@ -176,8 +178,8 @@ export function SaleForm({
   // The buyer's weighing slip. Controlled so the reconciliation below can read
   // them while they are being typed.
   const [weight, setWeight] = useState(initial?.weight ?? "");
-  const [netWeight, setNetWeight] = useState(initial?.netWeight ?? "");
-  const [returnKg, setReturnKg] = useState(initial?.returnKg ?? "");
+  const [waterLess, setWaterLess] = useState(initial?.waterLess ?? "");
+  const [totalBox, setTotalBox] = useState(initial?.totalBox ?? "");
 
   const [expenses, setExpenses] = useState<SaleExpenseRow[]>(
     initial?.expenses?.length ? initial.expenses : []
@@ -228,6 +230,13 @@ export function SaleForm({
    */
   const fillFromTrip = (from = trip) => {
     if (!from || from.remaining.length === 0) return;
+    // The boxes still unbilled on the trip are the boxes this bill is unloading
+    // — offered as the count so the second stop starts from what the first one
+    // left rather than from the whole load again.
+    if (weighed)
+      setTotalBox(
+        String(from.remaining.reduce((a, r) => a + (r.pack === "LOOSE" ? 0 : r.box), 0))
+      );
     setLines(
       from.remaining.map((r) => ({
         pack: r.pack,
@@ -243,13 +252,23 @@ export function SaleForm({
   // Kgs is the weight of ONE box, so the row's real weight is box × kgs and
   // the rate applies to that. saleLineTotalKg is the same helper the server
   // action uses, so the figure on screen and the figure saved cannot disagree.
-  const rowKg = (l: SaleLineInit) =>
-    saleLineTotalKg({ qtyKg: n(l.qtyKg), box: n(l.box) });
+  /**
+   * The weight of one Items row.
+   *
+   * On a fish mill or factory bill it is DERIVED — the average off the weighing
+   * slip, times the boxes on the row. The mill weighs the lot on arrival and
+   * nobody weighs a single box, so asking for a per-row weight was asking the
+   * clerk to apportion a figure the paper never broke down. A loose row has no
+   * boxes to multiply, so its weight is typed as it always was.
+   *
+   * Local bills keep typing it: there is no weighing slip to derive from.
+   */
+  const rowKg = (l: SaleLineInit) => {
+    if (weighed && l.pack !== "LOOSE") return avgKgPerBox * n(l.box);
+    return saleLineTotalKg({ qtyKg: n(l.qtyKg), box: n(l.box) });
+  };
 
-  const lineTotal = useMemo(
-    () => lines.reduce((s, l) => s + rowKg(l) * n(l.ratePerKg), 0),
-    [lines]
-  );
+  const lineTotal = lines.reduce((s, l) => s + rowKg(l) * n(l.ratePerKg), 0);
   /**
    * Particulars this bill claims more of than the trip has left.
    *
@@ -283,16 +302,25 @@ export function SaleForm({
     return out;
   }, [lines, trip]);
 
-  const boxTotal = useMemo(
-    () => lines.reduce((s, l) => s + (l.pack === "LOOSE" ? 0 : n(l.box)), 0),
-    [lines]
+  const boxTotal = lines.reduce(
+    (s, l) => s + (l.pack === "LOOSE" ? 0 : n(l.box)),
+    0
   );
-  const kgTotal = useMemo(() => lines.reduce((s, l) => s + rowKg(l), 0), [lines]);
+  const kgTotal = lines.reduce((s, l) => s + rowKg(l), 0);
 
-  // What the buyer took, by the weighing slip: the net, less what came back.
-  const expectedKg = Math.max(0, n(netWeight) - n(returnKg));
-  // A kilo of slack, so three decimal places rounding does not read as an error.
-  const kgOff = expectedKg > 0 && Math.abs(expectedKg - kgTotal) > 1;
+  // The net the buyer paid on: what arrived, less what they took off for water
+  // and ice. Derived, never typed — three figures that can be entered
+  // independently are three figures that can disagree.
+  const netWeight = Math.max(0, n(weight) - n(waterLess));
+
+  // What one box weighs, worked out from the lot. This is the way round the
+  // mill actually works: they weigh the whole consignment on arrival and
+  // nobody weighs a single box. Every Items row takes its weight from it.
+  const avgKgPerBox = n(totalBox) > 0 ? netWeight / n(totalBox) : 0;
+
+  // The Items rows have to add up to the boxes this bill unloaded. Off by any
+  // amount and either the count or a row is wrong.
+  const boxesOff = n(totalBox) > 0 && boxTotal !== n(totalBox);
 
   // Same helper the action stores with, so the figure approved on screen and
   // the figure written to the database are never two calculations.
@@ -672,59 +700,75 @@ export function SaleForm({
                 onChange={(e) => setWeight(e.target.value)}
                 className={inputCls + " num text-right"}
               />
-              <p className="text-muted text-[12px] mt-1">As loaded.</p>
+              <p className="text-muted text-[12px] mt-1">As it arrived.</p>
             </div>
             <div>
-              <label htmlFor="netWeight" className={labelCls}>
-                Net Weight
+              <label htmlFor="waterLess" className={labelCls}>
+                Water Less
               </label>
               <input
-                id="netWeight"
-                name="netWeight"
+                id="waterLess"
+                name="waterLess"
                 inputMode="decimal"
-                value={netWeight}
-                onChange={(e) => setNetWeight(e.target.value)}
+                value={waterLess}
+                onChange={(e) => setWaterLess(e.target.value)}
                 className={inputCls + " num text-right"}
               />
               <p className="text-muted text-[12px] mt-1">
-                After water and ice.
+                What they took off for water and ice.
               </p>
             </div>
             <div>
-              <label htmlFor="returnKg" className={labelCls}>
-                Return
-              </label>
-              <input
-                id="returnKg"
-                name="returnKg"
-                inputMode="decimal"
-                value={returnKg}
-                onChange={(e) => setReturnKg(e.target.value)}
-                className={inputCls + " num text-right"}
-              />
+              <span className={labelCls}>Net Weight</span>
+              {/* Derived, never typed. Three figures a clerk can enter
+                  independently are three figures that can disagree. */}
+              <p className="text-[15px] font-semibold num text-right py-2">
+                {netWeight ? fmtKg(netWeight) : "—"}
+              </p>
               <p className="text-muted text-[12px] mt-1">
-                Handed back to us.
+                Total less water. What they paid on.
               </p>
             </div>
           </div>
 
-          {/* The slip against the rows. Net less what came back should be what
-              the buyer actually took, which is what the Items add up to. Shown
-              rather than enforced: the money and the box statement come from
-              the Items, and a paper that does not quite reconcile is a fact to
-              notice, not a reason to refuse the bill. */}
-          {expectedKg > 0 && (
-            <p
-              className={
-                "text-[12px] mt-3 pt-2 border-t border-line " +
-                (kgOff ? "text-debit font-semibold" : "text-muted")
-              }
-            >
-              Net {fmtKg(n(netWeight))} less return {fmtKg(n(returnKg))} ={" "}
-              {fmtKg(expectedKg)} — and the items come to {fmtKg(kgTotal)}
-              {kgOff
-                ? `. ${fmtKg(Math.abs(expectedKg - kgTotal))} apart; check the figures, or save anyway if that is what the paper says.`
-                : ". They agree."}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-3 pt-3 border-t border-line">
+            <div>
+              <label htmlFor="totalBox" className={labelCls}>
+                Total Box
+              </label>
+              <input
+                id="totalBox"
+                name="totalBox"
+                inputMode="numeric"
+                value={totalBox}
+                onChange={(e) => setTotalBox(e.target.value)}
+                className={inputCls + " num text-right"}
+              />
+              <p className="text-muted text-[12px] mt-1">
+                {trip
+                  ? "From the trip — what it still has unbilled."
+                  : "The boxes this bill unloaded."}
+              </p>
+            </div>
+            <div>
+              <span className={labelCls}>Average Kg / Box</span>
+              {/* The figure every Items row takes its weight from. The mill
+                  weighs the lot on arrival; nobody weighs a single box. */}
+              <p className="text-[15px] font-semibold num text-right py-2">
+                {avgKgPerBox ? avgKgPerBox.toFixed(3) : "—"}
+              </p>
+              <p className="text-muted text-[12px] mt-1">
+                Net weight ÷ total box. Each row&rsquo;s kilos come from this.
+              </p>
+            </div>
+          </div>
+
+          {boxesOff && (
+            <p className="text-debit text-[12px] mt-3 pt-2 border-t border-line font-semibold">
+              The items come to {boxTotal} box
+              {boxTotal === 1 ? "" : "es"}, but this bill unloaded{" "}
+              {n(totalBox)}. They have to agree before the weights mean
+              anything.
             </p>
           )}
         </div>
@@ -810,7 +854,16 @@ export function SaleForm({
                       </td>
                       {type !== "MARKET" && (
                         <td className="px-1 py-1">
-                          <input name="qtyKg" inputMode="decimal" value={l.qtyKg} onChange={(e) => setLine(i, { qtyKg: e.target.value })} className={cell} />
+                          {weighed && l.pack !== "LOOSE" ? (
+                            // Derived: the average off the weighing slip times
+                            // this row's boxes. Read-only, because the mill
+                            // weighed the lot and never weighed a box.
+                            <span className="block num text-right text-muted py-2">
+                              {rowKg(l) ? rowKg(l).toFixed(3) : ""}
+                            </span>
+                          ) : (
+                            <input name="qtyKg" inputMode="decimal" value={l.qtyKg} onChange={(e) => setLine(i, { qtyKg: e.target.value })} className={cell} />
+                          )}
                         </td>
                       )}
                       {type !== "MARKET" && (

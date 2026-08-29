@@ -188,8 +188,8 @@ export default async function SalePage({
         </div>
       )}
 
-      {boxedLines && (sale.weight || sale.netWeight || sale.returnKg) && (
-        <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+      {boxedLines && (sale.weight || sale.netWeight || sale.totalBox) && (
+        <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-1 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-4">
           <Field
             label="Total Weight"
             value={sale.weight ? fmtKg(sale.weight) : "—"}
@@ -199,8 +199,21 @@ export default async function SalePage({
             value={sale.netWeight ? fmtKg(sale.netWeight) : "—"}
           />
           <Field
-            label="Return"
-            value={sale.returnKg ? fmtKg(sale.returnKg) : "—"}
+            label="Water Less"
+            value={sale.waterLess ? fmtKg(sale.waterLess) : "—"}
+          />
+          <Field
+            label="Total Box"
+            value={sale.totalBox ? String(sale.totalBox) : "—"}
+          />
+          {/* Derived from the two beside it, the same way the form does. */}
+          <Field
+            label="Avg Kg / Box"
+            value={
+              sale.netWeight && sale.totalBox
+                ? (Number(sale.netWeight) / sale.totalBox).toFixed(3)
+                : "—"
+            }
           />
         </div>
       )}

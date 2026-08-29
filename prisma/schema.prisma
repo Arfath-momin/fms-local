@@ -724,6 +724,17 @@ model Sale {
   /// netWeight − returnKg does not come to the Items total — a discrepancy
   /// worth seeing, never worth refusing a bill over.
   weight         Decimal? @db.Decimal(12, 3)
+  /// What the buyer deducted for water and ice, off their own slip. Net weight
+  /// is this taken off the total, and is stored derived rather than typed so
+  /// the three figures cannot be entered out of agreement with each other.
+  waterLess      Decimal? @map("water_less") @db.Decimal(12, 3)
+  /// The boxes this bill unloaded — the figure the Items rows must add up to.
+  ///
+  /// Prefilled from what the trip still has unbilled, so the second stop is
+  /// offered what the first one left rather than the whole load again. Typed
+  /// over where the count on the ground disagrees, which is the merchant's
+  /// call and not the app's.
+  totalBox       Int?     @map("total_box")
   netWeight      Decimal? @map("net_weight") @db.Decimal(12, 3)
   returnKg       Decimal? @map("return_kg") @db.Decimal(12, 3)
   vehicleNo      String?  @map("vehicle_no")
