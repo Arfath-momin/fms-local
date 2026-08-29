@@ -252,9 +252,23 @@ export function SaleForm({
     );
   };
 
-  // Kgs is the weight of ONE box, so the row's real weight is box × kgs and
-  // the rate applies to that. saleLineTotalKg is the same helper the server
-  // action uses, so the figure on screen and the figure saved cannot disagree.
+  // The net the buyer paid on: what arrived, less what they took off for water
+  // and ice. Derived, never typed — three figures that can be entered
+  // independently are three figures that can disagree.
+  //
+  // Declared HERE, above rowKg, and it has to stay above it. rowKg reads
+  // avgKgPerBox, and lineTotal calls rowKg immediately — so with these two
+  // sitting further down the body, rendering a weighed bill threw
+  // "Cannot access 'avgKgPerBox' before initialization" and the Fish Mill and
+  // Factory forms would not open at all. Market and Local were unaffected,
+  // because rowKg only reaches this branch when there is a weighing slip.
+  const netWeight = Math.max(0, n(weight) - n(waterLess));
+
+  // What one box weighs, worked out from the lot. This is the way round the
+  // mill actually works: they weigh the whole consignment on arrival and
+  // nobody weighs a single box. Every Items row takes its weight from it.
+  const avgKgPerBox = n(totalBox) > 0 ? netWeight / n(totalBox) : 0;
+
   /**
    * The weight of one Items row.
    *
@@ -310,16 +324,6 @@ export function SaleForm({
     0
   );
   const kgTotal = lines.reduce((s, l) => s + rowKg(l), 0);
-
-  // The net the buyer paid on: what arrived, less what they took off for water
-  // and ice. Derived, never typed — three figures that can be entered
-  // independently are three figures that can disagree.
-  const netWeight = Math.max(0, n(weight) - n(waterLess));
-
-  // What one box weighs, worked out from the lot. This is the way round the
-  // mill actually works: they weigh the whole consignment on arrival and
-  // nobody weighs a single box. Every Items row takes its weight from it.
-  const avgKgPerBox = n(totalBox) > 0 ? netWeight / n(totalBox) : 0;
 
   // The Items rows have to add up to the boxes this bill unloaded. Off by any
   // amount and either the count or a row is wrong.
@@ -904,11 +908,28 @@ export function SaleForm({
                         <td className="px-1 py-1">
                           {weighed && l.pack !== "LOOSE" ? (
                             // Derived: the average off the weighing slip times
-                            // this row's boxes. Read-only, because the mill
-                            // weighed the lot and never weighed a box.
-                            <span className="block num text-right text-muted py-2">
-                              {rowKg(l) ? rowKg(l).toFixed(3) : ""}
-                            </span>
+                            // this row's boxes. The mill weighed the lot and
+                            // never weighed a box, so this is not typed.
+                            //
+                            // readOnly, NOT a <span> and not disabled. It has to
+                            // remain a submitting field: the rows travel as
+                            // repeated `qtyKg` inputs paired up by position, so
+                            // a row that sends nothing shifts every row after
+                            // it. A bill of two boxed rows sent no weights at
+                            // all and was refused; a bill mixing Loose with
+                            // boxed rows would have been worse, quietly giving
+                            // the loose row's weight to somebody else.
+                            //
+                            // The server derives these again from the slip
+                            // regardless, so what is sent here is a starting
+                            // value and never the figure that is stored.
+                            <input
+                              name="qtyKg"
+                              readOnly
+                              tabIndex={-1}
+                              value={rowKg(l) ? rowKg(l).toFixed(3) : ""}
+                              className={cell + " text-muted bg-background"}
+                            />
                           ) : (
                             <input name="qtyKg" inputMode="decimal" value={l.qtyKg} onChange={(e) => setLine(i, { qtyKg: e.target.value })} className={cell} />
                           )}

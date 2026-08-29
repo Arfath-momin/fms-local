@@ -18,7 +18,8 @@
     "user:create": "tsx --conditions=react-server scripts/create-user.ts",
     "bootstrap": "tsx --conditions=react-server scripts/bootstrap.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke": "tsx --conditions=react-server scripts/smoke-pages.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

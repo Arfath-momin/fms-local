@@ -529,7 +529,18 @@ function parseLines(
    * the net the market paid, not a rate times a weight, so demanding a weight
    * would reject every market bill for a figure that has no meaning on one.
    */
-  boxesOnly = false
+  boxesOnly = false,
+  /**
+   * FISH_MILL and FACTORY. Their row weights are DERIVED from the weighing
+   * slip — the average kg per box times this row's boxes — so demanding a
+   * typed weight here rejects a bill for a figure the clerk is not the source
+   * of, and which applyWeighingSlip is about to overwrite anyway.
+   *
+   * What those rows must have instead is BOXES, since the boxes are what the
+   * average is spread over. A LOOSE row is the exception at both ends: it
+   * carries no boxes and keeps the weight that was typed for it.
+   */
+  weighed = false
 ): { error: string } | { lines: ParsedLine[] } {
   const packs = formData.getAll("pack").map(String);
   const particulars = formData.getAll("particular").map(String);
@@ -552,6 +563,10 @@ function parseLines(
     if (!p && !qtyRaw && !rateRaw && !boxRaw && !countRaw) continue;
     if (!p) return { error: "Every line needs a particular." };
     if (boxesOnly) {
+      if (!INT.test(boxRaw) || Number(boxRaw) <= 0)
+        return { error: `Boxes for “${p}” must be a positive whole number.` };
+    } else if (weighed && pack !== "LOOSE") {
+      // Boxes, not kilos. The weight arrives from the slip a moment later.
       if (!INT.test(boxRaw) || Number(boxRaw) <= 0)
         return { error: `Boxes for “${p}” must be a positive whole number.` };
     } else if (!DECIMAL3.test(qtyRaw) || Number(qtyRaw) <= 0) {
@@ -797,7 +812,7 @@ async function parse(
     // factory reweighs on arrival and pays for what it accepts, and without
     // rows there was no record of how many BOXES that was — so a factory trip
     // could never be reconciled by box the way a market trip is.
-    const parsedLines = parseLines(formData, true);
+    const parsedLines = parseLines(formData, true, false, true);
     if ("error" in parsedLines) return { error: parsedLines.error };
 
     if (parsedLines.lines.length > 0) {
@@ -816,12 +831,19 @@ async function parse(
       amount = billAmount;
     }
   } else if (type === "FISH_MILL") {
-    const parsedLines = parseLines(formData, true);
+    // The slip BEFORE the rows, the same order the factory branch uses.
+    //
+    // Read the other way round, a bill with no weighing slip failed on the
+    // first row's weight — "Qty for Prawns must be a positive number" — when
+    // the actual trouble was upstream: on a weighed bill the row weights are
+    // derived from the slip, so a missing slip has no weights to give them.
+    // Checking the slip first makes the complaint the true one.
+    const slip = readWeighingSlip(formData, base);
+    if (slip) return slip;
+    const parsedLines = parseLines(formData, true, false, true);
     if ("error" in parsedLines) return { error: parsedLines.error };
     if (parsedLines.lines.length === 0) return { error: "Add at least one line item." };
     base.lines = parsedLines.lines;
-    const slip = readWeighingSlip(formData, base);
-    if (slip) return slip;
     base.placeOfLoading = clean(formData.get("placeOfLoading")) || null;
     const applied = applyWeighingSlip(base);
     if (applied) return applied;
@@ -951,16 +973,35 @@ async function parse(
         const paidByMarket = paidByMarketOn(base.expenses, rent.id);
         const advance = trip.advancePaid ?? ZERO;
 
+        // Does THIS bill have anything to do with the rent at all?
+        //
+        // Most market bills do not. A truck stops at three markets; the rent is
+        // one cost, entered once, and at most one of those bills settles any of
+        // it. The other two are ordinary bills that happen to come off the same
+        // trip.
+        //
+        // This used to be checked unconditionally, so a trip carrying an
+        // advance made every bill off it unsaveable: with no rent row the sum
+        // read "the advance of 5,000 and the 0.00 this market paid come to more
+        // than the rent of 0.00", which is true and completely beside the
+        // point. The first market to unload had to invent a rent voucher it did
+        // not owe before it could record a sale.
+        const carriesRent = rentTotal.gt(0) || paidByMarket.gt(0);
+
         // The driver cannot be handed more than he is owed. Advance plus what
         // the market gave him is capped by the rent itself, or the transporter
         // finishes the trip in credit — reading as "we have overpaid him",
         // which is a figure nobody could act on.
-        if (advance.add(paidByMarket).gt(rentTotal))
+        if (carriesRent && advance.add(paidByMarket).gt(rentTotal))
           return {
             error:
-              `The advance of ${advance.toFixed(2)} and the ` +
-              `${paidByMarket.toFixed(2)} this market paid the driver come to ` +
-              `more than the rent of ${rentTotal.toFixed(2)}.`,
+              rentTotal.isZero()
+                ? `This bill records ${paidByMarket.toFixed(2)} paid to the ` +
+                  `driver but no rent for him to have been paid against. ` +
+                  `Enter the trip's rent on the same row.`
+                : `The advance of ${advance.toFixed(2)} and the ` +
+                  `${paidByMarket.toFixed(2)} this market paid the driver ` +
+                  `come to more than the rent of ${rentTotal.toFixed(2)}.`,
           };
 
         if (paidByMarket.gt(0)) base.rentDeducted = paidByMarket;
