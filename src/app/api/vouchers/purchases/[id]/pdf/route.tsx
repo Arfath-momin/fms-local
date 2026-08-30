@@ -53,7 +53,7 @@ export async function GET(
   const columns: Column[] = [{ label: "#", width: 26, align: "right" }];
   if (anyBoat) columns.push({ label: "Boat", width: 90 });
   columns.push({ label: "Particulars", flex: 1 });
-  columns.push({ label: "Qty (kg)", width: 66, align: "right" });
+  columns.push({ label: "Total Kg", width: 66, align: "right" });
   columns.push({ label: "Rate/kg", width: 58, align: "right" });
   columns.push({ label: "Amount", width: 74, align: "right" });
 

@@ -247,11 +247,20 @@ export function PurchaseForm({
                 <th className="text-left font-semibold px-2 py-2">
                   {hasLineBoats ? "Particulars" : "Particular"}
                 </th>
+                {/* The same two headings on every purchase type.
+                
+                    A Society or KFDC line said "Total Kg" and "Rate/kg" while a
+                    Private or Local one said "Qty" and "Rate" — for the same
+                    two columns, holding the same two figures, in the same
+                    units. The column is qtyKg and the price is per kilo
+                    whoever the fish came from; only the wording differed, and
+                    "Qty" left the clerk to guess whether it wanted kilos, boxes
+                    or pieces. */}
                 <th className="text-right font-semibold px-2 py-2 w-28">
-                  {hasLineBoats ? "Total Kg" : "Qty"}
+                  Total Kg
                 </th>
                 <th className="text-right font-semibold px-2 py-2 w-28">
-                  {hasLineBoats ? "Rate/kg" : "Rate"}
+                  Rate/kg
                 </th>
                 <th className="text-right font-semibold px-2 py-2 w-32">Amount</th>
                 <th className="w-8"></th>

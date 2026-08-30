@@ -118,8 +118,9 @@ export default async function PurchaseDetailPage({
                   <th className="num-col">Sl</th>
                   {showLineBoats && <th>Boat Name</th>}
                   <th>{showLineBoats ? "Particulars" : "Particular"}</th>
-                  <th className="num-col">{showLineBoats ? "Total Kg" : "Qty"}</th>
-                  <th className="num-col">{showLineBoats ? "Rate/kg" : "Rate"}</th>
+                  {/* Same headings on every type — see the note on the form. */}
+                  <th className="num-col">Total Kg</th>
+                  <th className="num-col">Rate/kg</th>
                   <th className="num-col">Amount</th>
                 </tr>
               </thead>

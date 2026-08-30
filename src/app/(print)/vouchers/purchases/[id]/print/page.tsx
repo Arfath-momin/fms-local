@@ -181,7 +181,7 @@ export default async function PurchasePrintPage({
                 <th className="w-8">#</th>
                 {hasLineBoats && <th>Boat</th>}
                 <th>Particulars</th>
-                <th className="r">Qty (kg)</th>
+                <th className="r">Total Kg</th>
                 <th className="r">Rate/kg</th>
                 <th className="r">Amount</th>
               </tr>
