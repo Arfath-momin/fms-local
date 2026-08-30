@@ -119,7 +119,13 @@ export default async function SaleBillPage({
   const anyCount = sale.lines.some((l) => l.count != null);
   // A market line is a BOX record: which market took how many of the load.
   const isMarket = sale.type === "MARKET";
-  const totalBoxes = sale.lines.reduce((a, l) => a + (l.box ?? 0), 0);
+  const totalBoxes = sale.lines.reduce(
+    // A LOOSE row never went into a crate, so it contributes none.
+    (a, l) => a + (l.pack === "LOOSE" ? 0 : (l.box ?? 0)),
+    0
+  );
+  /** Does this bill count boxes at all? Local yard sales often do not. */
+  const anyBox = sale.lines.some((l) => l.pack !== "LOOSE" && (l.box ?? 0) > 0);
   const hasLines = sale.lines.length > 0;
 
   // Summed from the same helper each row prints, so the column and its total
@@ -163,6 +169,17 @@ export default async function SaleBillPage({
                   {fmtDate(sale.saleDate ?? sale.date)}
                 </span>
               </div>
+              {/* The buying day, stated whenever it differs from the sale's
+                  own date. Fish bought on the 30th and sold on the 31st is one
+                  transaction with two dates, and a bill showing only the later
+                  one leaves the reader to guess which catch it came off. */}
+              {sale.saleDate &&
+                sale.saleDate.getTime() !== sale.date.getTime() && (
+                  <div className="num text-[12px]">
+                    <span className="opacity-75">Purchase date </span>
+                    <span className="font-semibold">{fmtDate(sale.date)}</span>
+                  </div>
+                )}
             </>
           }
         />
@@ -185,7 +202,7 @@ export default async function SaleBillPage({
               </div>
             )}
           </div>
-          <div className="text-[12px] grid gap-0.5">
+          <div className="text-[12px] bill-details">
             {/* Which of the two businesses is selling. Obvious on screen from
                 the company band; on a Fish Mill bill leaving the building it
                 has to be stated, because BFM and B2B bill the same mills. */}
@@ -198,13 +215,26 @@ export default async function SaleBillPage({
               <Detail label="Place of loading" value={sale.placeOfLoading} />
             )}
             {sale.weight && (
-              <Detail label="Weight" value={fmtKg(sale.weight)} />
+              <Detail label="Total weight" value={fmtKg(sale.weight)} />
+            )}
+            {/* The same column under the name each trade gives it: a mill
+                deducts for water and ice, a factory hands kilos back. */}
+            {sale.waterLess && Number(sale.waterLess) > 0 && (
+              <Detail
+                label={sale.type === "FACTORY" ? "Return" : "Water less"}
+                value={fmtKg(sale.waterLess)}
+              />
             )}
             {sale.netWeight && (
               <Detail label="Net weight" value={fmtKg(sale.netWeight)} />
             )}
+            {sale.totalBox != null && sale.totalBox > 0 && (
+              <Detail label="Total box" value={String(sale.totalBox)} />
+            )}
+            {/* A remark typed on an older bill, before the return became a
+                weight in its own right. Kept so those bills still print it. */}
             {sale.returnNote && (
-              <Detail label="Return" value={sale.returnNote} />
+              <Detail label="Note" value={sale.returnNote} />
             )}
           </div>
         </div>
@@ -225,7 +255,13 @@ export default async function SaleBillPage({
                 <th className="r" style={{ width: "3rem" }}>
                   Sr No
                 </th>
-                <th>{isMarket ? "Particulars" : isFishMill ? "Particulars" : "Particular"}</th>
+                <th>Particulars</th>
+                {/* Boxes on EVERY channel that has them, not just market.
+                    A mill or factory bill is unloaded box by box and the buyer
+                    counts them off the truck; leaving the column out meant the
+                    one figure both sides check on the ground was the one figure
+                    missing from the paper. Blank where a bill has none. */}
+                {anyBox && <th className="r">Box</th>}
                 {isMarket ? (
                   <th className="r">Boxes</th>
                 ) : (
@@ -246,14 +282,18 @@ export default async function SaleBillPage({
                 <tr key={l.id}>
                   <td className="r num text-muted">{i + 1}</td>
                   <td className="font-medium">{l.particular}</td>
+                  {anyBox && !isMarket && (
+                    <td className="r num">{l.box ?? "—"}</td>
+                  )}
                   {isMarket ? (
                     <td className="r num">{l.box ?? "—"}</td>
                   ) : (
                     <>
                       <td className="r num">
-                        {/* Kgs is the weight of ONE box, so what was actually
-                            sold — and what the rate is charged on — is
-                            box × kgs. The count prefixes it where the mill
+                        {/* The row's own weight. It used to be the weight of a
+                            single box, multiplied up by the boxes; saleLineTotalKg
+                            carries that history so this reads the same however
+                            old the bill is. The count prefixes it where the mill
                             recorded one, since "180 / 45.500 kg" is how the
                             trade reads a line. */}
                         {l.count ? `${l.count} / ` : ""}
@@ -276,6 +316,9 @@ export default async function SaleBillPage({
                 <td colSpan={2} className="r">
                   Total
                 </td>
+                {anyBox && !isMarket && (
+                  <td className="r num">{totalBoxes || "—"}</td>
+                )}
                 {isMarket ? (
                   <td className="r num">{totalBoxes || "—"}</td>
                 ) : (
@@ -304,47 +347,92 @@ export default async function SaleBillPage({
           </table>
         )}
 
-        {/* Market sales are billed gross and the seller expects to see every
-            figure, not just the net.
+        {/* The market bill's working, exactly as the entry screen shows it
+            and as the market's own paper reads.
 
-            Commission and reserve are listed BELOW the net, not subtracted
-            from it, because that is what they are: the net bill is what the
-            seller owes for the fish, and both of these are held separately
-            against their own accounts. Showing them as deductions would imply
-            a net that no ledger anywhere agrees with. */}
+            It used to print Total, then Net, then commission and reserve
+            listed BELOW the net with a note saying they were not deductions
+            from it. That was wrong twice over: they ARE netted inside the net
+            bill (spec invariants 3 and 4), and printing them after it invited
+            the reader to subtract them a second time. Cutting and the labour
+            balancing figure were missing altogether, so the four deductions
+            never added up to the difference the sheet was showing.
+
+            Rent is not among them. What the market handed the driver settles
+            part of this bill rather than shrinking it, so it comes off below
+            the net as a receipt — which is where the market looks to see what
+            it still owes. */}
         {sale.totalBill && (
-          <table className="bill-table mt-3" style={{ maxWidth: "22rem", marginLeft: "auto" }}>
+          <table
+            className="bill-table mt-3"
+            style={{ maxWidth: "24rem", marginLeft: "auto" }}
+          >
             <tbody>
               <tr>
                 <td>Total bill</td>
                 <td className="r num">{fmtMoney(sale.totalBill)}</td>
               </tr>
+              {sale.commission && Number(sale.commission) > 0 && (
+                <tr>
+                  <td>
+                    Less commission
+                    {sale.commissionRate && (
+                      <span className="text-muted">
+                        {" "}
+                        ({sale.commissionRate.toString()}%)
+                      </span>
+                    )}
+                  </td>
+                  <td className="r num">−{fmtMoney(sale.commission)}</td>
+                </tr>
+              )}
+              {sale.cutting && Number(sale.cutting) > 0 && (
+                <tr>
+                  <td>
+                    Less cutting
+                    {sale.cuttingRate && (
+                      <span className="text-muted">
+                        {" "}
+                        ({sale.cuttingRate.toString()}%)
+                      </span>
+                    )}
+                  </td>
+                  <td className="r num">−{fmtMoney(sale.cutting)}</td>
+                </tr>
+              )}
+              {sale.reserve && Number(sale.reserve) > 0 && (
+                <tr>
+                  <td>
+                    Less reserve<span className="text-muted"> (held)</span>
+                  </td>
+                  <td className="r num">−{fmtMoney(sale.reserve)}</td>
+                </tr>
+              )}
+              {sale.otherDeduction && Number(sale.otherDeduction) > 0 && (
+                <tr>
+                  <td>Less labour / other</td>
+                  <td className="r num">−{fmtMoney(sale.otherDeduction)}</td>
+                </tr>
+              )}
               <tr>
                 <td className="font-semibold">Net bill</td>
                 <td className="r num font-semibold">{fmtMoney(sale.amount)}</td>
               </tr>
-              {sale.commission && (
-                <tr>
-                  <td>
-                    Commission
-                    {sale.commissionRate && (
-                      <span className="text-muted">
-                        {" "}
-                        ({sale.commissionRate.toString()}% of total)
-                      </span>
-                    )}
-                  </td>
-                  <td className="r num">{fmtMoney(sale.commission)}</td>
-                </tr>
-              )}
-              {sale.reserve && (
-                <tr>
-                  <td>
-                    Reserve
-                    <span className="text-muted"> (held)</span>
-                  </td>
-                  <td className="r num">{fmtMoney(sale.reserve)}</td>
-                </tr>
+              {sale.rentDeducted && Number(sale.rentDeducted) > 0 && (
+                <>
+                  <tr>
+                    <td>Less receipt — paid the driver</td>
+                    <td className="r num">−{fmtMoney(sale.rentDeducted)}</td>
+                  </tr>
+                  <tr>
+                    <td className="font-semibold">Still owed on this bill</td>
+                    <td className="r num font-semibold">
+                      {fmtMoney(
+                        Number(sale.amount) - Number(sale.rentDeducted)
+                      )}
+                    </td>
+                  </tr>
+                </>
               )}
             </tbody>
           </table>
@@ -393,11 +481,18 @@ export default async function SaleBillPage({
   );
 }
 
+/**
+ * One label/value pair in a voucher header.
+ *
+ * Two grid cells, NOT a flex row that pushes them apart. As a flex
+ * space-between the label sat on one edge and the value on the other, an inch
+ * of nothing between "Vehicle No." and the number — see .bill-details.
+ */
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-3">
+    <>
       <span className="text-muted">{label}</span>
       <span className="font-medium">{value}</span>
-    </div>
+    </>
   );
 }

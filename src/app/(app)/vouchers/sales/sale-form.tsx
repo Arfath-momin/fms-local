@@ -728,12 +728,13 @@ export function SaleForm({
               </p>
             </div>
           )}
-          <div className="col-span-2">
-            <label htmlFor="returnNote" className={labelCls}>
-              Return (optional)
-            </label>
-            <input id="returnNote" name="returnNote" defaultValue={initial?.returnNote ?? ""} className={inputCls} />
-          </div>
+          {/* The free-text "Return" has gone. A factory's return is a WEIGHT —
+              it accepts every box and hands some kilos back — so it belongs in
+              the weighing block below, where it is subtracted to reach the net
+              the factory actually paid on. Typed as a note it was a remark
+              beside the arithmetic instead of part of it, and the clerk had to
+              enter the same figure again as "water less" to make the net come
+              out right. */}
         </div>
       )}
 
@@ -755,8 +756,16 @@ export function SaleForm({
               <p className="text-muted text-[12px] mt-1">As it arrived.</p>
             </div>
             <div>
+              {/* One column, two names, because the two trades take weight off
+                  for different reasons and the bill has to say which.
+                  
+                  A fish mill deducts for the water and ice the load carried. A
+                  factory accepts every box and hands back the fish it will not
+                  take, by weight. Same subtraction, same net — but a factory
+                  bill reading "water less 250" describes something that never
+                  happened. */}
               <label htmlFor="waterLess" className={labelCls}>
-                Water Less
+                {type === "FACTORY" ? "Return" : "Water Less"}
               </label>
               <input
                 id="waterLess"
@@ -767,7 +776,9 @@ export function SaleForm({
                 className={inputCls + " num text-right"}
               />
               <p className="text-muted text-[12px] mt-1">
-                What they took off for water and ice.
+                {type === "FACTORY"
+                  ? "Kilos they handed back. Taken off to reach what they paid on."
+                  : "What they took off for water and ice."}
               </p>
             </div>
             <div>
@@ -778,7 +789,9 @@ export function SaleForm({
                 {netWeight ? fmtKg(netWeight) : "—"}
               </p>
               <p className="text-muted text-[12px] mt-1">
-                Total less water. What they paid on.
+                {type === "FACTORY"
+                  ? "Total less the return. What they paid on."
+                  : "Total less water. What they paid on."}
               </p>
             </div>
           </div>

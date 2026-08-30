@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getActiveScope } from "@/lib/centre";
 import { requireSession } from "@/lib/session";
-import { lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
+import { lineKgPerBox, lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { PACK_LABELS } from "@/lib/pack";
 import { docTitle, titleDate } from "@/lib/doc-title";
 import { PrintHeader } from "../../../../letterhead";
 import { PrintToolbar } from "../../../../print-toolbar";
@@ -126,7 +127,7 @@ export default async function DeliveryNotePrintPage({
             </div>
             <div className="text-[15px] font-semibold">{note.recipient}</div>
           </div>
-          <div className="text-[12px] grid gap-0.5">
+          <div className="text-[12px] bill-details">
             <Detail label="Vehicle No." value={note.vehicle.number} />
             {note.driverName && (
               <Detail label="Driver" value={note.driverName} />
@@ -147,6 +148,7 @@ export default async function DeliveryNotePrintPage({
               <th className="r" style={{ width: "3rem" }}>
                 Sl
               </th>
+              <th>Pack</th>
               <th>Particulars</th>
               <th className="r">Kg / box</th>
               <th className="r">Box</th>
@@ -158,8 +160,18 @@ export default async function DeliveryNotePrintPage({
             {note.lines.map((l, i) => (
               <tr key={l.id}>
                 <td className="r num text-muted">{i + 1}</td>
+                {/* Box, Big Box or Loose. The party is taking delivery of the
+                    crates as well as the fish, and a big box is twice the fish
+                    of an ordinary one — so which kind travelled belongs on the
+                    copy that goes with the truck, not only on our screen. */}
+                <td className="text-muted">{PACK_LABELS[l.pack]}</td>
                 <td className="font-medium">{l.particulars}</td>
-                <td className="r num">{fmtKg(l.kg)}</td>
+                {/* What ONE box weighs, worked back out of the row's weight.
+                    This printed `l.kg` — which stopped being the per-box figure
+                    and became the row's whole weight. A note for 50 boxes of
+                    1,000 kg printed "Kg / box 1,000 kg", fifty times the truth,
+                    on the copy handed to the driver. */}
+                <td className="r num">{lineKgPerBox(l).toString()}</td>
                 <td className="r num">{l.box || "—"}</td>
                 <td className="r num">{l.pcs || "—"}</td>
                 {/* kg is the weight of ONE box, so the row's real weight is
@@ -171,7 +183,7 @@ export default async function DeliveryNotePrintPage({
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={3} className="r">
+              <td colSpan={4} className="r">
                 Total
               </td>
               <td className="r num">{totals.box || "—"}</td>
@@ -205,11 +217,12 @@ export default async function DeliveryNotePrintPage({
   );
 }
 
+/** One label/value pair — two grid cells, not a flex row that spreads them. */
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-3">
+    <>
       <span className="text-muted">{label}</span>
       <span className="font-medium">{value}</span>
-    </div>
+    </>
   );
 }

@@ -8,8 +8,8 @@
  * read as two businesses.
  *
  * On paper a voucher is a document, not a screen: it drops the page furniture,
- * loses the tinted app background that would flood a printer with ink, and pins
- * itself to the sheet's own margins.
+ * prints black on white with no tint anywhere, and pins itself to the sheet's
+ * own margins.
  */
 
 .bill-sheet {
@@ -19,32 +19,47 @@
 }
 
 .bill-paper {
-  /* Light grey body. Deliberately a flat literal rather than var(--surface):
-     this sheet has to look the same whatever theme the app is in, and a
-     document whose background follows the viewer's UI is not a document. */
-  background: #f2f2f2;
+  /* WHITE, and black on it. A voucher is a document: the merchant prints
+     dozens a day, often on a mono laser, and every tint is ink spent on
+     something nobody reads. The grey body and the company-coloured rule were
+     the app's idea of a document rather than the trade's. */
+  background: #ffffff;
   color: #1a1a1a;
   border: 1px solid var(--line-strong);
   padding: 1.75rem;
 }
 
 /* ---------------------------------------------------------------------------
+ * Label / value pairs in a voucher's header
+ *
+ * A two-column grid sized to the longest LABEL, not spread across the block.
+ * These were `flex; justify-content: space-between`, which pinned the label to
+ * one edge and the value to the other — so "Vehicle No." and "KA20A9087" sat at
+ * opposite ends of a half-width column with an inch of nothing between them,
+ * and the eye had to travel to pair them up. Values now line up in one column a
+ * short gap after the labels, which is how a printed form reads.
+ * ------------------------------------------------------------------------ */
+.bill-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 0.85rem;
+  row-gap: 0.2rem;
+  align-items: baseline;
+}
+
+/* ---------------------------------------------------------------------------
  * Company band
  *
- * White, against the light grey body below it. The band used to be filled with
- * the per-company colour (--company); it is now the lightest thing on the page
- * so the logo sits on white — a mark printed over a colour field reproduces
- * badly, and on a mono printer the fill turned into grey that fought the logo.
- * The company is still tellable at a glance from the mark itself.
- *
- * The colour has not been deleted, only moved: --company still draws the rule
- * under the band, which is enough to tell two businesses' paperwork apart
- * across a desk without flooding a printer with ink.
+ * The band was once filled with the per-company colour, then reduced to a
+ * coloured rule under a white band, and is now a plain rule like any other. A
+ * mark printed over a colour field reproduces badly, and on a mono printer the
+ * fill turned to grey that fought the logo. Which business issued a voucher is
+ * told by the mark and the name in the band, which is what a reader looks at.
  * ------------------------------------------------------------------------ */
 .bill-band {
   background: #ffffff;
   color: #1a1a1a;
-  border-bottom: 3px solid var(--company);
+  border-bottom: 2px solid var(--line-strong);
   padding: 0.75rem 1rem;
   margin: -1.75rem -1.75rem 1.25rem;
   /* Three columns rather than flex space-between, so the company mark is
@@ -120,11 +135,9 @@
   font-weight: 600;
 }
 
-/* A 4% tint on alternate rows — the largest readability win on a long note for
-   almost no ink, and the reason a driver can follow a row across the page. */
-.bill-table tbody tr:nth-child(even) {
-  background: color-mix(in srgb, var(--company) 4%, transparent);
-}
+/* No row tint. It was a 4% wash of the company colour, which reads as a smudge
+   on a mono printer and as a colour cast on a colour one. A ruled table with
+   rows this short does not need banding to be followed. */
 
 /* Signature block: who handed over, who received, who it was for. */
 .bill-sign {
@@ -149,27 +162,16 @@
 /* ---------------------------------------------------------------------------
  * Plain mode
  *
- * A merchant printing fifty delivery notes a day will not want the tint on
- * every one. Toggled on <body> from the toolbar, so it applies to the printed
- * sheet and the preview alike.
+ * Every voucher is now plain by default — white paper, black text, no company
+ * colour anywhere. What this toggle still does is drop the band's bleed so the
+ * header sits flush with the text, for a merchant who wants the tightest
+ * possible sheet.
  * ------------------------------------------------------------------------ */
 body.print-plain .bill-band {
-  /* The band is already white; plain mode only has to take the last of the
-     colour out of it — the company rule underneath — and drop the bleed so the
-     header sits flush with the text below. */
-  border-bottom: 2px solid var(--line-strong);
   padding-left: 0;
   padding-right: 0;
   margin-left: 0;
   margin-right: 0;
-}
-/* Plain means plain: the grey body goes too, leaving black on white. This is
-   the setting for a merchant printing fifty notes a day. */
-body.print-plain .bill-paper {
-  background: #fff;
-}
-body.print-plain .bill-table tbody tr:nth-child(even) {
-  background: none;
 }
 
 @media print {
@@ -179,17 +181,9 @@ body.print-plain .bill-table tbody tr:nth-child(even) {
     background: #fff;
   }
 
-  /* Browsers strip backgrounds by default to save ink. The grey body, the
-     company rule and the row tint are carrying meaning here — which document,
-     which company, which row — so they are opted back in explicitly. Plain
-     mode removes them at the source above, so this never forces colour on
-     someone who asked for none. */
-  .bill-band,
-  .bill-paper,
-  .bill-table tbody tr {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
+  /* Nothing to opt back in: the sheet is white with black text and ruled
+     borders, which every printer renders without being asked. Browsers strip
+     backgrounds to save ink, and there are none left worth keeping. */
 
   .bill-sheet {
     max-width: none;

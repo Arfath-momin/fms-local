@@ -166,7 +166,7 @@ export default async function PurchasePrintPage({
               </div>
             )}
           </div>
-          <div className="text-[12px] grid gap-0.5">
+          <div className="text-[12px] bill-details">
             {/* The voucher-level boat is gone (spec §3.7) — a bill can cover
                 several vessels, so the boat belongs to the line and is printed
                 in the table. */}
@@ -227,7 +227,7 @@ export default async function PurchasePrintPage({
               {rupeesInWords(purchase.amount)}
             </div>
           </div>
-          <div className="text-[12px] grid gap-0.5">
+          <div className="text-[12px] bill-details">
             <Detail label="Purchase amount" value={fmtMoney(purchase.amount)} />
             {/* Signed the same way as every ledger and statement: positive is
                 owed to us, negative is owed by us. A purchase normally leaves
@@ -261,11 +261,12 @@ export default async function PurchasePrintPage({
   );
 }
 
+/** One label/value pair — two grid cells, not a flex row that spreads them. */
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-3">
+    <>
       <span className="text-muted">{label}</span>
       <span className="font-medium">{value}</span>
-    </div>
+    </>
   );
 }

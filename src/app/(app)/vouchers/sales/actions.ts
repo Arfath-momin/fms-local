@@ -850,7 +850,13 @@ async function parse(
     amount = base.lines.reduce((a, l) => a.add(l.total), ZERO);
   } else {
     // LOCAL
-    const parsedLines = parseLines(formData, false);
+    //
+    // Boxes ARE kept. They were discarded here, from back when a local buyer
+    // collected loose fish off the yard and there was no trip behind it. A
+    // local bill can be filled from a trip now, and its boxes count against
+    // what the truck carried — so the form showed the 40 boxes the trip had
+    // left, and the server dropped every one of them on save.
+    const parsedLines = parseLines(formData, true);
     if ("error" in parsedLines) return { error: parsedLines.error };
     if (parsedLines.lines.length === 0) return { error: "Add at least one line item." };
     base.lines = parsedLines.lines;
