@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
@@ -93,12 +92,12 @@ export default async function PurchaseDetailPage({
             also where "Save as PDF" lives, so this covers printing and keeping
             a copy. Offered on the read-only view too: an auditor may not edit a
             voucher but still has every reason to print one. */}
-        <Link
-          href={`/vouchers/purchases/${purchase.id}/print`}
+        <a
+          href={`/api/vouchers/purchases/${purchase.id}/pdf`}
           className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
         >
           Save as PDF
-        </Link>
+        </a>
         </div>
         <dl className="border border-line-strong bg-surface divide-y divide-line max-w-lg text-[13px]">
           <Row label="Type" value={PURCHASE_TYPE_LABELS[purchase.type]} />
@@ -181,12 +180,12 @@ export default async function PurchaseDetailPage({
             also where "Save as PDF" lives, so this covers printing and keeping
             a copy. Offered on the read-only view too: an auditor may not edit a
             voucher but still has every reason to print one. */}
-        <Link
-          href={`/vouchers/purchases/${purchase.id}/print`}
+        <a
+          href={`/api/vouchers/purchases/${purchase.id}/pdf`}
           className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
         >
           Save as PDF
-        </Link>
+        </a>
       </div>
       {/* Above the form, not below it: it is the reason this screen is open.
           Collapses to nothing when no review was requested. */}

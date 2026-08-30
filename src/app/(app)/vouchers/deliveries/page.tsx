@@ -113,7 +113,7 @@ export default async function DeliveriesPage({
                     <td>
                       <VoucherRowActions
                         viewHref={`/vouchers/deliveries/${n.id}`}
-                        printHref={`/vouchers/deliveries/${n.id}/print`}
+                        printHref={`/api/vouchers/deliveries/${n.id}/pdf`}
                       />
                     </td>
                   </tr>

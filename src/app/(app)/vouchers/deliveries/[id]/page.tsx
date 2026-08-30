@@ -90,12 +90,12 @@ export default async function DeliveryNotePage({
         <div className="flex gap-2">
           {/* The copy that travels with the vehicle. The browser's print dialog
               is also where "Save as PDF" lives, so this covers both. */}
-          <Link
-            href={`/vouchers/deliveries/${note.id}/print`}
+          <a
+            href={`/api/vouchers/deliveries/${note.id}/pdf`}
             className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
           >
-            Save as PDF
-          </Link>
+            Download PDF
+          </a>
           {mayEdit && (
             <Link
               href={`/vouchers/deliveries/${note.id}/edit`}

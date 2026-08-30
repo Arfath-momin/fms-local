@@ -136,7 +136,7 @@ export default async function PurchasesPage({
                     <td>
                       <VoucherRowActions
                         viewHref={`/vouchers/purchases/${p.id}`}
-                        printHref={`/vouchers/purchases/${p.id}/print`}
+                        printHref={`/api/vouchers/purchases/${p.id}/pdf`}
                       />
                     </td>
                   </tr>

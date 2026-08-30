@@ -1,43 +1,29 @@
-import { renderToBuffer } from "@react-pdf/renderer";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { rupeesInWords } from "@/lib/amount-words";
-import { MarketBillDocument, type MarketBillData } from "@/pdf/market-bill";
+import { SALE_TYPE_LABELS, saleLineTotalKg } from "@/lib/sale";
+import { PACK_LABELS } from "@/lib/pack";
+import {
+  VoucherDocument,
+  sheetsFor,
+  type Column,
+  type WorkingRow,
+} from "@/pdf/voucher-doc";
+import { pdfFilename, pdfResponse } from "@/pdf/render";
 
 /**
- * A sale bill as a downloadable PDF.
+ * A sale bill as a downloadable PDF — one click, no print dialog.
  *
- * An API route rather than a page because a browser needs a URL it can be sent
- * to — one click, a file, no print dialog. `window.print()` cannot do this:
- * browsers deliberately refuse to let a page choose "Save as PDF" as the
- * destination, since that would let any site write to your disk.
+ * `window.print()` cannot do this: browsers refuse to let a page choose "Save
+ * as PDF" as the destination, since that would let any site write to your disk.
  *
- * Renders one at a time. The server has a single core shared with Postgres, and
- * two bills generated at once would have them competing for it while somebody
- * else is trying to save a voucher. A bill takes well under a second, so a
- * queue of two or three is not felt.
- *
- * MARKET ONLY for now, deliberately. This is the first document built this way;
- * the other channels keep the HTML print page until this one has been read on
- * paper and judged.
+ * All four channels, each printing what its own paper means. A MARKET bill is
+ * itemised in boxes and priced as a net, so it has no Kgs or Rate column —
+ * those would print zeros and invite the reader to multiply them.
  */
-
-let queue: Promise<unknown> = Promise.resolve();
-/** Run `fn` after whatever is already rendering, whether it succeeded or not. */
-function serialise<T>(fn: () => Promise<T>): Promise<T> {
-  const next = queue.then(fn, fn);
-  // The chain must not inherit a rejection, or one failed bill would stop every
-  // bill after it.
-  queue = next.then(
-    () => undefined,
-    () => undefined
-  );
-  return next;
-}
-
 const ZERO = new Prisma.Decimal(0);
 const gt0 = (v: Prisma.Decimal | null) => v != null && v.greaterThan(0);
 
@@ -51,24 +37,18 @@ export async function GET(
   const { id } = await params;
 
   const sale = await prisma.sale.findFirst({
-    // Scoped, exactly as the print page is: a voucher belonging to another
-    // company or centre must not render, let alone download.
+    // Scoped: a voucher belonging to another company or centre must not render.
     where: { id, companyId: company.id, centreId: centre.id },
     include: {
       company: { select: { name: true } },
       centre: { select: { name: true } },
-      party: { select: { id: true, name: true } },
-      careOfParty: { select: { id: true, name: true } },
+      party: { select: { name: true } },
+      careOfParty: { select: { name: true } },
       lines: { orderBy: { id: "asc" } },
-      deliveryNote: { select: { vehicle: { select: { number: true } } } },
+      deliveryNote: { select: { billNo: true, vehicle: { select: { number: true } } } },
     },
   });
   if (!sale) return new Response("Not found.", { status: 404 });
-  if (sale.type !== "MARKET")
-    return new Response(
-      "Only market bills are generated this way so far.",
-      { status: 400 }
-    );
 
   const ledgerPartyId = sale.careOfPartyId ?? sale.partyId;
   const latest = await prisma.ledgerEntry.findFirst({
@@ -78,99 +58,163 @@ export async function GET(
   });
   const outstanding = latest?.runningBalance ?? ZERO;
 
-  const details: { label: string; value: string }[] = [];
-  if (sale.place) details.push({ label: "Place", value: sale.place });
-  const vehicleNo = sale.deliveryNote?.vehicle.number ?? sale.vehicleNo;
-  if (vehicleNo) details.push({ label: "Vehicle No.", value: vehicleNo });
-
-  // The deductions, each named for what it is and only when it was struck.
-  const working: { label: string; value: string }[] = [
-    { label: "Total bill", value: fmtMoney(sale.totalBill ?? ZERO) },
-  ];
-  if (gt0(sale.commission))
-    working.push({
-      label: sale.commissionRate
-        ? `Less commission (${sale.commissionRate}%)`
-        : "Less commission",
-      value: `−${fmtMoney(sale.commission!)}`,
-    });
-  if (gt0(sale.cutting))
-    working.push({
-      label: sale.cuttingRate
-        ? `Less cutting (${sale.cuttingRate}%)`
-        : "Less cutting",
-      value: `−${fmtMoney(sale.cutting!)}`,
-    });
-  if (gt0(sale.reserve))
-    working.push({
-      label: "Less reserve (held)",
-      value: `−${fmtMoney(sale.reserve!)}`,
-    });
-  if (gt0(sale.otherDeduction))
-    working.push({
-      label: "Less labour / other",
-      value: `−${fmtMoney(sale.otherDeduction!)}`,
-    });
-
-  const data: MarketBillData = {
-    companyName: sale.company.name,
-    centreName: sale.centre.name,
-    billNo: sale.billNo,
-    saleDate: fmtDate(sale.saleDate ?? sale.date),
-    purchaseDate: fmtDate(sale.date),
-    partyName: sale.party.name,
-    careOfName: sale.careOfParty?.name ?? null,
-    details,
-    lines: sale.lines.map((l) => ({
-      particular: l.particular,
-      // A LOOSE row never went into a crate, so it carries no box count.
-      box: l.pack === "LOOSE" ? "—" : String(l.box ?? 0),
-    })),
-    totalBoxes: String(
-      sale.lines.reduce(
-        (a, l) => a + (l.pack === "LOOSE" ? 0 : (l.box ?? 0)),
-        0
-      )
-    ),
-    working,
-    netBill: fmtMoney(sale.amount),
-    receipt: gt0(sale.rentDeducted)
-      ? {
-          label: "Less receipt — paid the driver",
-          value: `−${fmtMoney(sale.rentDeducted!)}`,
-          owed: fmtMoney(sale.amount.sub(sale.rentDeducted!)),
-        }
-      : null,
-    // How many rows an A4 sheet holds once the head and the "billed to" block
-    // are down. Measured, not guessed: 35 on the first sheet and 36 on each
-    // after it. The divisor is deliberately LOWER than that, because the two
-    // ways of being wrong are not equally bad — over-estimating leaves a column
-    // heading on a sheet with no rows under it, which is untidy, while
-    // under-estimating drops the headings from a sheet that HAS rows, which
-    // leaves a reader guessing which column is which. Neither moves a figure.
-    lastItemPage: Math.max(1, Math.ceil(sale.lines.length / 34)),
-    amountInWords: rupeesInWords(sale.amount),
-    outstanding: outstanding.greaterThan(0) ? fmtMoney(outstanding) : null,
-    notes: sale.notes,
-  };
-
-  const pdf = await serialise(() =>
-    renderToBuffer(<MarketBillDocument d={data} />)
+  const isMarket = sale.type === "MARKET";
+  const anyBox = sale.lines.some((l) => l.pack !== "LOOSE" && (l.box ?? 0) > 0);
+  const anyPack = sale.lines.some((l) => l.pack !== "BOX");
+  const totalBoxes = sale.lines.reduce(
+    (a, l) => a + (l.pack === "LOOSE" ? 0 : (l.box ?? 0)),
+    0
+  );
+  const totalKg = sale.lines.reduce(
+    (a, l) => a + saleLineTotalKg({ qtyKg: Number(l.qtyKg), box: l.box }),
+    0
   );
 
-  // A filename the merchant can find again in a folder of fifty. Anything the
-  // filesystem or the header grammar dislikes is stripped rather than escaped.
-  const safe = `${sale.company.name}-market-${sale.billNo}`
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  // --- columns, and the rows built to match them exactly
+  const columns: Column[] = [{ label: "Sr No", width: 34, align: "right" }];
+  if (anyPack) columns.push({ label: "Pack", width: 48 });
+  columns.push({ label: "Particulars", flex: 1 });
+  if (anyBox) columns.push({ label: "Box", width: 44, align: "right" });
+  if (!isMarket) {
+    columns.push({ label: "Kgs", width: 62, align: "right" });
+    columns.push({ label: "Rate/kg", width: 58, align: "right" });
+    columns.push({ label: "Amount", width: 74, align: "right" });
+  }
 
-  return new Response(new Uint8Array(pdf), {
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${safe}.pdf"`,
-      // A bill can be corrected; a cached copy of the old one is worse than a
-      // second's wait.
-      "Cache-Control": "no-store",
-    },
+  const rows = sale.lines.map((l, i) => {
+    const r = [String(i + 1)];
+    if (anyPack) r.push(PACK_LABELS[l.pack]);
+    r.push(l.particular);
+    if (anyBox) r.push(l.pack === "LOOSE" ? "—" : String(l.box ?? 0));
+    if (!isMarket) {
+      r.push(fmtKg(saleLineTotalKg({ qtyKg: Number(l.qtyKg), box: l.box })));
+      r.push(fmtMoney(l.ratePerKg));
+      r.push(fmtMoney(l.total));
+    }
+    return r;
   });
+
+  const totalRow: string[] = [""];
+  if (anyPack) totalRow.push("");
+  totalRow.push("Total");
+  if (anyBox) totalRow.push(String(totalBoxes));
+  if (!isMarket) {
+    totalRow.push(fmtKg(totalKg));
+    totalRow.push("");
+    totalRow.push(fmtMoney(sale.amount));
+  }
+
+  // --- the working. A market bill shows every deduction, in the order the
+  // market's own paper strikes them; the other channels are paid in full.
+  const working: WorkingRow[] = [];
+  if (isMarket && sale.totalBill) {
+    working.push({ label: "Total bill", value: fmtMoney(sale.totalBill) });
+    if (gt0(sale.commission))
+      working.push({
+        label: sale.commissionRate
+          ? `Less commission (${sale.commissionRate}%)`
+          : "Less commission",
+        value: `−${fmtMoney(sale.commission!)}`,
+      });
+    if (gt0(sale.cutting))
+      working.push({
+        label: sale.cuttingRate
+          ? `Less cutting (${sale.cuttingRate}%)`
+          : "Less cutting",
+        value: `−${fmtMoney(sale.cutting!)}`,
+      });
+    if (gt0(sale.reserve))
+      working.push({
+        label: "Less reserve (held)",
+        value: `−${fmtMoney(sale.reserve!)}`,
+      });
+    if (gt0(sale.otherDeduction))
+      working.push({
+        label: "Less labour / other",
+        value: `−${fmtMoney(sale.otherDeduction!)}`,
+      });
+    working.push({
+      label: "Net bill",
+      value: fmtMoney(sale.amount),
+      rule: true,
+      strong: true,
+    });
+    if (gt0(sale.rentDeducted)) {
+      working.push({
+        label: "Less receipt — paid the driver",
+        value: `−${fmtMoney(sale.rentDeducted!)}`,
+      });
+      working.push({
+        label: "Still owed on this bill",
+        value: fmtMoney(sale.amount.sub(sale.rentDeducted!)),
+        rule: true,
+        strong: true,
+      });
+    }
+  } else {
+    working.push({
+      label: "Bill amount",
+      value: fmtMoney(sale.amount),
+      strong: true,
+    });
+  }
+
+  const details: { label: string; value: string }[] = [];
+  if (sale.place) details.push({ label: "Place", value: sale.place });
+  if (sale.placeOfLoading)
+    details.push({ label: "Place of loading", value: sale.placeOfLoading });
+  const vehicleNo = sale.deliveryNote?.vehicle.number ?? sale.vehicleNo;
+  if (vehicleNo) details.push({ label: "Vehicle No.", value: vehicleNo });
+  if (sale.deliveryNote?.billNo)
+    details.push({ label: "Trip", value: sale.deliveryNote.billNo });
+  if (sale.weight)
+    details.push({ label: "Total weight", value: fmtKg(sale.weight) });
+  // The same column under the name each trade gives it: a mill deducts for
+  // water and ice, a factory hands kilos back.
+  if (gt0(sale.waterLess))
+    details.push({
+      label: sale.type === "FACTORY" ? "Return" : "Water less",
+      value: fmtKg(sale.waterLess!),
+    });
+  if (sale.netWeight)
+    details.push({ label: "Net weight", value: fmtKg(sale.netWeight) });
+  if (sale.totalBox) details.push({ label: "Total box", value: String(sale.totalBox) });
+
+  const doc = (
+    <VoucherDocument
+      d={{
+        companyName: sale.company.name,
+        centreName: sale.centre.name,
+        docKind: `${SALE_TYPE_LABELS[sale.type]} Sale Bill`,
+        identity: [
+          { label: "No.", value: sale.billNo },
+          { label: "Date", value: fmtDate(sale.saleDate ?? sale.date) },
+          // Always, even when it matches. A reader seeing one date cannot tell
+          // whether they agreed or whether the bill simply does not say.
+          { label: "Purchase date", value: fmtDate(sale.date) },
+        ],
+        partyTitle: "Billed to",
+        partyName: sale.party.name,
+        partySub: sale.careOfParty ? `c/o ${sale.careOfParty.name}` : null,
+        details,
+        columns,
+        rows,
+        totalRow: rows.length > 0 ? totalRow : null,
+        working,
+        amountInWords: rupeesInWords(sale.amount),
+        footNote: outstanding.greaterThan(0)
+          ? `Total outstanding for ${(sale.careOfParty ?? sale.party).name} across all bills: ${fmtMoney(outstanding)}`
+          : null,
+        notes: sale.notes,
+        signLeft: "RECEIVER'S SIGNATURE",
+        signRight: `FOR ${sale.company.name.toUpperCase()}`,
+        lastItemPage: sheetsFor(rows.length),
+      }}
+    />
+  );
+
+  return pdfResponse(
+    doc,
+    pdfFilename(sale.company.name, sale.type.toLowerCase(), sale.billNo)
+  );
 }

@@ -197,12 +197,12 @@ export default async function PartyStatementPage({
                 the one printable that regularly leaves the building, handed to
                 a party querying what they owe. Carries the date window on
                 screen, so both links cover the same period. */}
-            <Link
-              href={`/ledgers/parties/${party.id}/print?from=${listWindow.from}&to=${listWindow.to}`}
+            <a
+              href={`/api/ledgers/parties/${party.id}/pdf?from=${listWindow.from}&to=${listWindow.to}`}
               className="text-accent text-[12px] underline underline-offset-2"
             >
               Save as PDF
-            </Link>
+            </a>
           </div>
         </div>
         <div className="text-right">
