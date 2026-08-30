@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { VoucherRowActions } from "../row-actions";
 import { prisma } from "@/lib/db";
-import { canEdit, canEnter, requireSession } from "@/lib/session";
+import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import {
@@ -25,7 +26,6 @@ export default async function PurchasesPage({
 }) {
   const session = await requireSession();
   const mayEnter = canEnter(session.role);
-  const mayEdit = canEdit(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
@@ -134,12 +134,10 @@ export default async function PurchasesPage({
                       {fmtMoney(p.amount)}
                     </td>
                     <td>
-                      <Link
-                        href={`/vouchers/purchases/${p.id}`}
-                        className="text-accent underline underline-offset-2 text-[12px]"
-                      >
-                        {mayEdit ? "Edit" : "View"}
-                      </Link>
+                      <VoucherRowActions
+                        viewHref={`/vouchers/purchases/${p.id}`}
+                        printHref={`/vouchers/purchases/${p.id}/print`}
+                      />
                     </td>
                   </tr>
                 );

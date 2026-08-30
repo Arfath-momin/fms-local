@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { VoucherRowActions } from "../row-actions";
 import { prisma } from "@/lib/db";
-import { canEdit, canEnter, requireSession } from "@/lib/session";
+import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtMoney } from "@/lib/format";
@@ -15,7 +16,6 @@ export default async function SalesPage({
 }) {
   const session = await requireSession();
   const mayEnter = canEnter(session.role);
-  const mayEdit = canEdit(session.role);
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
@@ -106,12 +106,10 @@ export default async function SalesPage({
                       {fmtMoney(s.amount)}
                     </td>
                     <td>
-                      <Link
-                        href={`/vouchers/sales/${s.id}`}
-                        className="text-accent underline underline-offset-2 text-[12px]"
-                      >
-                        {mayEdit ? "Edit" : "View"}
-                      </Link>
+                      <VoucherRowActions
+                        viewHref={`/vouchers/sales/${s.id}`}
+                        printHref={`/vouchers/sales/${s.id}/print`}
+                      />
                     </td>
                   </tr>
                 );

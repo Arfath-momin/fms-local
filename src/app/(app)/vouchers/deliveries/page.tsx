@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { VoucherRowActions } from "../row-actions";
 import { prisma } from "@/lib/db";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
@@ -110,12 +111,10 @@ export default async function DeliveriesPage({
                       )}
                     </td>
                     <td>
-                      <Link
-                        href={`/vouchers/deliveries/${n.id}`}
-                        className="text-accent underline underline-offset-2 text-[12px]"
-                      >
-                        Open
-                      </Link>
+                      <VoucherRowActions
+                        viewHref={`/vouchers/deliveries/${n.id}`}
+                        printHref={`/vouchers/deliveries/${n.id}/print`}
+                      />
                     </td>
                   </tr>
                 );
