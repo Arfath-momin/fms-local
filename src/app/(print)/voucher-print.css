@@ -173,20 +173,9 @@
   text-align: center;
 }
 
-/* ---------------------------------------------------------------------------
- * Plain mode
- *
- * Every voucher is now plain by default — white paper, black text, no company
- * colour anywhere. What this toggle still does is drop the band's bleed so the
- * header sits flush with the text, for a merchant who wants the tightest
- * possible sheet.
- * ------------------------------------------------------------------------ */
-body.print-plain .bill-band {
-  padding-left: 0;
-  padding-right: 0;
-  margin-left: 0;
-  margin-right: 0;
-}
+/* No "plain mode" rules here any more. Every voucher is plain — white paper,
+   black text, no company colour anywhere — so the toggle that used to switch it
+   on has gone from the toolbar, and the class it set is nothing to style. */
 
 @media print {
   /* The browser paints its own header/footer; the app's ground would only
