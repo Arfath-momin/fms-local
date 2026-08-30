@@ -234,12 +234,12 @@ export function PurchaseForm({
 
       <div>
         <label className={labelCls}>Items</label>
-        <div className="overflow-x-auto border border-line-strong bg-surface">
+        <div className="items-scroll border border-line-strong bg-surface">
           <table
             className={"w-full text-sm " + (hasLineBoats ? "min-w-[720px]" : "")}
           >
             <thead>
-              <tr className="text-muted text-[12px] uppercase tracking-wide">
+              <tr className="items-head text-muted text-[12px] uppercase tracking-wide">
                 <th className="text-left font-semibold px-2 py-2 w-10">Sl</th>
                 {hasLineBoats && (
                   <th className="text-left font-semibold px-2 py-2">Boat Name</th>

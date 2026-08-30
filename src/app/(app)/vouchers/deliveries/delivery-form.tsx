@@ -257,10 +257,10 @@ export function DeliveryForm({
 
       <div>
         <label className={labelCls}>Items</label>
-        <div className="overflow-x-auto border border-line-strong bg-surface">
+        <div className="items-scroll border border-line-strong bg-surface">
           <table className="w-full text-sm min-w-[760px]">
             <thead>
-              <tr className="text-muted text-[12px] uppercase tracking-wide">
+              <tr className="items-head text-muted text-[12px] uppercase tracking-wide">
                 <th className="text-left font-semibold px-2 py-2 w-28">Pack</th>
                 <th className="text-left font-semibold px-3 py-2">Particulars</th>
                 <th className="text-right font-semibold px-2 py-2 w-20">Box</th>

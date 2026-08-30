@@ -99,3 +99,62 @@ body {
 .ledger-table td.num-col {
   text-align: right;
 }
+
+/* ---------------------------------------------------------------------------
+ * Entry tables — the Items grid on a sale, purchase or delivery note
+ *
+ * A load can run to twenty rows. By row eighteen the headings have scrolled off
+ * and the clerk is typing into unlabelled boxes, guessing which column is Kgs
+ * and which is Rate — on a form where those two multiply into the money.
+ *
+ * The heading row sticks to the top of the window instead.
+ *
+ * `th`, not `tr`: sticky on a table row is ignored by some browsers, while
+ * sticky on the cells is honoured everywhere. Each cell needs its own opaque
+ * background too — a transparent sticky header has the rows scrolling visibly
+ * through it — and the bottom rule is an inset shadow rather than a border,
+ * because a border on a sticky cell detaches and floats as it moves.
+ *
+ * See the note on .items-scroll below: this only holds where the table is not
+ * inside a horizontal scroll container.
+ * ------------------------------------------------------------------------ */
+.items-head th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--line-strong);
+}
+
+/* Below the mobile top bar, which is itself sticky at z-30 — otherwise the
+   headings slide underneath it and are hidden exactly when they are wanted. */
+@media (max-width: 767px) {
+  .items-head th {
+    top: 3.25rem;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * The wrapper around those tables
+ *
+ * `overflow-x: auto` is why this needs saying. Setting overflow on ONE axis
+ * makes the element a scroll container in BOTH — the other axis computes to
+ * `auto` rather than staying visible — and a sticky heading inside a scroll
+ * container sticks to that container, not to the window. The container never
+ * scrolls vertically, so the heading would simply scroll away with the page and
+ * the stickiness would look broken for no visible reason.
+ *
+ * So the horizontal scroll is kept only where it earns its place: narrow
+ * screens, where these tables are wider than the display. From `md` up they fit
+ * and the wrapper stops being a scroll container, which is what lets the
+ * heading stick. Entering twenty items on a phone was never the case to
+ * optimise for.
+ * ------------------------------------------------------------------------ */
+.items-scroll {
+  overflow-x: auto;
+}
+@media (min-width: 768px) {
+  .items-scroll {
+    overflow-x: visible;
+  }
+}
