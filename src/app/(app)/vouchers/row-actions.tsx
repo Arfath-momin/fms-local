@@ -34,12 +34,25 @@ export function VoucherRowActions({
           <span className="text-muted" aria-hidden="true">
             ·
           </span>
-          <Link
-            href={printHref}
-            className="text-accent underline underline-offset-2"
-          >
-            PDF
-          </Link>
+          {/* A plain <a> when the target is a generated FILE rather than a
+              page. next/link client-navigates: it would fetch the PDF as an
+              RSC payload, fail to parse it, and leave the row looking broken
+              instead of downloading anything. */}
+          {printHref.startsWith("/api/") ? (
+            <a
+              href={printHref}
+              className="text-accent underline underline-offset-2"
+            >
+              PDF
+            </a>
+          ) : (
+            <Link
+              href={printHref}
+              className="text-accent underline underline-offset-2"
+            >
+              PDF
+            </Link>
+          )}
         </>
       )}
     </span>

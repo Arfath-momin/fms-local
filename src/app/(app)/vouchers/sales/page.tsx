@@ -108,7 +108,13 @@ export default async function SalesPage({
                     <td>
                       <VoucherRowActions
                         viewHref={`/vouchers/sales/${s.id}`}
-                        printHref={`/vouchers/sales/${s.id}/print`}
+                        // A market bill downloads straight off the list. The
+                        // other channels still open the printable page.
+                        printHref={
+                          s.type === "MARKET"
+                            ? `/api/vouchers/sales/${s.id}/pdf`
+                            : `/vouchers/sales/${s.id}/print`
+                        }
                       />
                     </td>
                   </tr>

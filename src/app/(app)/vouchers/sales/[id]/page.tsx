@@ -130,14 +130,28 @@ export default async function SalePage({
           </p>
         </div>
         <div className="flex gap-2">
-          {/* Opens the bill as a document — the browser's print dialog is also
-              where "Save as PDF" lives, so this covers printing and sending. */}
-          <Link
-            href={`/vouchers/sales/${sale.id}/print`}
-            className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
-          >
-            Bill
-          </Link>
+          {/* A market bill downloads as a real PDF — one click, no print dialog.
+              The browser will not let a page choose "Save as PDF" as a print
+              destination, so the file is generated on the server instead.
+
+              The other channels still open the HTML bill and go through the
+              dialog. Market is the first document built this way and the only
+              one until this has been read on paper and judged. */}
+          {sale.type === "MARKET" ? (
+            <a
+              href={`/api/vouchers/sales/${sale.id}/pdf`}
+              className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
+            >
+              Download PDF
+            </a>
+          ) : (
+            <Link
+              href={`/vouchers/sales/${sale.id}/print`}
+              className="border border-line-strong bg-surface px-4 py-2 text-[13px] font-semibold hover:border-accent"
+            >
+              Bill
+            </Link>
+          )}
           {mayEdit && (
             <Link
               href={`/vouchers/sales/${sale.id}/edit`}
