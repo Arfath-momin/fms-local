@@ -103,6 +103,7 @@ export default async function PartyStatementPrintPage({
   const listWindow = parseListWindow(await searchParams);
   const scope = { companyId: company.id, centreId: centre.id, partyId: id };
 
+
   const [entries, latest, totals] = await Promise.all([
     // No skip/take: the whole window, for the reason in the doc comment above.
     prisma.ledgerEntry.findMany({
@@ -122,6 +123,59 @@ export default async function PartyStatementPrintPage({
       _sum: { amount: true },
     }),
   ]);
+
+  /**
+   * What each row is FOR — the bill number under the kind.
+   *
+   * "Sale" on its own is not a statement line. A buyer disputing what they owe
+   * is holding a bill with a number on it, and a row they cannot match to that
+   * number is a row they will query. The screen has named these since it was
+   * built; the printed copy — the one that actually leaves the building and
+   * gets argued over — did not.
+   *
+   * One IN(…) per voucher kind over the ids on this statement, never one query
+   * per row.
+   */
+  const sourceIds = [...new Set(entries.map((e) => e.sourceId))];
+  const [srcSales, srcPurchases, srcExpenses, srcSettlements, srcTrips] =
+    await Promise.all([
+      prisma.sale.findMany({
+        where: { id: { in: sourceIds } },
+        select: { id: true, billNo: true },
+      }),
+      prisma.purchase.findMany({
+        where: { id: { in: sourceIds } },
+        select: { id: true, billNo: true },
+      }),
+      prisma.expense.findMany({
+        where: { id: { in: sourceIds } },
+        select: { id: true, category: { select: { name: true } } },
+      }),
+      prisma.settlement.findMany({
+        where: { id: { in: sourceIds } },
+        select: { id: true, reference: true },
+      }),
+      prisma.deliveryNote.findMany({
+        where: { id: { in: sourceIds } },
+        select: { id: true, billNo: true, vehicle: { select: { number: true } } },
+      }),
+    ]);
+
+  const detailBySource = new Map<string, string>();
+  for (const x of srcSales) if (x.billNo) detailBySource.set(x.id, `Bill ${x.billNo}`);
+  for (const x of srcPurchases)
+    if (x.billNo) detailBySource.set(x.id, `Bill ${x.billNo}`);
+  // An expense names its head — "Ice", "Vehicle Rent" — which is what the
+  // vendor is being asked about. It carries no bill number of its own.
+  for (const x of srcExpenses) detailBySource.set(x.id, x.category.name);
+  // A payment or receipt has whatever reference was recorded: a cheque number,
+  // a UPI id. Nothing to print when none was.
+  for (const x of srcSettlements)
+    if (x.reference) detailBySource.set(x.id, x.reference);
+  // A trip is identified by its note and the truck that ran it, which is how a
+  // transporter will refer to it.
+  for (const x of srcTrips)
+    detailBySource.set(x.id, `${x.billNo} · ${x.vehicle.number}`);
 
   const balance = latest?.runningBalance ?? ZERO;
   const sum = (t: "DEBIT" | "CREDIT") =>
@@ -226,7 +280,14 @@ export default async function PartyStatementPrintPage({
               {entries.map((e) => (
                 <tr key={e.id}>
                   <td className="num">{fmtDate(e.date)}</td>
-                  <td>{SOURCE_LABELS[e.sourceType] ?? e.sourceType}</td>
+                  <td>
+                    {SOURCE_LABELS[e.sourceType] ?? e.sourceType}
+                    {detailBySource.get(e.sourceId) && (
+                      <div className="text-muted text-[11px]">
+                        {detailBySource.get(e.sourceId)}
+                      </div>
+                    )}
+                  </td>
                   <td className="r num">
                     {e.type === "DEBIT" ? fmtMoney(e.amount) : ""}
                   </td>
