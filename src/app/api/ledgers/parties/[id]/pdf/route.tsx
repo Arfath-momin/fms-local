@@ -7,6 +7,7 @@ import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import { VoucherDocument, sheetsFor, type Column } from "@/pdf/voucher-doc";
 import { pdfFilename, pdfResponse } from "@/pdf/render";
+import { letterheadFor } from "@/pdf/letterhead";
 
 /**
  * A party's statement of account, as a downloadable PDF.
@@ -132,10 +133,12 @@ export async function GET(
     .reduce((a, e) => a.add(e.amount), ZERO);
   const balance = latest?.runningBalance ?? ZERO;
 
+  const letterhead = await letterheadFor(company.id);
+
   const doc = (
     <VoucherDocument
       d={{
-        companyName: company.name,
+        letterhead,
         centreName: centre.name,
         docKind: "Statement of Account",
         identity: [

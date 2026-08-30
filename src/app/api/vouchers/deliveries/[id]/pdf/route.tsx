@@ -6,6 +6,7 @@ import { lineKgPerBox, lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
 import { PACK_LABELS } from "@/lib/pack";
 import { VoucherDocument, sheetsFor, type Column } from "@/pdf/voucher-doc";
 import { pdfFilename, pdfResponse } from "@/pdf/render";
+import { letterheadFor } from "@/pdf/letterhead";
 
 /**
  * A delivery note as a downloadable PDF — the copy that travels with the truck.
@@ -79,10 +80,12 @@ export async function GET(
   if (note.advancePaid)
     details.push({ label: "Advance paid", value: fmtMoney(note.advancePaid) });
 
+  const letterhead = await letterheadFor(note.companyId);
+
   const doc = (
     <VoucherDocument
       d={{
-        companyName: note.company.name,
+        letterhead,
         centreName: note.centre.name,
         docKind: "Delivery Note",
         identity: [

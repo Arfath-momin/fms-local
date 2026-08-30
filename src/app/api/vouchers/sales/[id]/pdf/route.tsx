@@ -13,6 +13,7 @@ import {
   type WorkingRow,
 } from "@/pdf/voucher-doc";
 import { pdfFilename, pdfResponse } from "@/pdf/render";
+import { letterheadFor } from "@/pdf/letterhead";
 
 /**
  * A sale bill as a downloadable PDF — one click, no print dialog.
@@ -180,10 +181,12 @@ export async function GET(
     details.push({ label: "Net weight", value: fmtKg(sale.netWeight) });
   if (sale.totalBox) details.push({ label: "Total box", value: String(sale.totalBox) });
 
+  const letterhead = await letterheadFor(sale.companyId);
+
   const doc = (
     <VoucherDocument
       d={{
-        companyName: sale.company.name,
+        letterhead,
         centreName: sale.centre.name,
         docKind: `${SALE_TYPE_LABELS[sale.type]} Sale Bill`,
         identity: [

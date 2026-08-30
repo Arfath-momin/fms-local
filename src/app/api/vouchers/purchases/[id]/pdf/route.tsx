@@ -10,6 +10,7 @@ import {
   type Column,
 } from "@/pdf/voucher-doc";
 import { pdfFilename, pdfResponse } from "@/pdf/render";
+import { letterheadFor } from "@/pdf/letterhead";
 
 /** A purchase voucher as a downloadable PDF. */
 const ZERO = new Prisma.Decimal(0);
@@ -71,10 +72,12 @@ export async function GET(
   if (anyBoat) totalRow.push("");
   totalRow.push("Total", fmtKg(purchase.lines.reduce((a, l) => a.add(l.qtyKg), ZERO)), "", fmtMoney(linesTotal));
 
+  const letterhead = await letterheadFor(purchase.companyId);
+
   const doc = (
     <VoucherDocument
       d={{
-        companyName: purchase.company.name,
+        letterhead,
         centreName: purchase.centre.name,
         docKind: "Purchase Voucher",
         identity: [

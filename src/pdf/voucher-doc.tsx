@@ -1,5 +1,6 @@
-import { Document, Page, Text, View } from "@react-pdf/renderer";
+import { Document, Image, Page, Text, View } from "@react-pdf/renderer";
 import { s, MUTED, RULE_STRONG } from "./theme";
+import type { Letterhead } from "./letterhead";
 
 /**
  * Every printable voucher, as one document.
@@ -35,7 +36,8 @@ export type WorkingRow = {
 };
 
 export type VoucherDoc = {
-  companyName: string;
+  /** The mark, the legal name, the address and the GSTIN. */
+  letterhead: Letterhead;
   centreName: string;
   docKind: string;
   /** Bill number, dates — whatever identifies this document. */
@@ -78,8 +80,8 @@ const cell = (c: Column) => ({
 export function VoucherDocument({ d }: { d: VoucherDoc }) {
   return (
     <Document
-      title={`${d.companyName} · ${d.docKind}`}
-      author={d.companyName}
+      title={`${d.letterhead.name} · ${d.docKind}`}
+      author={d.letterhead.name}
     >
       <Page size="A4" style={s.page}>
         {/* Repeated on every sheet: a loose second page of a bill has to say
@@ -90,7 +92,36 @@ export function VoucherDocument({ d }: { d: VoucherDoc }) {
             <Text style={{ marginTop: 2 }}>{d.centreName}</Text>
           </View>
           <View style={s.bandCentre}>
-            <Text style={s.companyMark}>{d.companyName}</Text>
+            {d.letterhead.logo ? (
+              // Bounded rather than sized: logos arrive square, wide or tall,
+              // and `objectFit: contain` keeps whichever it is inside the band
+              // without stretching it into something a client would not
+              // recognise on their own paperwork.
+              /* eslint-disable-next-line jsx-a11y/alt-text --
+                 this is react-pdf's Image, which draws into a PDF and has no
+                 alt attribute to give; the rule is looking for an HTML <img>. */
+              <Image
+                src={d.letterhead.logo}
+                style={{ height: 40, maxWidth: 150, objectFit: "contain" }}
+              />
+            ) : (
+              // No mark uploaded — the short name fills the space one would
+              // have, which is why it is `name` and not the legal name.
+              <Text style={s.companyMark}>{d.letterhead.name}</Text>
+            )}
+            {d.letterhead.legalName && d.letterhead.logo && (
+              <Text style={[s.companyLine, { fontWeight: "bold", marginTop: 2 }]}>
+                {d.letterhead.legalName}
+              </Text>
+            )}
+            {/* An Indian address collapsed onto one line is unreadable, so the
+                lines it was typed on are kept. */}
+            {d.letterhead.address && (
+              <Text style={s.companyLine}>{d.letterhead.address}</Text>
+            )}
+            {d.letterhead.contact && (
+              <Text style={s.companyLine}>{d.letterhead.contact}</Text>
+            )}
           </View>
           <View style={s.bandRight}>
             {d.identity.map((x) => (
