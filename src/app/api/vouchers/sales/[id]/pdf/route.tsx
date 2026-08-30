@@ -141,6 +141,14 @@ export async function GET(
           owed: fmtMoney(sale.amount.sub(sale.rentDeducted!)),
         }
       : null,
+    // How many rows an A4 sheet holds once the head and the "billed to" block
+    // are down. Measured, not guessed: 35 on the first sheet and 36 on each
+    // after it. The divisor is deliberately LOWER than that, because the two
+    // ways of being wrong are not equally bad — over-estimating leaves a column
+    // heading on a sheet with no rows under it, which is untidy, while
+    // under-estimating drops the headings from a sheet that HAS rows, which
+    // leaves a reader guessing which column is which. Neither moves a figure.
+    lastItemPage: Math.max(1, Math.ceil(sale.lines.length / 34)),
     amountInWords: rupeesInWords(sale.amount),
     outstanding: outstanding.greaterThan(0) ? fmtMoney(outstanding) : null,
     notes: sale.notes,

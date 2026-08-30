@@ -95,7 +95,9 @@ export const s = StyleSheet.create({
     flexDirection: "row",
     borderBottomWidth: 0.5,
     borderBottomColor: RULE,
-    paddingVertical: 4,
+    // Tight enough that an ordinary bill stays on one sheet, loose enough to
+    // read down a column of forty without losing your place.
+    paddingVertical: 3,
   },
   tfoot: {
     flexDirection: "row",
@@ -119,7 +121,9 @@ export const s = StyleSheet.create({
   sign: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 46,
+    // Enough air to sign in, not so much that an otherwise one-page bill is
+    // pushed onto a second sheet by whitespace alone.
+    marginTop: 30,
   },
   signBox: {
     width: 150,

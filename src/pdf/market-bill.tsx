@@ -33,6 +33,16 @@ export type MarketBillData = {
   amountInWords: string;
   outstanding: string | null;
   notes: string | null;
+  /**
+   * The last sheet the item rows reach, so the column headings stop there.
+   *
+   * Estimated from the row count rather than measured — react-pdf lays out
+   * after this component is built, so nothing here can ask how tall the table
+   * came out. Being wrong is cheap in both directions: too low drops the
+   * headings from a page that has rows, too high leaves the stray heading this
+   * exists to remove. Neither changes a figure.
+   */
+  lastItemPage: number;
 };
 
 export function MarketBillDocument({ d }: { d: MarketBillData }) {
@@ -94,11 +104,32 @@ export function MarketBillDocument({ d }: { d: MarketBillData }) {
         {/* Items. A market bill is itemised in BOXES: its money is the net the
             market paid, not a rate times a weight, so a Kgs column would print
             zeros and invite the reader to multiply them. */}
-        <View style={s.th} fixed>
-          <Text style={[s.thText, { width: 34, textAlign: "right" }]}>SR NO</Text>
-          <Text style={[s.thText, { flex: 1, paddingLeft: 10 }]}>PARTICULARS</Text>
-          <Text style={[s.thText, { width: 60, textAlign: "right" }]}>BOX</Text>
-        </View>
+        {/* Repeated at the top of every sheet the rows run onto, so a reader
+            on page three still knows which column is which.
+
+            `fixed` alone repeats it on EVERY page, including a final sheet that
+            carries only the totals — a column heading with no table under it,
+            which reads as a fault. The render callback draws it only up to the
+            page the rows actually reach. */}
+        <View
+          style={s.th}
+          fixed
+          render={({ pageNumber }: { pageNumber: number }) =>
+            pageNumber <= d.lastItemPage ? (
+              <>
+                <Text style={[s.thText, { width: 34, textAlign: "right" }]}>
+                  SR NO
+                </Text>
+                <Text style={[s.thText, { flex: 1, paddingLeft: 10 }]}>
+                  PARTICULARS
+                </Text>
+                <Text style={[s.thText, { width: 60, textAlign: "right" }]}>
+                  BOX
+                </Text>
+              </>
+            ) : null
+          }
+        />
         {d.lines.map((l, i) => (
           <View style={s.tr} key={i} wrap={false}>
             <Text style={{ width: 34, textAlign: "right", color: MUTED }}>
@@ -117,6 +148,15 @@ export function MarketBillDocument({ d }: { d: MarketBillData }) {
           </Text>
         </View>
 
+        {/* The bill's foot, as one unbreakable block.
+        
+            It split across the page break before: "AMOUNT IN WORDS" was left at
+            the bottom of one sheet with the words themselves at the top of the
+            next, and the totals could be separated from the signatures that
+            attest to them. A figure on a page without its label is how a total
+            gets disputed. Either the whole foot fits below the last row or it
+            moves to the next sheet intact. */}
+        <View wrap={false}>
         <View style={s.totals}>
           {d.working.map((w) => (
             <View style={s.totalRow} key={w.label}>
@@ -176,6 +216,7 @@ export function MarketBillDocument({ d }: { d: MarketBillData }) {
         <View style={s.sign}>
           <Text style={s.signBox}>RECEIVER&apos;S SIGNATURE</Text>
           <Text style={s.signBox}>FOR {d.companyName.toUpperCase()}</Text>
+        </View>
         </View>
 
         <Text
