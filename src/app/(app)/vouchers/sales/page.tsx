@@ -32,6 +32,12 @@ export default async function SalesPage({
       include: {
         party: { select: { name: true } },
         careOfParty: { select: { name: true } },
+        // The trip's truck. `vehicleNo` on the sale is only filled when a bill
+        // was typed WITHOUT a trip — choosing a trip means the vehicle is the
+        // trip's, and reading the column alone left the list showing a dash for
+        // every bill entered the normal way. The voucher page and the bill have
+        // resolved it this way all along; the list was the odd one out.
+        deliveryNote: { select: { vehicle: { select: { number: true } } } },
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       skip: listWindow.skip,
@@ -100,7 +106,8 @@ export default async function SalesPage({
                       )}
                     </td>
                     <td className="num">
-                      {s.vehicleNo ?? <span className="text-muted">—</span>}
+                      {s.deliveryNote?.vehicle.number ??
+                        s.vehicleNo ?? <span className="text-muted">—</span>}
                     </td>
                     <td className="num-col num text-credit">
                       {fmtMoney(s.amount)}

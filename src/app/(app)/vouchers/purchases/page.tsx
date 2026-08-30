@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { VoucherRowActions } from "../row-actions";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import {
   dateWhere,
   parseListWindow,
@@ -41,13 +42,16 @@ export default async function PurchasesPage({
       where,
       include: {
         party: { select: { name: true } },
-        _count: { select: { lines: true } },
         // The boats behind the bill. On a Society purchase the money is owed to
         // the Society, so "Owed to" alone never tells you WHICH boat the
         // payment is for — which is the thing the merchant actually needs when
         // settling. The names are already on the rows; they were just never
         // brought up to the list.
-        lines: { select: { boat: { select: { name: true } } } },
+        // …and the weights, because the list column is the KILOS bought, not a
+        // count of rows. "3 items" tells a merchant nothing about a day's
+        // buying; 1,100 kg is the figure they carry in their head and can check
+        // against the boats.
+        lines: { select: { qtyKg: true, boat: { select: { name: true } } } },
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       skip: listWindow.skip,
@@ -93,7 +97,7 @@ export default async function PurchasesPage({
                 <th>No.</th>
                 <th>Owed to</th>
                 <th>Type</th>
-                <th className="num-col">Items</th>
+                <th className="num-col">Total Kg</th>
                 <th className="num-col">Total</th>
                 <th className="w-16"></th>
               </tr>
@@ -128,7 +132,13 @@ export default async function PurchasesPage({
                     </td>
                     <td >{TYPE_LABELS[p.type]}</td>
                     <td className="num-col num text-muted">
-                      {p._count.lines || "—"}
+                      {(() => {
+                        const kg = p.lines.reduce(
+                          (a, l) => a.add(l.qtyKg),
+                          new Prisma.Decimal(0)
+                        );
+                        return kg.greaterThan(0) ? fmtKg(kg) : "—";
+                      })()}
                     </td>
                     <td className="num-col num text-debit">
                       {fmtMoney(p.amount)}
