@@ -275,7 +275,7 @@ export async function createExpense(
           notes: d.notes,
           details: d.details,
           createdById: session.userId,
-          lines: { create: d.lines },
+          lines: { create: d.lines.map((l, i) => ({ ...l, sortOrder: i })) },
         },
       });
       await postExpenseLedger(tx, { ...expense, ...d });
@@ -376,7 +376,7 @@ export async function updateExpense(
           partyId,
           categoryId: d.categoryId,
           deliveryNoteId: d.deliveryNoteId,
-          lines: { create: d.lines },
+          lines: { create: d.lines.map((l, i) => ({ ...l, sortOrder: i })) },
           amount: d.amount,
           date: d.date,
           spentOn: d.spentOn,

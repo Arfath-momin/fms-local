@@ -34,7 +34,7 @@ export default async function PurchaseDetailPage({
     include: {
       party: { select: { name: true } },
       lines: {
-        orderBy: { id: "asc" },
+        orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         include: { boat: { select: { name: true } } },
       },
       createdBy: { select: { name: true } },

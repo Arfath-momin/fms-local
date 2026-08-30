@@ -77,7 +77,7 @@ export default async function DeliveryNotePrintPage({
         },
       },
       centre: { select: { name: true } },
-      lines: { orderBy: { id: "asc" } },
+      lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
     },
   });
   if (!note) notFound();

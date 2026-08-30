@@ -268,7 +268,12 @@ export async function createPurchase(
           amount: d.amount,
           date: d.date,
           createdById: session.userId,
-          lines: { create: await lineData(tx, d.lines) },
+          lines: {
+            create: (await lineData(tx, d.lines)).map((l, i) => ({
+              ...l,
+              sortOrder: i,
+            })),
+          },
         },
       });
       await postPurchaseLedger(tx, { ...purchase, ...d });
@@ -395,7 +400,12 @@ export async function updatePurchase(
           date: d.date,
           updatedById: session.userId,
           updatedAt: new Date(),
-          lines: { create: await lineData(tx, d.lines) },
+          lines: {
+            create: (await lineData(tx, d.lines)).map((l, i) => ({
+              ...l,
+              sortOrder: i,
+            })),
+          },
         },
       });
       await postPurchaseLedger(tx, { ...purchase, ...d });

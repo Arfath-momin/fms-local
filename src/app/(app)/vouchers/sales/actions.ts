@@ -1210,7 +1210,9 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
     placeOfLoading: d.placeOfLoading,
     returnNote: d.returnNote,
     lines: {
-      create: d.lines.map((l) => ({
+      create: d.lines.map((l, i) => ({
+        // The row's place as typed — see the note on SaleLine.sortOrder.
+        sortOrder: i,
         pack: l.pack,
         particular: l.particular,
         box: l.box,

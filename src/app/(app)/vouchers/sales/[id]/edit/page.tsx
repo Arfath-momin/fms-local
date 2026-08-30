@@ -28,7 +28,7 @@ export default async function EditSalePage({
     include: {
       party: { select: { name: true } },
       careOfParty: { select: { name: true } },
-      lines: { orderBy: { id: "asc" } },
+      lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       // The costs entered on this bill. Ordered so re-opening it shows the rows
       // in the order they were typed.
       expenses: {

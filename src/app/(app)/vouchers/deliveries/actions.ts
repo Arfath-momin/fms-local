@@ -262,7 +262,11 @@ export async function createDelivery(
           notes: d.notes,
           createdById: session.userId,
           lines: {
-            create: d.lines.map((l) => ({
+            create: d.lines.map((l, i) => ({
+              // The row's place as typed. Without it the rows come back in
+              // uuid order, which is arbitrary — and arbitrary AGAIN after
+              // every edit, since saving recreates them with new uuids.
+              sortOrder: i,
               pack: l.pack,
               particulars: l.particulars,
               kg: l.kg,
@@ -417,7 +421,11 @@ export async function updateDelivery(
           updatedById: session.userId,
           updatedAt: new Date(),
           lines: {
-            create: d.lines.map((l) => ({
+            create: d.lines.map((l, i) => ({
+              // The row's place as typed. Without it the rows come back in
+              // uuid order, which is arbitrary — and arbitrary AGAIN after
+              // every edit, since saving recreates them with new uuids.
+              sortOrder: i,
               pack: l.pack,
               particulars: l.particulars,
               kg: l.kg,

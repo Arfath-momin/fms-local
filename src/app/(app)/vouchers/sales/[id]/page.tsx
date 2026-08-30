@@ -69,7 +69,7 @@ export default async function SalePage({
       centre: { select: { name: true } },
       party: { select: { name: true } },
       careOfParty: { select: { name: true } },
-      lines: { orderBy: { id: "asc" } },
+      lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       // Costs entered on this bill — shown below, and named in the delete
       // warning so removing the bill is never a surprise.
       expenses: {

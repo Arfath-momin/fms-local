@@ -350,6 +350,8 @@ model Purchase {
 model PurchaseLine {
   id         String  @id @default(uuid())
   purchaseId String  @map("purchase_id")
+  /// The row's place in the voucher, as it was typed. See DeliveryNoteLine.
+  sortOrder  Int     @default(0) @map("sort_order")
   boatId     String? @map("boat_id")
   particular String
   qtyKg      Decimal @map("qty_kg") @db.Decimal(12, 3)
@@ -412,6 +414,8 @@ model ExpenseCategory {
 model ExpenseLine {
   id          String  @id @default(uuid())
   expenseId   String  @map("expense_id")
+  /// The row's place in the voucher, as it was typed. See DeliveryNoteLine.
+  sortOrder   Int     @default(0) @map("sort_order")
   description String
   amount      Decimal @db.Decimal(14, 2)
 
@@ -611,6 +615,14 @@ model DeliveryNote {
 model DeliveryNoteLine {
   id             String   @id @default(uuid())
   deliveryNoteId String   @map("delivery_note_id")
+  /// The row's place in the voucher, as it was typed.
+  ///
+  /// Rows were read `orderBy: id`, and the id is a random UUID — so the order
+  /// was arbitrary, and an EDIT made it arbitrary again: saving deletes every
+  /// line and recreates it with a fresh uuid, so a voucher's rows reshuffled on
+  /// every save. A merchant who corrected the third row and found the whole
+  /// table rearranged had no way to tell whether the correction had taken.
+  sortOrder      Int      @default(0) @map("sort_order")
   particulars    String
   /// How this line is packed — see PackType. The note and the bills it feeds
   /// have to agree about this, or a loose consignment counts as crates on one
@@ -816,6 +828,8 @@ model Sale {
 model SaleLine {
   id         String   @id @default(uuid())
   saleId     String   @map("sale_id")
+  /// The row's place in the voucher, as it was typed. See DeliveryNoteLine.
+  sortOrder  Int      @default(0) @map("sort_order")
   particular String
   /// How this line is packed. LOOSE rows carry no crates, so they are left out
   /// of every box tally rather than counted as zero and quietly balancing.

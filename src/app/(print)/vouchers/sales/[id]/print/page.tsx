@@ -77,7 +77,7 @@ export default async function SaleBillPage({
       centre: { select: { name: true } },
       party: { select: { name: true, contactInfo: true } },
       careOfParty: { select: { name: true } },
-      lines: { orderBy: { id: "asc" } },
+      lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       // The truck this bill's fish travelled on. The sale stopped carrying its
       // own vehicle number — it was a second place to type one the trip already
       // knew — so the bill reads it from the trip, or failing that from the

@@ -28,7 +28,7 @@ export async function GET(
       company: { select: { name: true } },
       centre: { select: { name: true } },
       vehicle: { select: { number: true, transporter: { select: { name: true } } } },
-      lines: { orderBy: { id: "asc" } },
+      lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
     },
   });
   if (!note) return new Response("Not found.", { status: 404 });

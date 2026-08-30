@@ -33,7 +33,7 @@ export default async function ExpenseDetailPage({
     include: {
       party: { select: { name: true } },
       category: { select: { id: true, code: true, name: true } },
-      lines: { orderBy: { id: "asc" } },
+      lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       createdBy: { select: { name: true } },
       updatedBy: { select: { name: true } },
     },

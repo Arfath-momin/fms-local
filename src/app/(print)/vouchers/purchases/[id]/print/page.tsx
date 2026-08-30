@@ -77,7 +77,7 @@ export default async function PurchasePrintPage({
       centre: { select: { name: true } },
       party: { select: { name: true, contactInfo: true } },
       lines: {
-        orderBy: { id: "asc" },
+        orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         include: { boat: { select: { name: true } } },
       },
     },

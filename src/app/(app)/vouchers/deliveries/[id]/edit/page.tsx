@@ -24,7 +24,7 @@ export default async function EditDeliveryPage({
     // Scoped, not just found by id. A voucher belonging to another company or
     // centre must not open — let alone be editable — from the scope you are in.
     where: { id, companyId: company.id, centreId: centre.id },
-    include: { lines: { orderBy: { id: "asc" } }, vehicle: { select: { number: true, transporter: { select: { name: true } } } } },
+    include: { lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] }, vehicle: { select: { number: true, transporter: { select: { name: true } } } } },
   });
   if (!note) notFound();
 

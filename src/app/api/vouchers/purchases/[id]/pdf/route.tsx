@@ -29,7 +29,7 @@ export async function GET(
       company: { select: { name: true } },
       centre: { select: { name: true } },
       party: { select: { name: true } },
-      lines: { orderBy: { id: "asc" }, include: { boat: { select: { name: true } } } },
+      lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }], include: { boat: { select: { name: true } } } },
     },
   });
   if (!purchase) return new Response("Not found.", { status: 404 });

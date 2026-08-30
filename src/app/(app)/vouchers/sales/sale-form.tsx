@@ -906,13 +906,25 @@ export function SaleForm({
                         </select>
                       </td>
                       <td className="px-1 py-1">
-                        {l.pack === "LOOSE" ? (
-                          <span className="block text-center text-muted text-[12px] py-2">
-                            —
-                          </span>
-                        ) : (
-                          <input name="box" inputMode="numeric" value={l.box} onChange={(e) => setLine(i, { box: e.target.value })} className={cell} />
-                        )}
+                        {/* readOnly, never a <span> — the same trap the Kgs
+                            cell fell into. Rows travel as repeated `box` fields
+                            paired up BY POSITION, so a row that sends nothing
+                            shifts every row after it, and a bill mixing a loose
+                            row with boxed ones would give one row's boxes to
+                            another. The server zeroes a loose row's boxes
+                            anyway; what matters is that something is sent. */}
+                        <input
+                          name="box"
+                          inputMode="numeric"
+                          readOnly={l.pack === "LOOSE"}
+                          tabIndex={l.pack === "LOOSE" ? -1 : undefined}
+                          value={l.pack === "LOOSE" ? "" : l.box}
+                          onChange={(e) => setLine(i, { box: e.target.value })}
+                          className={
+                            cell + (l.pack === "LOOSE" ? " text-muted bg-background" : "")
+                          }
+                          placeholder={l.pack === "LOOSE" ? "—" : undefined}
+                        />
                       </td>
                       <td className="px-2 py-1">
                         <input name="particular" value={l.particular} onChange={(e) => setLine(i, { particular: e.target.value })} className={inputCls} placeholder="e.g. Prawn" />

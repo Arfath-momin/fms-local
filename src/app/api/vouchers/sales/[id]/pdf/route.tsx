@@ -44,7 +44,7 @@ export async function GET(
       centre: { select: { name: true } },
       party: { select: { name: true } },
       careOfParty: { select: { name: true } },
-      lines: { orderBy: { id: "asc" } },
+      lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       deliveryNote: { select: { billNo: true, vehicle: { select: { number: true } } } },
     },
   });

@@ -51,7 +51,7 @@ export default async function DeliveryNotePage({
         vehicle: { select: { number: true, transporter: { select: { name: true } } } },
       company: { select: { name: true } },
       centre: { select: { name: true } },
-      lines: { orderBy: { id: "asc" } },
+      lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       // The bills that came back off this trip — what the reconciliation
       // tallies against what went out.
       sales: {
