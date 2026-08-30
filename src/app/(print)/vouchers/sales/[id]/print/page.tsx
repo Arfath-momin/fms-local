@@ -169,17 +169,19 @@ export default async function SaleBillPage({
                   {fmtDate(sale.saleDate ?? sale.date)}
                 </span>
               </div>
-              {/* The buying day, stated whenever it differs from the sale's
-                  own date. Fish bought on the 30th and sold on the 31st is one
-                  transaction with two dates, and a bill showing only the later
-                  one leaves the reader to guess which catch it came off. */}
-              {sale.saleDate &&
-                sale.saleDate.getTime() !== sale.date.getTime() && (
-                  <div className="num text-[12px]">
-                    <span className="opacity-75">Purchase date </span>
-                    <span className="font-semibold">{fmtDate(sale.date)}</span>
-                  </div>
-                )}
+              {/* The buying day, ALWAYS. Fish bought on the 30th and sold on
+                  the 31st is one transaction with two dates, and a bill showing
+                  only the later one leaves the reader to guess which catch it
+                  came off.
+
+                  Printed even when the two match. Suppressing it then saves a
+                  line and costs certainty: a reader seeing one date cannot tell
+                  whether the dates agreed or whether this bill simply does not
+                  say, and that doubt is the thing the line exists to remove. */}
+              <div className="num text-[12px]">
+                <span className="opacity-75">Purchase date </span>
+                <span className="font-semibold">{fmtDate(sale.date)}</span>
+              </div>
             </>
           }
         />
@@ -256,15 +258,14 @@ export default async function SaleBillPage({
                   Sr No
                 </th>
                 <th>Particulars</th>
-                {/* Boxes on EVERY channel that has them, not just market.
+                {/* ONE box column, on every channel that has boxes.
                     A mill or factory bill is unloaded box by box and the buyer
-                    counts them off the truck; leaving the column out meant the
-                    one figure both sides check on the ground was the one figure
-                    missing from the paper. Blank where a bill has none. */}
+                    counts them off the truck, so the column is not a market
+                    speciality. Market had its own "Boxes" column as well for a
+                    moment, which printed two headings over one cell and shifted
+                    every figure a column to the left. */}
                 {anyBox && <th className="r">Box</th>}
-                {isMarket ? (
-                  <th className="r">Boxes</th>
-                ) : (
+                {!isMarket && (
                   <>
                     {anyCount ? (
                       <th className="r">Count / Kg</th>
@@ -282,12 +283,8 @@ export default async function SaleBillPage({
                 <tr key={l.id}>
                   <td className="r num text-muted">{i + 1}</td>
                   <td className="font-medium">{l.particular}</td>
-                  {anyBox && !isMarket && (
-                    <td className="r num">{l.box ?? "—"}</td>
-                  )}
-                  {isMarket ? (
-                    <td className="r num">{l.box ?? "—"}</td>
-                  ) : (
+                  {anyBox && <td className="r num">{l.box ?? "—"}</td>}
+                  {!isMarket && (
                     <>
                       <td className="r num">
                         {/* The row's own weight. It used to be the weight of a
@@ -316,12 +313,8 @@ export default async function SaleBillPage({
                 <td colSpan={2} className="r">
                   Total
                 </td>
-                {anyBox && !isMarket && (
-                  <td className="r num">{totalBoxes || "—"}</td>
-                )}
-                {isMarket ? (
-                  <td className="r num">{totalBoxes || "—"}</td>
-                ) : (
+                {anyBox && <td className="r num">{totalBoxes || "—"}</td>}
+                {!isMarket && (
                   <>
                     {/* Kg total sits under the column it totals, so the mill
                         can check the weight it received against the money

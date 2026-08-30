@@ -41,10 +41,24 @@
  * ------------------------------------------------------------------------ */
 .bill-details {
   display: grid;
-  grid-template-columns: max-content 1fr;
-  column-gap: 0.85rem;
+  /* Both columns sized to their content, and the pair pushed to the right edge
+     of the block. The middle ground between the two things this has been:
+     `space-between` threw label and value to opposite edges with an inch of
+     nothing between them, and `max-content 1fr` left the values starting
+     wherever the longest label happened to end — which reads as neither left-
+     nor right-aligned, just adrift somewhere near the middle.
+
+     Labels are right-aligned so they sit tight against their values; values are
+     left-aligned so they start on one axis. The block as a whole hugs the right
+     margin, which is where a reader looks for a voucher's particulars. */
+  grid-template-columns: max-content max-content;
+  justify-content: end;
+  column-gap: 0.75rem;
   row-gap: 0.2rem;
   align-items: baseline;
+}
+.bill-details > :nth-child(odd) {
+  text-align: right;
 }
 
 /* ---------------------------------------------------------------------------
