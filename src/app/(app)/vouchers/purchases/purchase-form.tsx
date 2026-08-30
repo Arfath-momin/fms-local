@@ -4,7 +4,7 @@ import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { PurchaseFormState } from "./actions";
 import type { PurchaseType } from "@/generated/prisma/enums";
-import { businessToday, fmtMoney } from "@/lib/format";
+import { businessToday, fmtKg, fmtMoney } from "@/lib/format";
 import type { FormScope } from "@/lib/scope";
 import { BillUpload } from "../bill-upload";
 import { ScopeFields } from "../scope-fields";
@@ -119,6 +119,23 @@ export function PurchaseForm({
         const q = Number(l.qtyKg);
         const p = Number(l.pricePerKg);
         return sum + (Number.isFinite(q) && Number.isFinite(p) ? q * p : 0);
+      }, 0),
+    [lines]
+  );
+
+  /**
+   * The kilos on the voucher, added up as they are typed.
+   *
+   * The foot totalled the money and not the weight, so a clerk entering 100,
+   * 200 and 150 could see what the day cost but had to add the kilos in their
+   * head to check it against the boats — on the one figure the seller is being
+   * paid per unit of.
+   */
+  const grandKg = useMemo(
+    () =>
+      lines.reduce((sum, l) => {
+        const q = Number(l.qtyKg);
+        return sum + (Number.isFinite(q) ? q : 0);
       }, 0),
     [lines]
   );
@@ -343,13 +360,21 @@ export function PurchaseForm({
               })}
             </tbody>
             <tfoot>
+              {/* Each total sits UNDER the column it totals, rather than the
+                  label stretching across to leave the money alone at the end.
+                  A merchant checking a voucher reads down a column, not across
+                  a row. */}
               <tr className="border-t border-line-strong">
                 <td
-                  colSpan={hasLineBoats ? 5 : 4}
+                  colSpan={hasLineBoats ? 3 : 2}
                   className="px-3 py-2 text-right font-semibold"
                 >
-                  Total Amount
+                  Total
                 </td>
+                <td className="px-2 py-2 num text-right font-semibold">
+                  {grandKg > 0 ? fmtKg(grandKg) : "—"}
+                </td>
+                <td></td>
                 <td className="px-2 py-2 num text-right font-semibold text-debit">
                   {fmtMoney(grandTotal)}
                 </td>
