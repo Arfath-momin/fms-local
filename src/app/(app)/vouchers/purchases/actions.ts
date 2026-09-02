@@ -11,7 +11,11 @@ import {
 } from "@/lib/document-series";
 import { requireAdmin, requireEntry } from "@/lib/session";
 import { getActiveScope, requireSubmittedScope } from "@/lib/centre";
-import { FIXED_PURCHASE_PARTY, purchaseHasLineBoats } from "@/lib/party";
+import {
+  FIXED_PURCHASE_PARTY,
+  purchaseHasLineBoats,
+  purchaseHasLineBoxes,
+} from "@/lib/party";
 import { findOrCreateParty } from "@/lib/party-db";
 import { postLedgerEntries, removeLedgerEntries } from "@/lib/ledger";
 import { resolveReviews } from "@/lib/review-db";
@@ -28,6 +32,8 @@ export type PurchaseFormState = { error: string } | null;
 const PURCHASE_TYPES: PurchaseType[] = ["SOCIETY", "KFDC", "PRIVATE", "LOCAL"];
 
 type ParsedLine = {
+  /** Boxes on the line. Zero on a Society or KFDC bill, which states kilos. */
+  box: number;
   /** Society / KFDC only; null on a Private or Local row. */
   boatName: string | null;
   particular: string;
@@ -56,6 +62,7 @@ const clean = (v: FormDataEntryValue | null) =>
 
 const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
 const DECIMAL3 = /^\d+(\.\d{1,3})?$/;
+const INT = /^\d{1,6}$/;
 
 /**
  * Every purchase type is itemised, and the grand total is always the sum of the
@@ -89,9 +96,15 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
   // Only Society / KFDC rows carry a boat, so on the other two the field is not
   // rendered at all and getAll() returns an empty list that indexes to "".
   const wantsBoats = purchaseHasLineBoats(type);
+  // Private and Local buy by the box and quote what one box weighs; Society and
+  // KFDC state the kilos outright. Which two fields a row carries follows from
+  // that, and so does which of them is derived.
+  const wantsBoxes = purchaseHasLineBoxes(type);
   const boatNames = formData.getAll("boatName").map(String);
   const particulars = formData.getAll("particular").map(String);
   const qtys = formData.getAll("qtyKg").map(String);
+  const boxes = formData.getAll("box").map(String);
+  const kgPerBoxes = formData.getAll("kgPerBox").map(String);
   const prices = formData.getAll("pricePerKg").map(String);
 
   const lines: ParsedLine[] = [];
@@ -101,23 +114,47 @@ function parse(formData: FormData): { error: string } | { data: Parsed } {
       ? (boatNames[i] ?? "").trim().replace(/\s+/g, " ")
       : "";
     const qtyRaw = (qtys[i] ?? "").trim();
+    const boxRaw = (boxes[i] ?? "").trim();
+    const kgPerBoxRaw = (kgPerBoxes[i] ?? "").trim();
     const priceRaw = (prices[i] ?? "").trim();
 
     // Skip fully-blank rows the form may submit.
-    if (!particular && !boatName && !qtyRaw && !priceRaw) continue;
+    if (!particular && !boatName && !qtyRaw && !boxRaw && !kgPerBoxRaw && !priceRaw)
+      continue;
     if (!particular) return { error: `Row ${i + 1} needs a particular.` };
-    if (!DECIMAL3.test(qtyRaw) || Number(qtyRaw) <= 0)
-      return {
-        error: `Quantity for “${particular}” must be a positive number.`,
-      };
+
+    let box = 0;
+    let qtyKg: Prisma.Decimal;
+    if (wantsBoxes) {
+      // Boxes and what one weighs. The weight is DERIVED from them and never
+      // read off the form: a total the clerk could type independently is a
+      // total that can disagree with the two figures printed beside it.
+      if (!INT.test(boxRaw) || Number(boxRaw) <= 0)
+        return {
+          error: `Boxes for “${particular}” must be a positive whole number.`,
+        };
+      if (!DECIMAL3.test(kgPerBoxRaw) || Number(kgPerBoxRaw) <= 0)
+        return {
+          error: `Kg / box for “${particular}” must be a positive number.`,
+        };
+      box = Number(boxRaw);
+      qtyKg = new Prisma.Decimal(kgPerBoxRaw).mul(box).toDecimalPlaces(3);
+    } else {
+      if (!DECIMAL3.test(qtyRaw) || Number(qtyRaw) <= 0)
+        return {
+          error: `Quantity for “${particular}” must be a positive number.`,
+        };
+      qtyKg = new Prisma.Decimal(qtyRaw);
+    }
+
     if (!DECIMAL2.test(priceRaw))
       return { error: `Rate for “${particular}” must be a number.` };
 
-    const qtyKg = new Prisma.Decimal(qtyRaw);
     const pricePerKg = new Prisma.Decimal(priceRaw);
     lines.push({
       boatName: boatName || null,
       particular,
+      box,
       qtyKg,
       pricePerKg,
       total: qtyKg.mul(pricePerKg),
@@ -186,6 +223,7 @@ async function lineData(tx: Prisma.TransactionClient, lines: ParsedLine[]) {
     // several vessels.
     boatId: boatIds[i],
     particular: l.particular,
+    box: l.box,
     qtyKg: l.qtyKg,
     pricePerKg: l.pricePerKg,
     total: l.total,

@@ -4,7 +4,8 @@ import { prisma } from "@/lib/db";
 import { getActiveScope } from "@/lib/centre";
 import { requireSession } from "@/lib/session";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
-import { purchaseHasLineBoats } from "@/lib/party";
+import { purchaseHasLineBoats,
+  purchaseHasLineBoxes } from "@/lib/party";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { rupeesInWords } from "@/lib/amount-words";
 import { docTitle, titleDate } from "@/lib/doc-title";
@@ -103,6 +104,7 @@ export default async function PurchasePrintPage({
   // the whole voucher, or none. The same helper the entry form uses decides,
   // so the printed sheet always has the shape the voucher was entered in.
   const hasLineBoats = purchaseHasLineBoats(purchase.type);
+  const hasLineBoxes = purchaseHasLineBoxes(purchase.type);
   const hasLines = purchase.lines.length > 0;
 
   const linesTotal = purchase.lines.reduce(
@@ -181,6 +183,10 @@ export default async function PurchasePrintPage({
                 <th className="w-8">#</th>
                 {hasLineBoats && <th>Boat</th>}
                 <th>Particulars</th>
+                {/* Private and Local buy by the box; Society and KFDC state
+                    their kilos outright. */}
+                {hasLineBoxes && <th className="r">Box</th>}
+                {hasLineBoxes && <th className="r">Kg / Box</th>}
                 <th className="r">Total Kg</th>
                 <th className="r">Rate/kg</th>
                 <th className="r">Amount</th>
@@ -192,6 +198,17 @@ export default async function PurchasePrintPage({
                   <td className="num">{i + 1}</td>
                   {hasLineBoats && <td>{l.boat?.name ?? "—"}</td>}
                   <td>{l.particular}</td>
+                  {hasLineBoxes && <td className="r num">{l.box || "—"}</td>}
+                  {hasLineBoxes && (
+                    <td className="r num">
+                      {l.box > 0
+                        ? new Prisma.Decimal(l.qtyKg)
+                            .div(l.box)
+                            .toDecimalPlaces(3)
+                            .toString()
+                        : "—"}
+                    </td>
+                  )}
                   <td className="r num">{fmtKg(l.qtyKg)}</td>
                   <td className="r num">{fmtMoney(l.pricePerKg)}</td>
                   <td className="r num">{fmtMoney(l.total)}</td>
@@ -201,6 +218,14 @@ export default async function PurchasePrintPage({
             <tfoot>
               <tr>
                 <td colSpan={hasLineBoats ? 3 : 2}>Total</td>
+                {hasLineBoxes && (
+                  <>
+                    <td className="r num">
+                      {purchase.lines.reduce((a, l) => a + l.box, 0) || "—"}
+                    </td>
+                    <td />
+                  </>
+                )}
                 <td className="r num">{fmtKg(totalKg)}</td>
                 <td></td>
                 <td className="r num">{fmtMoney(linesTotal)}</td>

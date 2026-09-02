@@ -354,6 +354,19 @@ model PurchaseLine {
   sortOrder  Int     @default(0) @map("sort_order")
   boatId     String? @map("boat_id")
   particular String
+  /// Boxes on this line — PRIVATE and LOCAL only.
+  ///
+  /// A private or local seller lands fish in boxes and quotes what one box
+  /// weighs, so the row's weight is box × kg-per-box rather than a figure
+  /// anybody weighed directly. A Society or KFDC bill states its kilos and
+  /// leaves this at zero.
+  ///
+  /// The per-box weight is NOT stored: it is `qtyKg / box`, derived wherever it
+  /// is shown, exactly as a delivery note line does it. Two stored figures that
+  /// must agree are two figures that can disagree.
+  box        Int     @default(0)
+  /// The row's whole weight. Typed on a Society or KFDC bill; derived from the
+  /// boxes on a Private or Local one.
   qtyKg      Decimal @map("qty_kg") @db.Decimal(12, 3)
   pricePerKg Decimal @map("price_per_kg") @db.Decimal(12, 2)
   total      Decimal @db.Decimal(14, 2)

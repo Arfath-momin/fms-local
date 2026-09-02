@@ -50,9 +50,17 @@ export async function GET(
   // while the money is owed to whoever sent it. Shown only when recorded.
   const anyBoat = purchase.lines.some((l) => l.boat);
 
+  // Private and Local buy by the box and quote what one weighs; Society and
+  // KFDC state their kilos outright.
+  const anyBox = purchase.lines.some((l) => l.box > 0);
+
   const columns: Column[] = [{ label: "#", width: 26, align: "right" }];
   if (anyBoat) columns.push({ label: "Boat", width: 90 });
   columns.push({ label: "Particulars", flex: 1 });
+  if (anyBox) {
+    columns.push({ label: "Box", width: 40, align: "right" });
+    columns.push({ label: "Kg / Box", width: 54, align: "right" });
+  }
   columns.push({ label: "Total Kg", width: 66, align: "right" });
   columns.push({ label: "Rate/kg", width: 58, align: "right" });
   columns.push({ label: "Amount", width: 74, align: "right" });
@@ -61,6 +69,15 @@ export async function GET(
     const r = [String(i + 1)];
     if (anyBoat) r.push(l.boat?.name ?? "—");
     r.push(l.particular);
+    if (anyBox) {
+      r.push(l.box ? String(l.box) : "—");
+      // Worked back out of the row's weight, never stored beside it.
+      r.push(
+        l.box > 0
+          ? new Prisma.Decimal(l.qtyKg).div(l.box).toDecimalPlaces(3).toString()
+          : "—"
+      );
+    }
     r.push(fmtKg(l.qtyKg));
     r.push(fmtMoney(l.pricePerKg));
     r.push(fmtMoney(l.total));
@@ -70,7 +87,15 @@ export async function GET(
   const linesTotal = purchase.lines.reduce((a, l) => a.add(l.total), ZERO);
   const totalRow = [""];
   if (anyBoat) totalRow.push("");
-  totalRow.push("Total", fmtKg(purchase.lines.reduce((a, l) => a.add(l.qtyKg), ZERO)), "", fmtMoney(linesTotal));
+  totalRow.push("Total");
+  if (anyBox) {
+    totalRow.push(String(purchase.lines.reduce((a, l) => a + l.box, 0)), "");
+  }
+  totalRow.push(
+    fmtKg(purchase.lines.reduce((a, l) => a.add(l.qtyKg), ZERO)),
+    "",
+    fmtMoney(linesTotal)
+  );
 
   const letterhead = await letterheadFor(purchase.companyId);
 

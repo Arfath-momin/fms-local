@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
 import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
-import { purchaseHasLineBoats, purchasePartyIsTyped } from "@/lib/party";
+import { purchaseHasLineBoats,
+  purchaseHasLineBoxes, purchasePartyIsTyped } from "@/lib/party";
 import { deletePurchase, updatePurchase } from "../actions";
 import { PurchaseForm, type PurchaseInit } from "../purchase-form";
 import { getAttachments } from "@/lib/attachments";
@@ -80,6 +82,7 @@ export default async function PurchaseDetailPage({
   // Society / KFDC name a boat on every row; Private and Local name their
   // seller once, as the party, so there is no boat column to show.
   const showLineBoats = purchaseHasLineBoats(purchase.type);
+  const showLineBoxes = purchaseHasLineBoxes(purchase.type);
 
   // Only an administrator may change a voucher after it is saved. Everyone else
   // who can reach this page sees the same figures, read-only.
@@ -118,6 +121,9 @@ export default async function PurchaseDetailPage({
                   <th className="num-col">Sl</th>
                   {showLineBoats && <th>Boat Name</th>}
                   <th>{showLineBoats ? "Particulars" : "Particular"}</th>
+                  {/* Boxes and what one weighed — Private and Local only. */}
+                  {showLineBoxes && <th className="num-col">Box</th>}
+                  {showLineBoxes && <th className="num-col">Kg / Box</th>}
                   {/* Same headings on every type — see the note on the form. */}
                   <th className="num-col">Total Kg</th>
                   <th className="num-col">Rate/kg</th>
@@ -132,6 +138,22 @@ export default async function PurchaseDetailPage({
                       <td>{l.boat?.name ?? <span className="text-muted">—</span>}</td>
                     )}
                     <td>{l.particular}</td>
+                    {showLineBoxes && (
+                      <td className="num-col num">{l.box || "—"}</td>
+                    )}
+                    {showLineBoxes && (
+                      // Worked back out of the row's weight rather than stored
+                      // beside it — two figures that must agree are two that
+                      // can disagree.
+                      <td className="num-col num text-muted">
+                        {l.box > 0
+                          ? new Prisma.Decimal(l.qtyKg)
+                              .div(l.box)
+                              .toDecimalPlaces(3)
+                              .toString()
+                          : "—"}
+                      </td>
+                    )}
                     <td className="num-col">{fmtKg(l.qtyKg)}</td>
                     <td className="num-col">{fmtMoney(l.pricePerKg)}</td>
                     <td className="num-col">{fmtMoney(l.total)}</td>
@@ -139,10 +161,28 @@ export default async function PurchaseDetailPage({
                 ))}
               </tbody>
               <tfoot>
+                {/* Each total under the column it totals. */}
                 <tr className="border-t border-line-strong font-semibold">
-                  <td colSpan={showLineBoats ? 5 : 4} className="text-right">
-                    Total Amount
+                  <td colSpan={showLineBoats ? 3 : 2} className="text-right">
+                    Total
                   </td>
+                  {showLineBoxes && (
+                    <>
+                      <td className="num-col num">
+                        {purchase.lines.reduce((a, l) => a + l.box, 0) || "—"}
+                      </td>
+                      <td />
+                    </>
+                  )}
+                  <td className="num-col num">
+                    {fmtKg(
+                      purchase.lines.reduce(
+                        (a, l) => a.add(l.qtyKg),
+                        new Prisma.Decimal(0)
+                      )
+                    )}
+                  </td>
+                  <td />
                   <td className="num-col num text-debit">
                     {fmtMoney(purchase.amount)}
                   </td>
@@ -169,6 +209,14 @@ export default async function PurchaseDetailPage({
       boatName: l.boat?.name ?? "",
       particular: l.particular,
       qtyKg: l.qtyKg.toString(),
+      box: l.box ? String(l.box) : "",
+      // `qtyKg` is the row's TOTAL; the form takes the per-box figure, so it is
+      // divided back out on the way in — the same round trip a delivery note
+      // line makes. Storing both would be two figures free to disagree.
+      kgPerBox:
+        l.box > 0
+          ? new Prisma.Decimal(l.qtyKg).div(l.box).toDecimalPlaces(3).toString()
+          : "",
       pricePerKg: l.pricePerKg.toString(),
     })),
   };

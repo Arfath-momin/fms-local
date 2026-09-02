@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import type { PurchaseFormState } from "./actions";
 import type { PurchaseType } from "@/generated/prisma/enums";
@@ -13,6 +13,7 @@ import { PartyCombobox } from "../../masters/party-combobox";
 import {
   FIXED_PURCHASE_PARTY,
   purchaseHasLineBoats,
+  purchaseHasLineBoxes,
   purchasePartyIsTyped,
 } from "@/lib/party";
 
@@ -35,6 +36,9 @@ export type PurchaseLineInit = {
   boatName: string;
   particular: string;
   qtyKg: string;
+  /** PRIVATE and LOCAL: boxes, and what one of them weighs. */
+  box: string;
+  kgPerBox: string;
   pricePerKg: string;
 };
 
@@ -54,6 +58,8 @@ const BLANK_LINE: PurchaseLineInit = {
   boatName: "",
   particular: "",
   qtyKg: "",
+  box: "",
+  kgPerBox: "",
   pricePerKg: "",
 };
 
@@ -113,15 +119,27 @@ export function PurchaseForm({
   const issuesOwnNumber = type === "PRIVATE" || type === "LOCAL";
   const fixedParty = FIXED_PURCHASE_PARTY[type];
 
-  const grandTotal = useMemo(
-    () =>
-      lines.reduce((sum, l) => {
-        const q = Number(l.qtyKg);
-        const p = Number(l.pricePerKg);
-        return sum + (Number.isFinite(q) && Number.isFinite(p) ? q * p : 0);
-      }, 0),
-    [lines]
-  );
+  // Private and Local buy by the box and quote what one box weighs; Society and
+  // KFDC state the kilos outright. One helper so the row, the totals and the
+  // amount all read the weight the same way.
+  const hasLineBoxes = purchaseHasLineBoxes(type);
+  const rowKg = (l: PurchaseLineInit) =>
+    hasLineBoxes
+      ? (Number(l.box) || 0) * (Number(l.kgPerBox) || 0)
+      : Number(l.qtyKg) || 0;
+
+  /**
+   * The three totals, as plain reductions over a handful of rows.
+   *
+   * NOT useMemo: they read `rowKg`, which is rebuilt on every render, so a
+   * dependency array either omits it and goes stale the moment the purchase
+   * type changes, or includes it and memoises nothing. Summing five rows costs
+   * less than the array that would guard it.
+   */
+  const grandTotal = lines.reduce((sum, l) => {
+    const p = Number(l.pricePerKg);
+    return sum + (Number.isFinite(p) ? rowKg(l) * p : 0);
+  }, 0);
 
   /**
    * The kilos on the voucher, added up as they are typed.
@@ -131,14 +149,9 @@ export function PurchaseForm({
    * head to check it against the boats — on the one figure the seller is being
    * paid per unit of.
    */
-  const grandKg = useMemo(
-    () =>
-      lines.reduce((sum, l) => {
-        const q = Number(l.qtyKg);
-        return sum + (Number.isFinite(q) ? q : 0);
-      }, 0),
-    [lines]
-  );
+  const grandKg = lines.reduce((sum, l) => sum + rowKg(l), 0);
+
+  const grandBox = lines.reduce((sum, l) => sum + (Number(l.box) || 0), 0);
 
   const setLine = (i: number, patch: Partial<PurchaseLineInit>) =>
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -264,6 +277,18 @@ export function PurchaseForm({
                 <th className="text-left font-semibold px-2 py-2">
                   {hasLineBoats ? "Particulars" : "Particular"}
                 </th>
+                {/* Boxes, and what one weighs — Private and Local only.
+                    A Society or KFDC bill states its kilos outright. */}
+                {hasLineBoxes && (
+                  <>
+                    <th className="text-right font-semibold px-2 py-2 w-20">
+                      Box
+                    </th>
+                    <th className="text-right font-semibold px-2 py-2 w-24">
+                      Kg / Box
+                    </th>
+                  </>
+                )}
                 {/* The same two headings on every purchase type.
                 
                     A Society or KFDC line said "Total Kg" and "Rate/kg" while a
@@ -285,8 +310,7 @@ export function PurchaseForm({
             </thead>
             <tbody>
               {lines.map((l, i) => {
-                const rowTotal =
-                  (Number(l.qtyKg) || 0) * (Number(l.pricePerKg) || 0);
+                const rowTotal = rowKg(l) * (Number(l.pricePerKg) || 0);
                 return (
                   <tr key={i} className="border-t border-line align-top">
                     <td className="px-2 py-2 num text-muted">{i + 1}</td>
@@ -316,15 +340,58 @@ export function PurchaseForm({
                         placeholder="e.g. Prawn"
                       />
                     </td>
+                    {hasLineBoxes && (
+                      <>
+                        <td className="px-1 py-1">
+                          <input
+                            name="box"
+                            aria-label={`Boxes, row ${i + 1}`}
+                            inputMode="numeric"
+                            value={l.box}
+                            onChange={(e) => setLine(i, { box: e.target.value })}
+                            className={cellCls + " num text-right"}
+                          />
+                        </td>
+                        <td className="px-1 py-1">
+                          <input
+                            name="kgPerBox"
+                            aria-label={`Kg per box, row ${i + 1}`}
+                            inputMode="decimal"
+                            value={l.kgPerBox}
+                            onChange={(e) =>
+                              setLine(i, { kgPerBox: e.target.value })
+                            }
+                            className={cellCls + " num text-right"}
+                          />
+                        </td>
+                      </>
+                    )}
                     <td className="px-1 py-1">
-                      <input
-                        name="qtyKg"
-                        aria-label={`Quantity, row ${i + 1}`}
-                        inputMode="decimal"
-                        value={l.qtyKg}
-                        onChange={(e) => setLine(i, { qtyKg: e.target.value })}
-                        className={cellCls + " num text-right"}
-                      />
+                      {hasLineBoxes ? (
+                        // Derived: boxes times what one weighs. readOnly rather
+                        // than a <span>, because the rows are paired up BY
+                        // POSITION on the server and a cell that submits
+                        // nothing shifts every row after it.
+                        <input
+                          name="qtyKg"
+                          aria-label={`Total weight, row ${i + 1}`}
+                          readOnly
+                          tabIndex={-1}
+                          value={rowKg(l) ? rowKg(l).toFixed(3) : ""}
+                          className={
+                            cellCls + " num text-right text-muted bg-background"
+                          }
+                        />
+                      ) : (
+                        <input
+                          name="qtyKg"
+                          aria-label={`Quantity, row ${i + 1}`}
+                          inputMode="decimal"
+                          value={l.qtyKg}
+                          onChange={(e) => setLine(i, { qtyKg: e.target.value })}
+                          className={cellCls + " num text-right"}
+                        />
+                      )}
                     </td>
                     <td className="px-1 py-1">
                       <input
@@ -371,6 +438,14 @@ export function PurchaseForm({
                 >
                   Total
                 </td>
+                {hasLineBoxes && (
+                  <>
+                    <td className="px-2 py-2 num text-right font-semibold">
+                      {grandBox || "—"}
+                    </td>
+                    <td />
+                  </>
+                )}
                 <td className="px-2 py-2 num text-right font-semibold">
                   {grandKg > 0 ? fmtKg(grandKg) : "—"}
                 </td>

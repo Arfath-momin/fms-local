@@ -122,3 +122,14 @@ export function purchasePartyIsTyped(type: PurchaseType): boolean {
 export function purchaseHasLineBoats(type: PurchaseType): boolean {
   return !purchasePartyIsTyped(type);
 }
+
+/**
+ * True when each line of the bill is counted in BOXES.
+ *
+ * A Private or Local seller lands fish in boxes and quotes what one box weighs,
+ * so the row's weight is box × kg-per-box. A Society or KFDC bill states its
+ * kilos outright — the same two types that carry boats, from the other side.
+ */
+export function purchaseHasLineBoxes(type: PurchaseType): boolean {
+  return purchasePartyIsTyped(type);
+}
