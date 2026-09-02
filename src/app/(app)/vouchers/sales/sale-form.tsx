@@ -1,5 +1,7 @@
 "use client";
 
+import { DuplicateRow, duplicateAt } from "../duplicate-row";
+
 import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { SaleType } from "@/generated/prisma/enums";
@@ -968,9 +970,15 @@ export function SaleForm({
                       {type !== "MARKET" && (
                         <td className="px-3 py-1 num text-right text-muted">{fmtMoney(rowTotal)}</td>
                       )}
-                      <td className="px-1 py-1 text-center">
+                      <td className="px-1 py-1 text-center whitespace-nowrap">
+                        <DuplicateRow
+                          row={i + 1}
+                          onDuplicate={() =>
+                            setLines((ls) => duplicateAt(ls, i, BLANK_LINE))
+                          }
+                        />
                         {lines.length > 1 && (
-                          <button type="button" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} className="text-debit text-lg leading-none" aria-label="Remove line">
+                          <button type="button" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} className="text-debit text-lg leading-none px-1" aria-label={`Remove row ${i + 1}`}>
                             ×
                           </button>
                         )}
