@@ -8,6 +8,7 @@ import { NoCompanyNotice } from "./no-company";
 import { NavLinks } from "./nav-links";
 import { BackLink } from "./back-link";
 import { AppShell } from "./app-shell";
+import { ShortcutProvider } from "./keys/shortcut-provider";
 
 const ROLE_LABELS: Record<Role, string> = {
   SUPER_ADMIN: "Super Admin · system owner",
@@ -49,6 +50,10 @@ export default async function AppLayout({
       {/* Gateway sidebar — Tally-style top-level sections. AppShell owns only
           whether it is on screen; everything inside stays server-rendered, so
           the company and centre switchers remain Server Action forms. */}
+      {/* The keyboard. Wraps the shell rather than sitting inside it, because
+          the shell's own mobile drawer is one of the overlays Escape has to
+          close before it navigates anywhere. */}
+      <ShortcutProvider>
       <AppShell
         companyName={activeCompany.name}
         centreName={activeCentre?.name ?? null}
@@ -193,6 +198,7 @@ export default async function AppLayout({
           {children}
         </main>
       </AppShell>
+      </ShortcutProvider>
     </div>
   );
 }

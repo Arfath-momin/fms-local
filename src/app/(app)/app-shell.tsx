@@ -1,5 +1,7 @@
 "use client";
 
+import { useEscapeLayer } from "./keys/escape-layer";
+
 import { useEffect, useState } from "react";
 
 /**
@@ -38,15 +40,11 @@ export function AppShell({
     };
   }, [open]);
 
-  // Escape closes it, as any overlay should.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
+  // Escape closes it, as any overlay should — through the shared stack rather
+  // than a listener of its own. Two independent handlers would both fire on one
+  // press: this drawer would close AND the app would navigate back, which is
+  // never what a person meant by a single key.
+  useEscapeLayer(open, () => setOpen(false));
 
   return (
     <>

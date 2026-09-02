@@ -1,5 +1,7 @@
 "use client";
 
+import { useEscapeLayer } from "../../keys/escape-layer";
+
 
 import {
   expenseEntryAmount,
@@ -90,6 +92,12 @@ export function ExpenseDrawer({
   onClose: () => void;
   onRemove: () => void;
 }) {
+  // Escape closes the drawer rather than leaving the bill. This is the overlay
+  // most likely to be covering half-typed work — an ice cost with its blocks
+  // and rate part entered — and a global handler that navigated away would take
+  // the whole bill with it.
+  useEscapeLayer(true, onClose);
+
   const category = categories.find((c) => c.id === row.categoryId);
   const spec = category ? specFor(category) : null;
   const isRent = category?.code === "RENT";
