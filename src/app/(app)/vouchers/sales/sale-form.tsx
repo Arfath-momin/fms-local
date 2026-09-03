@@ -77,6 +77,9 @@ export type SaleInit = {
   amount: string; // factory bill amount total
   /** The buyer's weighing slip. Net is derived from these two. */
   weight: string;
+  /** FISH MILL: the two weighbridge readings the total comes from. */
+  weightFirst: string;
+  weightSecond: string;
   waterLess: string;
   /** The boxes this bill unloaded; the Items rows must add up to it. */
   totalBox: string;
@@ -194,6 +197,8 @@ export function SaleForm({
   // The buyer's weighing slip. Controlled so the reconciliation below can read
   // them while they are being typed.
   const [weight, setWeight] = useState(initial?.weight ?? "");
+  const [weightFirst, setWeightFirst] = useState(initial?.weightFirst ?? "");
+  const [weightSecond, setWeightSecond] = useState(initial?.weightSecond ?? "");
   const [waterLess, setWaterLess] = useState(initial?.waterLess ?? "");
   const [totalBox, setTotalBox] = useState(initial?.totalBox ?? "");
 
@@ -283,7 +288,15 @@ export function SaleForm({
   // "Cannot access 'avgKgPerBox' before initialization" and the Fish Mill and
   // Factory forms would not open at all. Market and Local were unaffected,
   // because rowKg only reaches this branch when there is a weighing slip.
-  const netWeight = Math.max(0, n(weight) - n(waterLess));
+  // A fish mill weighs twice — the lots with the truck, then without — and the
+  // load is the difference. A factory states one figure. Either way the total
+  // is working rather than something anybody quotes, which is why it stays off
+  // the printed bill.
+  const twoWeighings = type === "FISH_MILL";
+  const totalWeight = twoWeighings
+    ? Math.max(0, n(weightFirst) - n(weightSecond))
+    : n(weight);
+  const netWeight = Math.max(0, totalWeight - n(waterLess));
 
   // What one box weighs, worked out from the lot. This is the way round the
   // mill actually works: they weigh the whole consignment on arrival and
@@ -779,21 +792,67 @@ export function SaleForm({
 
       {weighed && (
         <div className="border border-line-strong bg-surface px-4 py-3">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label htmlFor="weight" className={labelCls}>
-                Total Weight
-              </label>
-              <input
-                id="weight"
-                name="weight"
-                inputMode="decimal"
-                value={weight}
-                onChange={(e) => setWeight(e.target.value)}
-                className={inputCls + " num text-right"}
-              />
-              <p className="text-muted text-[12px] mt-1">As it arrived.</p>
-            </div>
+          <div
+            className={
+              "grid grid-cols-1 gap-4 " +
+              // A mill states two readings, then water, then the net: four
+              // figures. A factory states one weight and its return.
+              (twoWeighings ? "sm:grid-cols-2 md:grid-cols-4" : "sm:grid-cols-3")
+            }
+          >
+            {twoWeighings ? (
+              <>
+                <div>
+                  <label htmlFor="weightFirst" className={labelCls}>
+                    1st Weight
+                  </label>
+                  <input
+                    id="weightFirst"
+                    name="weightFirst"
+                    inputMode="decimal"
+                    value={weightFirst}
+                    onChange={(e) => setWeightFirst(e.target.value)}
+                    className={inputCls + " num text-right"}
+                  />
+                  <p className="text-muted text-[12px] mt-1">
+                    The lots and the truck.
+                  </p>
+                </div>
+                <div>
+                  <label htmlFor="weightSecond" className={labelCls}>
+                    2nd Weight
+                  </label>
+                  <input
+                    id="weightSecond"
+                    name="weightSecond"
+                    inputMode="decimal"
+                    value={weightSecond}
+                    onChange={(e) => setWeightSecond(e.target.value)}
+                    className={inputCls + " num text-right"}
+                  />
+                  <p className="text-muted text-[12px] mt-1">
+                    {totalWeight > 0
+                      ? `The load is the difference: ${fmtKg(totalWeight)}.`
+                      : "Just the lots."}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div>
+                <label htmlFor="weight" className={labelCls}>
+                  Total Weight
+                </label>
+                <input
+                  id="weight"
+                  name="weight"
+                  inputMode="decimal"
+                  value={weight}
+                  onChange={(e) => setWeight(e.target.value)}
+                  className={inputCls + " num text-right"}
+                />
+                <p className="text-muted text-[12px] mt-1">As it arrived.</p>
+              </div>
+            )}
             <div>
               {/* One column, two names, because the two trades take weight off
                   for different reasons and the bill has to say which.

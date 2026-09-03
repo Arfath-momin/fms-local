@@ -180,8 +180,15 @@ export async function GET(
   if (vehicleNo) details.push({ label: "Vehicle No.", value: vehicleNo });
   if (sale.deliveryNote?.billNo)
     details.push({ label: "Trip", value: sale.deliveryNote.billNo });
-  if (sale.weight)
+  // A mill's bill states both weighbridge readings; the total is the difference
+  // between them and is working, not a figure anybody quotes, so it is left off.
+  // A factory states its one weight.
+  if (sale.weightFirst && sale.weightSecond) {
+    details.push({ label: "1st weight", value: fmtKg(sale.weightFirst) });
+    details.push({ label: "2nd weight", value: fmtKg(sale.weightSecond) });
+  } else if (sale.weight) {
     details.push({ label: "Total weight", value: fmtKg(sale.weight) });
+  }
   // The same column under the name each trade gives it: a mill deducts for
   // water and ice, a factory hands kilos back.
   if (gt0(sale.waterLess))

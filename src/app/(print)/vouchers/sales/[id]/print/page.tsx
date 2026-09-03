@@ -216,8 +216,15 @@ export default async function SaleBillPage({
             {sale.placeOfLoading && (
               <Detail label="Place of loading" value={sale.placeOfLoading} />
             )}
-            {sale.weight && (
-              <Detail label="Total weight" value={fmtKg(sale.weight)} />
+            {sale.weightFirst && sale.weightSecond ? (
+              <>
+                <Detail label="1st weight" value={fmtKg(sale.weightFirst)} />
+                <Detail label="2nd weight" value={fmtKg(sale.weightSecond)} />
+              </>
+            ) : (
+              sale.weight && (
+                <Detail label="Total weight" value={fmtKg(sale.weight)} />
+              )
             )}
             {/* The same column under the name each trade gives it: a mill
                 deducts for water and ice, a factory hands kilos back. */}

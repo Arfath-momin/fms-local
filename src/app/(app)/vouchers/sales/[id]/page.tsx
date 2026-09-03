@@ -164,7 +164,16 @@ export default async function SalePage({
         {sale.careOfParty && <Field label="CareOf" value={sale.careOfParty.name} />}
         {sale.place && <Field label="Place" value={sale.place} />}
         {vehicleNo && <Field label="Vehicle No." value={vehicleNo} />}
-        {sale.weight && <Field label="Weight" value={sale.weight.toString()} />}
+        {/* Both weighbridge readings on a mill bill; the total is their
+            difference and is working rather than something quoted. */}
+        {sale.weightFirst && sale.weightSecond ? (
+          <>
+            <Field label="1st Weight" value={fmtKg(sale.weightFirst)} />
+            <Field label="2nd Weight" value={fmtKg(sale.weightSecond)} />
+          </>
+        ) : (
+          sale.weight && <Field label="Weight" value={fmtKg(sale.weight)} />
+        )}
         {sale.netWeight && (
           <Field label="Net Weight" value={sale.netWeight.toString()} />
         )}

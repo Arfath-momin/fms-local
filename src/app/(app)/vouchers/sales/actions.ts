@@ -91,6 +91,8 @@ type Parsed = {
   rentDeducted: Prisma.Decimal | null;
   /** Costs entered on this bill, each becoming an expense voucher. */
   expenses: ParsedExpense[];
+  weightFirst: Prisma.Decimal | null;
+  weightSecond: Prisma.Decimal | null;
   weight: Prisma.Decimal | null;
   netWeight: Prisma.Decimal | null;
   waterLess: Prisma.Decimal | null;
@@ -314,14 +316,40 @@ function rentOnRows(
 function readWeighingSlip(
   formData: FormData,
   base: {
+    weightFirst: Prisma.Decimal | null;
+    weightSecond: Prisma.Decimal | null;
     weight: Prisma.Decimal | null;
     netWeight: Prisma.Decimal | null;
     waterLess: Prisma.Decimal | null;
     totalBox: number | null;
-  }
+  },
+  /** A mill weighs twice; a factory states one figure. */
+  twoWeighings: boolean
 ): { error: string } | null {
-  base.weight = parseMoney(clean(formData.get("weight"))) ?? null;
   base.waterLess = parseMoney(clean(formData.get("waterLess"))) ?? null;
+
+  if (twoWeighings) {
+    // A mill weighs the lots with the truck, then without. The load is the
+    // difference, so the total is DERIVED — a third field the clerk could type
+    // is a third figure free to disagree with the two it comes from.
+    base.weightFirst = parseMoney(clean(formData.get("weightFirst"))) ?? null;
+    base.weightSecond = parseMoney(clean(formData.get("weightSecond"))) ?? null;
+
+    if (base.weightFirst && base.weightSecond) {
+      if (base.weightSecond.gt(base.weightFirst))
+        return {
+          error:
+            `The second weighing (${base.weightSecond.toFixed(3)} kg) is more ` +
+            `than the first (${base.weightFirst.toFixed(3)} kg). The load is ` +
+            `the difference between them, so the first has to be the larger.`,
+        };
+      base.weight = base.weightFirst.sub(base.weightSecond);
+    } else {
+      base.weight = null;
+    }
+  } else {
+    base.weight = parseMoney(clean(formData.get("weight"))) ?? null;
+  }
 
   if (base.waterLess && base.weight && base.waterLess.gt(base.weight))
     return {
@@ -718,6 +746,8 @@ async function parse(
     deliveryNoteId: null as string | null,
     rentDeducted: null as Prisma.Decimal | null,
     expenses: [] as ParsedExpense[],
+    weightFirst: null as Prisma.Decimal | null,
+    weightSecond: null as Prisma.Decimal | null,
     weight: null as Prisma.Decimal | null,
     netWeight: null as Prisma.Decimal | null,
     waterLess: null as Prisma.Decimal | null,
@@ -844,7 +874,7 @@ async function parse(
     // Nothing is grossed back up at report time any more — this IS the revenue.
     amount = netBill;
   } else if (type === "FACTORY") {
-    const slip = readWeighingSlip(formData, base);
+    const slip = readWeighingSlip(formData, base, false);
     if (slip) return slip;
     base.returnNote = clean(formData.get("returnNote")) || null;
 
@@ -878,7 +908,8 @@ async function parse(
     // the actual trouble was upstream: on a weighed bill the row weights are
     // derived from the slip, so a missing slip has no weights to give them.
     // Checking the slip first makes the complaint the true one.
-    const slip = readWeighingSlip(formData, base);
+    // A mill weighs twice; a factory states one figure.
+    const slip = readWeighingSlip(formData, base, true);
     if (slip) return slip;
     const parsedLines = parseLines(formData, true, false, true);
     if ("error" in parsedLines) return { error: parsedLines.error };
@@ -1242,6 +1273,8 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
     deliveryNoteId: d.deliveryNoteId,
     rentDeducted: d.rentDeducted,
     notes: d.notes,
+    weightFirst: d.weightFirst,
+    weightSecond: d.weightSecond,
     weight: d.weight,
     netWeight: d.netWeight,
     waterLess: d.waterLess,

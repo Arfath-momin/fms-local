@@ -144,6 +144,8 @@ export default async function EditSalePage({
           })),
           amount: sale.type === "FACTORY" ? sale.amount.toString() : "",
           weight: sale.weight?.toString() ?? "",
+          weightFirst: sale.weightFirst?.toString() ?? "",
+          weightSecond: sale.weightSecond?.toString() ?? "",
           waterLess: sale.waterLess?.toString() ?? "",
           totalBox: sale.totalBox?.toString() ?? "",
           netWeight: sale.netWeight?.toString() ?? "",
