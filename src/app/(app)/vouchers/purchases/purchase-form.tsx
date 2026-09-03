@@ -1,5 +1,7 @@
 "use client";
 
+import { useStickyFields } from "../use-sticky-fields";
+
 import { DuplicateRow, duplicateAt } from "../duplicate-row";
 
 import { useActionState, useState } from "react";
@@ -108,6 +110,11 @@ export function PurchaseForm({
     action,
     null
   );
+
+  // Keeps what was typed when a save comes back with an error — React 19
+  // resets an uncontrolled form once its action returns, and a rejected
+  // voucher would otherwise lose the bill number along with the mistake.
+  const { field } = useStickyFields();
   const [type, setType] = useState<PurchaseType>(initial?.type ?? "SOCIETY");
   const [lines, setLines] = useState<PurchaseLineInit[]>(
     initial?.lines?.length ? initial.lines : [BLANK_LINE]
@@ -206,8 +213,7 @@ export function PurchaseForm({
           ) : (
             <input
               id="billNo"
-              name="billNo"
-              defaultValue={initial?.billNo ?? ""}
+              {...field("billNo", initial?.billNo ?? "")}
               placeholder="From the society's bill"
               className={inputCls}
             />
@@ -484,8 +490,7 @@ export function PurchaseForm({
         </label>
         <input
           id="notes"
-          name="notes"
-          defaultValue={initial?.notes ?? ""}
+          {...field("notes", initial?.notes ?? "")}
           className={inputCls}
         />
       </div>

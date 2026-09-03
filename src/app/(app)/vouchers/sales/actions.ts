@@ -563,7 +563,13 @@ function parseLines(
     if (!p && !qtyRaw && !rateRaw && !boxRaw && !countRaw) continue;
     if (!p) return { error: "Every line needs a particular." };
     if (boxesOnly) {
-      if (!INT.test(boxRaw) || Number(boxRaw) <= 0)
+      // A LOOSE row has no boxes to state. Fish too big to crate goes straight
+      // onto the truck bed, and a market bill can carry it like any other —
+      // demanding a positive box count made a trip with one loose lot
+      // unbillable, since "Reset from trip" lays that lot out and the bill then
+      // refuses to save. The row records WHICH fish went to that market; a
+      // market bill's money is the net it paid, never a rate times a count.
+      if (pack !== "LOOSE" && (!INT.test(boxRaw) || Number(boxRaw) <= 0))
         return { error: `Boxes for “${p}” must be a positive whole number.` };
     } else if (weighed && pack !== "LOOSE") {
       // Boxes, not kilos. The weight arrives from the slip a moment later.

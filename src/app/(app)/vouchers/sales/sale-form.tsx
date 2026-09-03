@@ -1,5 +1,7 @@
 "use client";
 
+import { useStickyFields } from "../use-sticky-fields";
+
 import { DuplicateRow, duplicateAt } from "../duplicate-row";
 
 import { useActionState, useMemo, useState } from "react";
@@ -142,6 +144,11 @@ export function SaleForm({
     action,
     null
   );
+
+  // Keeps what was typed when a save comes back with an error — React 19
+  // resets an uncontrolled form once its action returns, and a rejected
+  // voucher would otherwise lose the bill number along with the mistake.
+  const { field } = useStickyFields();
   const today = businessToday();
   // MARKET is in here now: a market bill is counted in boxes, and those box
   // counts are what tally against the boxes the trip dispatched. Without them
@@ -400,9 +407,8 @@ export function SaleForm({
           ) : (
             <input
               id="billNo"
-              name="billNo"
               required
-              defaultValue={initial?.billNo ?? ""}
+              {...field("billNo", initial?.billNo ?? "")}
               className={inputCls}
             />
           )}
@@ -527,8 +533,7 @@ export function SaleForm({
               </label>
               <input
                 id="place"
-                name="place"
-                defaultValue={initial?.place ?? ""}
+                {...field("place", initial?.place ?? "")}
                 className={inputCls}
               />
             </div>
@@ -700,7 +705,7 @@ export function SaleForm({
             <label htmlFor="placeOfLoading" className={labelCls}>
               Place of Loading
             </label>
-            <input id="placeOfLoading" name="placeOfLoading" defaultValue={initial?.placeOfLoading ?? ""} className={inputCls} />
+            <input id="placeOfLoading" {...field("placeOfLoading", initial?.placeOfLoading ?? "")} className={inputCls} />
           </div>
         </div>
       )}
@@ -1090,8 +1095,7 @@ export function SaleForm({
         </label>
         <input
           id="notes"
-          name="notes"
-          defaultValue={initial?.notes ?? ""}
+          {...field("notes", initial?.notes ?? "")}
           className={inputCls}
         />
       </div>

@@ -1,5 +1,7 @@
 "use client";
 
+import { useStickyFields } from "../use-sticky-fields";
+
 import { DuplicateRow, duplicateAt } from "../duplicate-row";
 
 import { useActionState, useState } from "react";
@@ -88,6 +90,11 @@ export function DeliveryForm({
     action,
     null
   );
+
+  // Keeps what was typed when a save comes back with an error — React 19
+  // resets an uncontrolled form once its action returns, and a rejected
+  // voucher would otherwise lose the bill number along with the mistake.
+  const { field } = useStickyFields();
   const [lines, setLines] = useState<DeliveryLineInit[]>(
     initial?.lines?.length ? initial.lines : [BLANK_LINE]
   );
@@ -163,9 +170,8 @@ export function DeliveryForm({
           </label>
           <input
             id="recipient"
-            name="recipient"
             required
-            defaultValue={initial?.recipient ?? ""}
+            {...field("recipient", initial?.recipient ?? "")}
             placeholder="Recipient name / place"
             className={inputCls}
           />
@@ -222,9 +228,8 @@ export function DeliveryForm({
           </label>
           <input
             id="advancePaid"
-            name="advancePaid"
             inputMode="decimal"
-            defaultValue={initial?.advancePaid ?? ""}
+            {...field("advancePaid", initial?.advancePaid ?? "")}
             className={inputCls + " num text-right"}
           />
           <p className="text-muted text-[12px] mt-1">
@@ -238,8 +243,7 @@ export function DeliveryForm({
           </label>
           <input
             id="driverName"
-            name="driverName"
-            defaultValue={initial?.driverName ?? ""}
+            {...field("driverName", initial?.driverName ?? "")}
             className={inputCls}
           />
         </div>
@@ -249,9 +253,8 @@ export function DeliveryForm({
           </label>
           <input
             id="mobileNo"
-            name="mobileNo"
             inputMode="tel"
-            defaultValue={initial?.mobileNo ?? ""}
+            {...field("mobileNo", initial?.mobileNo ?? "")}
             className={inputCls}
           />
         </div>
@@ -415,8 +418,7 @@ export function DeliveryForm({
         </label>
         <input
           id="notes"
-          name="notes"
-          defaultValue={initial?.notes ?? ""}
+          {...field("notes", initial?.notes ?? "")}
           className={inputCls}
         />
       </div>

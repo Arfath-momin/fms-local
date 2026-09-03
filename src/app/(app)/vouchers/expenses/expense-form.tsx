@@ -1,5 +1,7 @@
 "use client";
 
+import { useStickyFields } from "../use-sticky-fields";
+
 import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import type { ExpenseFormState } from "./actions";
@@ -100,6 +102,11 @@ export function ExpenseForm({
     action,
     null
   );
+
+  // Keeps what was typed when a save comes back with an error — React 19
+  // resets an uncontrolled form once its action returns, and a rejected
+  // voucher would otherwise lose the bill number along with the mistake.
+  const { field } = useStickyFields();
   const [categoryId, setCategoryId] = useState<string>(
     initial?.categoryId ?? categories[0]?.id ?? ""
   );
@@ -484,10 +491,9 @@ export function ExpenseForm({
           </label>
           <input
             id="amount"
-            name="amount"
             required
             inputMode="decimal"
-            defaultValue={initial?.amount ?? ""}
+            {...field("amount", initial?.amount ?? "")}
             className={inputCls + " num text-right max-w-[12rem]"}
           />
         </div>
@@ -538,8 +544,7 @@ export function ExpenseForm({
         </label>
         <input
           id="notes"
-          name="notes"
-          defaultValue={initial?.notes ?? ""}
+          {...field("notes", initial?.notes ?? "")}
           className={inputCls}
         />
       </div>
