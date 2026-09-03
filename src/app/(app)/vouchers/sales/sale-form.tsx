@@ -47,9 +47,8 @@ export type SaleLineInit = {
   box: string;
   qtyKg: string;
   ratePerKg: string;
-  /** MARKET: what one box weighs, and what the market paid for one box. */
+  /** MARKET: what one box weighed, carried from the delivery note. */
   kgPerBox: string;
-  ratePerBox: string;
   count: string;
 };
 
@@ -96,7 +95,6 @@ const BLANK_LINE: SaleLineInit = {
   qtyKg: "",
   ratePerKg: "",
   kgPerBox: "",
-  ratePerBox: "",
   count: "",
 };
 
@@ -272,7 +270,6 @@ export function SaleForm({
             ? String(Math.round((r.kg / r.box) * 1000) / 1000)
             : "",
         ratePerKg: "",
-        ratePerBox: "",
         count: "",
       }))
     );
@@ -325,19 +322,16 @@ export function SaleForm({
   };
 
   /**
-   * What the market paid for one row.
+   * What one row is worth.
    *
-   * A market quotes PER BOX — its bill says how many boxes it took and what it
-   * paid for each — so the money is box × rate. A loose row never went into a
-   * box, so there is no per-box price to quote it at and it is priced on its
-   * weight like every other channel.
+   * ZERO on a market bill, and that is not an omission. A market's money is the
+   * net it paid — the total less its commission, cutting, reserve and labour —
+   * and a per-row amount printed beside that invites the reader to add the rows
+   * up and ask why the two figures differ. The rows record which market took
+   * which fish, and how much of it.
    */
-  const rowAmount = (l: SaleLineInit) => {
-    if (type !== "MARKET") return rowKg(l) * n(l.ratePerKg);
-    return l.pack === "LOOSE"
-      ? rowKg(l) * n(l.ratePerKg)
-      : n(l.box) * n(l.ratePerBox);
-  };
+  const rowAmount = (l: SaleLineInit) =>
+    type === "MARKET" ? 0 : rowKg(l) * n(l.ratePerKg);
 
   const lineTotal = lines.reduce((s, l) => s + rowAmount(l), 0);
   /**
@@ -960,21 +954,20 @@ export function SaleForm({
                   <th className="text-left font-semibold px-2 py-2 w-28">Pack</th>
                   <th className="text-right font-semibold px-2 py-2 w-16">Box</th>
                   <th className="text-left font-semibold px-3 py-2">Particular</th>
-                  {/* A market bill is quoted PER BOX: it states how many boxes
-                      it took, what one weighed, and what it paid for each. Every
-                      other channel reweighs on arrival and pays by weight. */}
-                  {type === "MARKET" && (
-                    <th className="text-right font-semibold px-2 py-2 w-20">
-                      Kg / Box
-                    </th>
+                  {/* Kgs on every channel. A market row's weight comes from
+                      the delivery note, which recorded what one box weighed
+                      when the truck was loaded — so it is not asked for twice.
+
+                      No rate and no amount on a market bill: its money is the
+                      net it paid, and a per-row price beside that invites
+                      adding the rows up and asking why the two disagree. */}
+                  <th className="text-right font-semibold px-2 py-2 w-24">Kgs</th>
+                  {type !== "MARKET" && (
+                    <th className="text-right font-semibold px-2 py-2 w-24">Rate/kg</th>
                   )}
-                  <th className="text-right font-semibold px-2 py-2 w-24">
-                    {type === "MARKET" ? "Total Kg" : "Kgs"}
-                  </th>
-                  <th className="text-right font-semibold px-2 py-2 w-24">
-                    {type === "MARKET" ? "Rate/Box" : "Rate/kg"}
-                  </th>
-                  <th className="text-right font-semibold px-3 py-2 w-28">Amount</th>
+                  {type !== "MARKET" && (
+                    <th className="text-right font-semibold px-3 py-2 w-28">Amount</th>
+                  )}
                   <th className="w-8"></th>
                 </tr>
               </thead>
@@ -1029,26 +1022,17 @@ export function SaleForm({
                       <td className="px-2 py-1">
                         <input name="particular" value={l.particular} onChange={(e) => setLine(i, { particular: e.target.value })} className={inputCls} placeholder="e.g. Prawn" />
                       </td>
+                      {/* What one box weighed, carried from the delivery note
+                          rather than asked for again: it was recorded when the
+                          truck was loaded, and the market's bill does not
+                          restate it. Hidden but SUBMITTED — the server works
+                          each row's kilos out from it. */}
                       {type === "MARKET" && (
-                        <td className="px-1 py-1">
-                          {/* What one box weighed, off the market's own bill —
-                              and prefilled from the delivery note, which
-                              recorded it when the truck was loaded. Blank on a
-                              loose row: nothing that never went into a box has
-                              a per-box weight. */}
-                          <input
-                            name="kgPerBox"
-                            inputMode="decimal"
-                            readOnly={l.pack === "LOOSE"}
-                            tabIndex={l.pack === "LOOSE" ? -1 : undefined}
-                            value={l.pack === "LOOSE" ? "" : l.kgPerBox}
-                            onChange={(e) => setLine(i, { kgPerBox: e.target.value })}
-                            className={
-                              cell + (l.pack === "LOOSE" ? " text-muted bg-background" : "")
-                            }
-                            placeholder={l.pack === "LOOSE" ? "—" : undefined}
-                          />
-                        </td>
+                        <input
+                          type="hidden"
+                          name="kgPerBox"
+                          value={l.pack === "LOOSE" ? "" : l.kgPerBox}
+                        />
                       )}
                       <td className="px-1 py-1">
                         {weighed && l.pack !== "LOOSE" ? (
@@ -1091,37 +1075,14 @@ export function SaleForm({
                           <input name="qtyKg" inputMode="decimal" value={l.qtyKg} onChange={(e) => setLine(i, { qtyKg: e.target.value })} className={cell} />
                         )}
                       </td>
-                      <td className="px-1 py-1">
-                        {/* A market quotes PER BOX; every other channel pays by
-                            weight. A loose row never went into a box, so there
-                            is no per-box price to quote it at and it keeps the
-                            per-kilo rate. Two fields, not one that means two
-                            things depending on the row. */}
-                        {/* EVERY row sends both names, whichever it shows.
-                            The rows are paired up by position on the server, so
-                            a row that sends only one of them shifts every row
-                            after it — a bill mixing a loose row with boxed ones
-                            would hand one row's rate to another. The unused one
-                            goes as an empty hidden field. */}
-                        {type === "MARKET" && l.pack !== "LOOSE" ? (
-                          <>
-                            <input
-                              name="ratePerBox"
-                              inputMode="decimal"
-                              value={l.ratePerBox}
-                              onChange={(e) => setLine(i, { ratePerBox: e.target.value })}
-                              className={cell}
-                            />
-                            <input type="hidden" name="ratePerKg" value="" />
-                          </>
-                        ) : (
-                          <>
-                            <input name="ratePerKg" inputMode="decimal" value={l.ratePerKg} onChange={(e) => setLine(i, { ratePerKg: e.target.value })} className={cell} />
-                            <input type="hidden" name="ratePerBox" value="" />
-                          </>
-                        )}
-                      </td>
-                      <td className="px-3 py-1 num text-right text-muted">{fmtMoney(rowTotal)}</td>
+                      {type !== "MARKET" && (
+                        <td className="px-1 py-1">
+                          <input name="ratePerKg" inputMode="decimal" value={l.ratePerKg} onChange={(e) => setLine(i, { ratePerKg: e.target.value })} className={cell} />
+                        </td>
+                      )}
+                      {type !== "MARKET" && (
+                        <td className="px-3 py-1 num text-right text-muted">{fmtMoney(rowTotal)}</td>
+                      )}
                       <td className="px-1 py-1 text-center whitespace-nowrap">
                         <DuplicateRow
                           row={i + 1}
@@ -1147,12 +1108,13 @@ export function SaleForm({
                   <td />
                   <td className="px-2 py-2 num text-right">{boxTotal || ""}</td>
                   <td className="px-3 py-2 text-right">Total</td>
-                  {type === "MARKET" && <td />}
                   <td className="px-2 py-2 num text-right">
                     {kgTotal ? fmtKg(kgTotal) : ""}
                   </td>
-                  <td />
-                  <td className="px-3 py-2 num text-right text-credit">{fmtMoney(lineTotal)}</td>
+                  {type !== "MARKET" && <td />}
+                  {type !== "MARKET" && (
+                    <td className="px-3 py-2 num text-right text-credit">{fmtMoney(lineTotal)}</td>
+                  )}
                   <td></td>
                 </tr>
               </tfoot>

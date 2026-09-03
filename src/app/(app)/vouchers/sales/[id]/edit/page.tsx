@@ -167,7 +167,6 @@ export default async function EditSalePage({
                     .toDecimalPlaces(3)
                     .toString()
                 : "",
-            ratePerBox: l.ratePerBox?.toString() ?? "",
             count: l.count != null ? String(l.count) : "",
           })),
         }}
