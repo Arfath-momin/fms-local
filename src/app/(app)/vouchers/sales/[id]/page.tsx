@@ -243,7 +243,12 @@ export default async function SalePage({
                 <th className="num-col">Box</th>
                 <th>Particular</th>
                 <th className="num-col">Kgs</th>
-                <th className="num-col">Rate/kg</th>
+                {/* A market is quoted per BOX; every other channel pays by
+                    weight. A loose row has no box to price, so it keeps the
+                    per-kilo rate whatever the channel. */}
+                <th className="num-col">
+                  {sale.type === "MARKET" ? "Rate/Box" : "Rate/kg"}
+                </th>
                 <th className="num-col">Amount</th>
               </tr>
             </thead>
@@ -254,7 +259,13 @@ export default async function SalePage({
                   <td className="num-col num">{l.box ?? "—"}</td>
                   <td className="font-medium">{l.particular}</td>
                   <td className="num-col num">{l.qtyKg.toString()}</td>
-                  <td className="num-col num">{fmtMoney(l.ratePerKg)}</td>
+                  <td className="num-col num">
+                    {fmtMoney(
+                      sale.type === "MARKET" && l.pack !== "LOOSE"
+                        ? (l.ratePerBox ?? 0)
+                        : l.ratePerKg
+                    )}
+                  </td>
                   <td className="num-col num">{fmtMoney(l.total)}</td>
                 </tr>
               ))}

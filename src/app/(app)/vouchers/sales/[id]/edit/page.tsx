@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { getActiveScope, scopeFieldValues } from "@/lib/centre";
 import { canEdit, requireSession } from "@/lib/session";
@@ -154,6 +155,17 @@ export default async function EditSalePage({
             box: l.box != null ? String(l.box) : "",
             qtyKg: l.qtyKg.toString(),
             ratePerKg: l.ratePerKg.toString(),
+            // `qtyKg` is the row's TOTAL; a market row takes the per-box figure,
+            // so it is divided back out on the way in. Storing both would be two
+            // figures free to disagree.
+            kgPerBox:
+              l.pack !== "LOOSE" && (l.box ?? 0) > 0
+                ? new Prisma.Decimal(l.qtyKg)
+                    .div(l.box!)
+                    .toDecimalPlaces(3)
+                    .toString()
+                : "",
+            ratePerBox: l.ratePerBox?.toString() ?? "",
             count: l.count != null ? String(l.count) : "",
           })),
         }}

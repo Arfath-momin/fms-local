@@ -76,22 +76,27 @@ export async function GET(
   if (anyPack) columns.push({ label: "Pack", width: 48 });
   columns.push({ label: "Particulars", flex: 1 });
   if (anyBox) columns.push({ label: "Box", width: 44, align: "right" });
-  if (!isMarket) {
-    columns.push({ label: "Kgs", width: 62, align: "right" });
-    columns.push({ label: "Rate/kg", width: 58, align: "right" });
-    columns.push({ label: "Amount", width: 74, align: "right" });
-  }
+  columns.push({ label: "Kgs", width: 62, align: "right" });
+  // A market is quoted per BOX; every other channel pays by weight.
+  columns.push({
+    label: isMarket ? "Rate/Box" : "Rate/kg",
+    width: 58,
+    align: "right",
+  });
+  columns.push({ label: "Amount", width: 74, align: "right" });
 
   const rows = sale.lines.map((l, i) => {
     const r = [String(i + 1)];
     if (anyPack) r.push(PACK_LABELS[l.pack]);
     r.push(l.particular);
     if (anyBox) r.push(l.pack === "LOOSE" ? "—" : String(l.box ?? 0));
-    if (!isMarket) {
-      r.push(fmtKg(saleLineTotalKg({ qtyKg: Number(l.qtyKg), box: l.box })));
-      r.push(fmtMoney(l.ratePerKg));
-      r.push(fmtMoney(l.total));
-    }
+    r.push(fmtKg(saleLineTotalKg({ qtyKg: Number(l.qtyKg), box: l.box })));
+    r.push(
+      fmtMoney(
+        isMarket && l.pack !== "LOOSE" ? (l.ratePerBox ?? 0) : l.ratePerKg
+      )
+    );
+    r.push(fmtMoney(l.total));
     return r;
   });
 
@@ -99,11 +104,18 @@ export async function GET(
   if (anyPack) totalRow.push("");
   totalRow.push("Total");
   if (anyBox) totalRow.push(String(totalBoxes));
-  if (!isMarket) {
-    totalRow.push(fmtKg(totalKg));
-    totalRow.push("");
-    totalRow.push(fmtMoney(sale.amount));
-  }
+  totalRow.push(fmtKg(totalKg));
+  totalRow.push("");
+  // The rows' own sum. On a market bill this is the GROSS the market's paper
+  // adds up to — the net it actually paid is in the working below, after its
+  // commission, cutting, reserve and labour come off.
+  totalRow.push(
+    fmtMoney(
+      isMarket
+        ? sale.lines.reduce((a, l) => a + Number(l.total), 0)
+        : Number(sale.amount)
+    )
+  );
 
   // --- the working. A market bill shows every deduction, in the order the
   // market's own paper strikes them; the other channels are paid in full.

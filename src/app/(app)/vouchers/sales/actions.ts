@@ -46,6 +46,8 @@ const clean = (v: FormDataEntryValue | null) =>
   String(v ?? "").trim().replace(/\s+/g, " ");
 
 type ParsedLine = {
+  /** MARKET, boxed rows only: what the market paid for one box. */
+  ratePerBox: Prisma.Decimal | null;
   pack: PackType;
   particular: string;
   box: number | null;
@@ -546,6 +548,10 @@ function parseLines(
   const particulars = formData.getAll("particular").map(String);
   const qtys = formData.getAll("qtyKg").map(String);
   const rates = formData.getAll("ratePerKg").map(String);
+  // MARKET rows also carry what one box weighed and what the market paid for
+  // one — its bill is quoted per box, not per kilo.
+  const kgPerBoxes = formData.getAll("kgPerBox").map(String);
+  const ratePerBoxes = formData.getAll("ratePerBox").map(String);
   const boxes = formData.getAll("box").map(String);
   const counts = formData.getAll("count").map(String);
 
@@ -554,6 +560,8 @@ function parseLines(
     const p = particulars[i].trim().replace(/\s+/g, " ");
     const qtyRaw = (qtys[i] ?? "").trim();
     const rateRaw = (rates[i] ?? "").trim();
+    const kgPerBoxRaw = (kgPerBoxes[i] ?? "").trim();
+    const ratePerBoxRaw = (ratePerBoxes[i] ?? "").trim();
     const boxRaw = (boxes[i] ?? "").trim();
     const countRaw = (counts[i] ?? "").trim();
     const pack = PACK_TYPES.includes(packs[i] as PackType)
@@ -600,22 +608,48 @@ function parseLines(
       }
     }
 
-    const qtyKg = qtyRaw ? new Prisma.Decimal(qtyRaw) : new Prisma.Decimal(0);
-    // Blank rate is zero — see the note above; a market line carries boxes,
-    // not a price per kilo.
     const ratePerKg = rateRaw ? new Prisma.Decimal(rateRaw) : new Prisma.Decimal(0);
-    // The weight typed IS the line's weight now — the whole lot on the scale,
-    // not one box multiplied up. Nothing to derive; the per-box average is
-    // shown from these two numbers rather than being the input to them.
-    const totalKg = qtyKg;
+
+    // A MARKET bill is quoted PER BOX: how many boxes it took, what one
+    // weighed, and what it paid for each. So both the weight and the money are
+    // derived from those, and neither is read off a field the clerk could type
+    // independently of them.
+    //
+    // A LOOSE row is the exception at both ends. Fish too big to crate never
+    // went into a box, so there is no per-box weight to multiply and no
+    // per-box price to quote it at: its weight is typed and it is priced by
+    // the kilo like every other channel.
+    const boxed = boxesOnly && pack !== "LOOSE";
+
+    let ratePerBox: Prisma.Decimal | null = null;
+    if (boxed && ratePerBoxRaw) {
+      if (!DECIMAL2.test(ratePerBoxRaw))
+        return { error: `Rate / box for “${p}” must be a number.` };
+      ratePerBox = new Prisma.Decimal(ratePerBoxRaw);
+    }
+
+    let qtyKg = qtyRaw ? new Prisma.Decimal(qtyRaw) : new Prisma.Decimal(0);
+    if (boxed) {
+      if (kgPerBoxRaw && !DECIMAL3.test(kgPerBoxRaw))
+        return { error: `Kg / box for “${p}” must be a number.` };
+      qtyKg = kgPerBoxRaw
+        ? new Prisma.Decimal(kgPerBoxRaw).mul(box ?? 0).toDecimalPlaces(3)
+        : new Prisma.Decimal(0);
+    }
+
     lines.push({
       pack,
       particular: p,
       box: pack === "LOOSE" ? null : box,
       qtyKg,
       ratePerKg,
+      ratePerBox,
       count,
-      total: totalKg.mul(ratePerKg),
+      // Box × rate on a market row, weight × rate everywhere else — including
+      // a market bill's loose rows.
+      total: boxed
+        ? new Prisma.Decimal(box ?? 0).mul(ratePerBox ?? 0)
+        : qtyKg.mul(ratePerKg),
     });
   }
   return { lines };
@@ -1224,6 +1258,7 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
         box: l.box,
         qtyKg: l.qtyKg,
         ratePerKg: l.ratePerKg,
+        ratePerBox: l.ratePerBox,
         count: l.count,
         total: l.total,
       })),
