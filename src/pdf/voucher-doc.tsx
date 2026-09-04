@@ -71,10 +71,20 @@ export type VoucherDoc = {
   lastItemPage: number;
 };
 
+/**
+ * One cell's box.
+ *
+ * A right-aligned column gets padding on BOTH sides. A rupee figure in Indian
+ * grouping is long — ₹16,16,001.00 is thirteen characters — and with padding on
+ * one side only, a column just wide enough for it ends flush against the number
+ * to its left. On a statement of a month's trading that is three columns of
+ * figures running into each other, which is what was reported.
+ */
 const cell = (c: Column) => ({
   ...(c.width ? { width: c.width } : { flex: c.flex ?? 1 }),
   textAlign: (c.align ?? "left") as "left" | "right",
-  paddingRight: 6,
+  paddingRight: 8,
+  ...(c.align === "right" ? { paddingLeft: 8 } : {}),
 });
 
 export function VoucherDocument({ d }: { d: VoucherDoc }) {

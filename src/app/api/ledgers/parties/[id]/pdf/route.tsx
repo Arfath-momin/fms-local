@@ -104,11 +104,15 @@ export async function GET(
   const columns: Column[] = [
     // Wide enough for "16 Aug 2026" on one line. At 58 it wrapped, putting the
     // year on a second line and pushing every row of a long statement taller.
-    { label: "Date", width: 74 },
+    { label: "Date", width: 68 },
     { label: "Particulars", flex: 1 },
-    { label: "Debit", width: 68, align: "right" },
-    { label: "Credit", width: 68, align: "right" },
-    { label: "Balance", width: 72, align: "right" },
+    // Wide enough for a lakh figure with its padding: ₹16,16,001.00 is
+    // thirteen characters, and a month of a society's trading is full of them.
+    // The particulars column is flexible and gives up the room, which it has —
+    // it was taking half the sheet to print "Purchase · Bill 1105".
+    { label: "Debit", width: 88, align: "right" },
+    { label: "Credit", width: 88, align: "right" },
+    { label: "Balance", width: 94, align: "right" },
   ];
 
   const rows: string[][] = [

@@ -55,16 +55,17 @@ export async function GET(
   const anyBox = purchase.lines.some((l) => l.box > 0);
 
   const columns: Column[] = [{ label: "#", width: 26, align: "right" }];
-  if (anyBoat) columns.push({ label: "Boat", width: 90 });
+  if (anyBoat) columns.push({ label: "Boat", width: 82 });
   columns.push({ label: "Particulars", flex: 1 });
   if (anyBox) {
     // Kg / Box first, then Box — the order the merchant's own bills state it.
     columns.push({ label: "Kg / Box", width: 54, align: "right" });
     columns.push({ label: "Box", width: 40, align: "right" });
   }
-  columns.push({ label: "Total Kg", width: 66, align: "right" });
-  columns.push({ label: "Rate/kg", width: 58, align: "right" });
-  columns.push({ label: "Amount", width: 74, align: "right" });
+  columns.push({ label: "Total Kg", width: 68, align: "right" });
+  columns.push({ label: "Rate/kg", width: 64, align: "right" });
+  // Room for a lakh figure — a day's buying from a society reaches it easily.
+  columns.push({ label: "Amount", width: 88, align: "right" });
 
   const rows = purchase.lines.map((l, i) => {
     const r = [String(i + 1)];

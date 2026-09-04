@@ -72,7 +72,10 @@ export async function GET(
   );
 
   // --- columns, and the rows built to match them exactly
-  const columns: Column[] = [{ label: "Sr No", width: 34, align: "right" }];
+  // 42, not 34: the heading "SR NO" wrapped onto two lines once every cell
+  // gained its padding, which made the header row taller than the rows under it
+  // on every bill.
+  const columns: Column[] = [{ label: "Sr No", width: 42, align: "right" }];
   if (anyPack) columns.push({ label: "Pack", width: 48 });
   columns.push({ label: "Particulars", flex: 1 });
   if (anyBox) columns.push({ label: "Box", width: 44, align: "right" });
@@ -80,10 +83,12 @@ export async function GET(
   // Rate and amount only where the money IS a rate times a weight: a market's
   // money is the net it paid, and per-row prices beside that invite adding the
   // rows up and asking why the two disagree.
-  columns.push({ label: "Kgs", width: 62, align: "right" });
+  columns.push({ label: "Kgs", width: 68, align: "right" });
   if (!isMarket) {
-    columns.push({ label: "Rate/kg", width: 58, align: "right" });
-    columns.push({ label: "Amount", width: 74, align: "right" });
+    columns.push({ label: "Rate/kg", width: 64, align: "right" });
+    // A bill can run to lakhs: ₹3,35,580.00 needs the room, and a figure that
+    // touches the rate beside it is a figure somebody misreads.
+    columns.push({ label: "Amount", width: 88, align: "right" });
   }
 
   const rows = sale.lines.map((l, i) => {

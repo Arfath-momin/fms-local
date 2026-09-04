@@ -96,8 +96,9 @@ export const s = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: RULE,
     // Tight enough that an ordinary bill stays on one sheet, loose enough to
-    // read down a column of forty without losing your place.
-    paddingVertical: 3,
+    // read down a column of forty without losing your place — and a statement
+    // of a month's trading is exactly that, read down.
+    paddingVertical: 3.5,
   },
   tfoot: {
     flexDirection: "row",
