@@ -164,19 +164,10 @@ export default async function SalePage({
         {sale.careOfParty && <Field label="CareOf" value={sale.careOfParty.name} />}
         {sale.place && <Field label="Place" value={sale.place} />}
         {vehicleNo && <Field label="Vehicle No." value={vehicleNo} />}
-        {/* Both weighbridge readings on a mill bill; the total is their
-            difference and is working rather than something quoted. */}
-        {sale.weightFirst && sale.weightSecond ? (
-          <>
-            <Field label="1st Weight" value={fmtKg(sale.weightFirst)} />
-            <Field label="2nd Weight" value={fmtKg(sale.weightSecond)} />
-          </>
-        ) : (
-          sale.weight && <Field label="Weight" value={fmtKg(sale.weight)} />
-        )}
-        {sale.netWeight && (
-          <Field label="Net Weight" value={sale.netWeight.toString()} />
-        )}
+        {/* No weights here. They are the weighing panel's, below, and were
+            being printed in both places — a bill showing "Weight 770.7" at the
+            top and "Total Weight 770.7" again underneath reads as two figures
+            that happen to agree rather than one stated once. */}
         {sale.placeOfLoading && (
           <Field label="Place of Loading" value={sale.placeOfLoading} />
         )}
@@ -280,17 +271,32 @@ export default async function SalePage({
 
       {boxedLines && (sale.weight || sale.netWeight || sale.totalBox) && (
         <div className="border border-line-strong bg-surface px-4 py-3 grid grid-cols-1 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-4">
+          {/* A mill weighs twice and the load is the difference, so its bill
+              states both readings and not the total between them. A factory
+              states one weight. */}
+          {sale.weightFirst && sale.weightSecond ? (
+            <>
+              <Field label="1st Weight" value={fmtKg(sale.weightFirst)} />
+              <Field label="2nd Weight" value={fmtKg(sale.weightSecond)} />
+            </>
+          ) : (
+            <Field
+              label="Total Weight"
+              value={sale.weight ? fmtKg(sale.weight) : "—"}
+            />
+          )}
+          {/* The same column under the name each trade gives it: a mill deducts
+              for the water and ice the load carried, a factory accepts every
+              box and hands kilos back. The form has said Return on a factory
+              bill since it was asked for; this said Water Less regardless, so
+              the figure changed its name on the way to being saved. */}
           <Field
-            label="Total Weight"
-            value={sale.weight ? fmtKg(sale.weight) : "—"}
+            label={sale.type === "FACTORY" ? "Return" : "Water Less"}
+            value={sale.waterLess ? fmtKg(sale.waterLess) : "—"}
           />
           <Field
             label="Net Weight"
             value={sale.netWeight ? fmtKg(sale.netWeight) : "—"}
-          />
-          <Field
-            label="Water Less"
-            value={sale.waterLess ? fmtKg(sale.waterLess) : "—"}
           />
           <Field
             label="Total Box"
