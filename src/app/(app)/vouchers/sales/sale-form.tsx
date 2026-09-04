@@ -1,5 +1,7 @@
 "use client";
 
+import { TripPicker } from "../trip-picker";
+
 import { useStickyFields } from "../use-sticky-fields";
 
 import { DuplicateRow, duplicateAt } from "../duplicate-row";
@@ -475,31 +477,21 @@ export function SaleForm({
           is sold locally on the way home, off the same truck, and those boxes
           have to come off the same trip or the box statement never balances. */}
       <div className="max-w-lg">
-        <label htmlFor="deliveryNoteId" className={labelCls}>
-          Trip (optional)
-        </label>
-        <select
-          id="deliveryNoteId"
-          name="deliveryNoteId"
+        {/* Typed, not scrolled. A list of every open trip sorts by BUYING
+            DAY, so a note raised today against an old purchase lands near the
+            bottom and the merchant who entered it two minutes ago cannot find
+            it. Typing 88 finds DN-00088. */}
+        <TripPicker
+          trips={trips}
           value={tripId}
-          onChange={(e) => {
-            const id = e.target.value;
+          onChange={(id) => {
             setTripId(id);
             // Choosing a trip lays out its remaining load. Only on an actual
             // change, so re-opening a saved bill keeps the rows it was saved
             // with — this never fires on mount.
             fillFromTrip(trips.find((t) => t.id === id));
           }}
-          className={inputCls}
-        >
-          <option value="">No trip — this bill stands on its own</option>
-          {trips.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.date} · {t.billNo} · {t.vehicleNumber}
-              {t.boxesDispatched > 0 ? ` · ${t.boxesDispatched} boxes` : ""}
-            </option>
-          ))}
-        </select>
+        />
         {trips.length === 0 ? (
           <p className="text-muted text-[12px] mt-1">
             No open trips.{" "}
