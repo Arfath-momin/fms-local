@@ -287,13 +287,16 @@ export function PurchaseForm({
                 </th>
                 {/* Boxes, and what one weighs — Private and Local only.
                     A Society or KFDC bill states its kilos outright. */}
+                {/* Kg / Box first, then Box — the order the merchant's own
+                    bills state it in. Reading a paper bill onto a screen laid
+                    out the other way round means transposing every line. */}
                 {hasLineBoxes && (
                   <>
-                    <th className="text-right font-semibold px-2 py-2 w-20">
-                      Box
-                    </th>
                     <th className="text-right font-semibold px-2 py-2 w-24">
                       Kg / Box
+                    </th>
+                    <th className="text-right font-semibold px-2 py-2 w-20">
+                      Box
                     </th>
                   </>
                 )}
@@ -352,16 +355,6 @@ export function PurchaseForm({
                       <>
                         <td className="px-1 py-1">
                           <input
-                            name="box"
-                            aria-label={`Boxes, row ${i + 1}`}
-                            inputMode="numeric"
-                            value={l.box}
-                            onChange={(e) => setLine(i, { box: e.target.value })}
-                            className={cellCls + " num text-right"}
-                          />
-                        </td>
-                        <td className="px-1 py-1">
-                          <input
                             name="kgPerBox"
                             aria-label={`Kg per box, row ${i + 1}`}
                             inputMode="decimal"
@@ -369,6 +362,16 @@ export function PurchaseForm({
                             onChange={(e) =>
                               setLine(i, { kgPerBox: e.target.value })
                             }
+                            className={cellCls + " num text-right"}
+                          />
+                        </td>
+                        <td className="px-1 py-1">
+                          <input
+                            name="box"
+                            aria-label={`Boxes, row ${i + 1}`}
+                            inputMode="numeric"
+                            value={l.box}
+                            onChange={(e) => setLine(i, { box: e.target.value })}
                             className={cellCls + " num text-right"}
                           />
                         </td>
@@ -454,10 +457,11 @@ export function PurchaseForm({
                 </td>
                 {hasLineBoxes && (
                   <>
+                    {/* One box's weight is not a quantity to add up. */}
+                    <td />
                     <td className="px-2 py-2 num text-right font-semibold">
                       {grandBox || "—"}
                     </td>
-                    <td />
                   </>
                 )}
                 <td className="px-2 py-2 num text-right font-semibold">

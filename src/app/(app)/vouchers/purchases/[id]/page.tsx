@@ -122,8 +122,8 @@ export default async function PurchaseDetailPage({
                   {showLineBoats && <th>Boat Name</th>}
                   <th>{showLineBoats ? "Particulars" : "Particular"}</th>
                   {/* Boxes and what one weighed — Private and Local only. */}
-                  {showLineBoxes && <th className="num-col">Box</th>}
                   {showLineBoxes && <th className="num-col">Kg / Box</th>}
+                  {showLineBoxes && <th className="num-col">Box</th>}
                   {/* Same headings on every type — see the note on the form. */}
                   <th className="num-col">Total Kg</th>
                   <th className="num-col">Rate/kg</th>
@@ -139,9 +139,6 @@ export default async function PurchaseDetailPage({
                     )}
                     <td>{l.particular}</td>
                     {showLineBoxes && (
-                      <td className="num-col num">{l.box || "—"}</td>
-                    )}
-                    {showLineBoxes && (
                       // Worked back out of the row's weight rather than stored
                       // beside it — two figures that must agree are two that
                       // can disagree.
@@ -153,6 +150,9 @@ export default async function PurchaseDetailPage({
                               .toString()
                           : "—"}
                       </td>
+                    )}
+                    {showLineBoxes && (
+                      <td className="num-col num">{l.box || "—"}</td>
                     )}
                     <td className="num-col">{fmtKg(l.qtyKg)}</td>
                     <td className="num-col">{fmtMoney(l.pricePerKg)}</td>
@@ -168,10 +168,10 @@ export default async function PurchaseDetailPage({
                   </td>
                   {showLineBoxes && (
                     <>
+                      <td />
                       <td className="num-col num">
                         {purchase.lines.reduce((a, l) => a + l.box, 0) || "—"}
                       </td>
-                      <td />
                     </>
                   )}
                   <td className="num-col num">

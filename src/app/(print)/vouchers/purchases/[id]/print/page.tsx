@@ -185,8 +185,8 @@ export default async function PurchasePrintPage({
                 <th>Particulars</th>
                 {/* Private and Local buy by the box; Society and KFDC state
                     their kilos outright. */}
-                {hasLineBoxes && <th className="r">Box</th>}
                 {hasLineBoxes && <th className="r">Kg / Box</th>}
+                {hasLineBoxes && <th className="r">Box</th>}
                 <th className="r">Total Kg</th>
                 <th className="r">Rate/kg</th>
                 <th className="r">Amount</th>
@@ -198,7 +198,6 @@ export default async function PurchasePrintPage({
                   <td className="num">{i + 1}</td>
                   {hasLineBoats && <td>{l.boat?.name ?? "—"}</td>}
                   <td>{l.particular}</td>
-                  {hasLineBoxes && <td className="r num">{l.box || "—"}</td>}
                   {hasLineBoxes && (
                     <td className="r num">
                       {l.box > 0
@@ -209,6 +208,7 @@ export default async function PurchasePrintPage({
                         : "—"}
                     </td>
                   )}
+                  {hasLineBoxes && <td className="r num">{l.box || "—"}</td>}
                   <td className="r num">{fmtKg(l.qtyKg)}</td>
                   <td className="r num">{fmtMoney(l.pricePerKg)}</td>
                   <td className="r num">{fmtMoney(l.total)}</td>
@@ -220,10 +220,10 @@ export default async function PurchasePrintPage({
                 <td colSpan={hasLineBoats ? 3 : 2}>Total</td>
                 {hasLineBoxes && (
                   <>
+                    <td />
                     <td className="r num">
                       {purchase.lines.reduce((a, l) => a + l.box, 0) || "—"}
                     </td>
-                    <td />
                   </>
                 )}
                 <td className="r num">{fmtKg(totalKg)}</td>

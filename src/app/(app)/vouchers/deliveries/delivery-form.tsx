@@ -268,8 +268,10 @@ export function DeliveryForm({
               <tr className="items-head text-muted text-[12px] uppercase tracking-wide">
                 <th className="text-left font-semibold px-2 py-2 w-28">Pack</th>
                 <th className="text-left font-semibold px-3 py-2">Particulars</th>
-                <th className="text-right font-semibold px-2 py-2 w-20">Box</th>
+                {/* Kg / Box first, then Box — the order the merchant's own
+                    bills state it in. */}
                 <th className="text-right font-semibold px-2 py-2 w-24">Kg / Box</th>
+                <th className="text-right font-semibold px-2 py-2 w-20">Box</th>
                 <th className="text-right font-semibold px-2 py-2 w-24">Total Kg</th>
                 <th className="text-right font-semibold px-2 py-2 w-20">Pcs</th>
                 <th className="w-8"></th>
@@ -309,6 +311,19 @@ export function DeliveryForm({
                       placeholder="e.g. Prawn"
                     />
                   </td>
+                  {/* Kg / Box comes FIRST, because that is the order the
+                      merchant's own bills state it: what one box weighs, then
+                      how many went. Reading a paper bill onto a screen laid out
+                      the other way round means transposing every line. */}
+                  <td className="px-1 py-1">
+                    <input
+                      name="kgPerBox"
+                      inputMode="decimal"
+                      value={l.kgPerBox}
+                      onChange={(e) => setLine(i, { kgPerBox: e.target.value })}
+                      className={cell}
+                    />
+                  </td>
                   <td className="px-1 py-1">
                     {/* readOnly, never a <span>. The rows travel as repeated
                         `box` fields paired up BY POSITION, so a row that sends
@@ -328,15 +343,6 @@ export function DeliveryForm({
                         cell + (l.pack === "LOOSE" ? " text-muted bg-background" : "")
                       }
                       placeholder={l.pack === "LOOSE" ? "—" : undefined}
-                    />
-                  </td>
-                  <td className="px-1 py-1">
-                    <input
-                      name="kgPerBox"
-                      inputMode="decimal"
-                      value={l.kgPerBox}
-                      onChange={(e) => setLine(i, { kgPerBox: e.target.value })}
-                      className={cell}
                     />
                   </td>
                   {/* Derived: the per-box weight times the boxes. At loading the
@@ -383,8 +389,10 @@ export function DeliveryForm({
                 <td className="px-3 py-2 text-right" colSpan={2}>
                   Total
                 </td>
-                <td className="px-2 py-2 num text-right">{totals.box || ""}</td>
+                {/* Kg / Box has no total worth footing — one box's weight is
+                    not a quantity to add up. The boxes are. */}
                 <td />
+                <td className="px-2 py-2 num text-right">{totals.box || ""}</td>
                 <td className="px-2 py-2 num text-right">
                   {totals.totalKg ? totals.totalKg.toFixed(3) : ""}
                 </td>

@@ -43,8 +43,9 @@ export async function GET(
     // the fish, and a big box is twice the fish of an ordinary one.
     { label: "Pack", width: 48 },
     { label: "Particulars", flex: 1 },
-    { label: "Box", width: 44, align: "right" },
+    // Kg / box first, then Box — the order the merchant's own bills state it.
     { label: "Kg / box", width: 56, align: "right" },
+    { label: "Box", width: 44, align: "right" },
     ...(anyPcs ? [{ label: "Pcs", width: 40, align: "right" as const }] : []),
     { label: "Total Kg", width: 66, align: "right" },
   ];
@@ -53,10 +54,10 @@ export async function GET(
     String(i + 1),
     PACK_LABELS[l.pack],
     l.particulars,
-    l.box ? String(l.box) : "—",
     // What ONE box weighs, worked back out of the row's weight — not the row's
     // own weight, which would read as fifty times the truth on a 50-box line.
     lineKgPerBox(l).toString(),
+    l.box ? String(l.box) : "—",
     ...(anyPcs ? [l.pcs ? String(l.pcs) : "—"] : []),
     lineTotalKg(l).toString(),
   ]);
@@ -65,8 +66,8 @@ export async function GET(
     "",
     "",
     "Total",
-    String(totals.box),
     "",
+    String(totals.box),
     ...(anyPcs ? [String(totals.pcs)] : []),
     totals.totalKg.toString(),
   ];

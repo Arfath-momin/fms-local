@@ -84,6 +84,7 @@ export type SaleInit = {
   waterLess: string;
   /** The boxes this bill unloaded; the Items rows must add up to it. */
   totalBox: string;
+  /** FACTORY types this and the total follows; elsewhere it is derived. */
   netWeight: string;
   placeOfLoading: string;
   returnNote: string;
@@ -196,9 +197,10 @@ export function SaleForm({
   const [netBillRaw, setNetBillRaw] = useState(initial?.netBill ?? "");
   // The buyer's weighing slip. Controlled so the reconciliation below can read
   // them while they are being typed.
-  const [weight, setWeight] = useState(initial?.weight ?? "");
   const [weightFirst, setWeightFirst] = useState(initial?.weightFirst ?? "");
   const [weightSecond, setWeightSecond] = useState(initial?.weightSecond ?? "");
+  // FACTORY types the net; the total follows from it and the return.
+  const [netWeightTyped, setNetWeightTyped] = useState(initial?.netWeight ?? "");
   const [waterLess, setWaterLess] = useState(initial?.waterLess ?? "");
   const [totalBox, setTotalBox] = useState(initial?.totalBox ?? "");
 
@@ -292,10 +294,20 @@ export function SaleForm({
   // is working rather than something anybody quotes, which is why it stays off
   // the printed bill.
   const twoWeighings = type === "FISH_MILL";
+  // A FACTORY states what it ACCEPTED and what it handed back; the total is the
+  // two added. Which way round the arithmetic runs follows the paper: a mill's
+  // slip gives the weighings and leaves the net to be worked out, a factory's
+  // gives the net and the return.
+  const factoryNetTyped = type === "FACTORY";
+  // Neither channel types it any more: a mill's is the gap between its two
+  // weighings, a factory's is what it accepted plus what it sent back. There is
+  // no third case — only those two channels weigh at all.
   const totalWeight = twoWeighings
     ? Math.max(0, n(weightFirst) - n(weightSecond))
-    : n(weight);
-  const netWeight = Math.max(0, totalWeight - n(waterLess));
+    : n(netWeightTyped) + n(waterLess);
+  const netWeight = factoryNetTyped
+    ? n(netWeightTyped)
+    : Math.max(0, totalWeight - n(waterLess));
 
   // What one box weighs, worked out from the lot. This is the way round the
   // mill actually works: they weigh the whole consignment on arrival and
@@ -825,18 +837,18 @@ export function SaleForm({
               </>
             ) : (
               <div>
-                <label htmlFor="weight" className={labelCls}>
-                  Total Weight
-                </label>
-                <input
-                  id="weight"
-                  name="weight"
-                  inputMode="decimal"
-                  value={weight}
-                  onChange={(e) => setWeight(e.target.value)}
-                  className={inputCls + " num text-right"}
-                />
-                <p className="text-muted text-[12px] mt-1">As it arrived.</p>
+                <span className={labelCls}>Total Weight</span>
+                {/* DERIVED on a factory bill: the return plus the net. The
+                    factory states what it took and what it sent back; the total
+                    is the two added, and a third field the clerk could type is
+                    a third figure free to disagree with them. */}
+                <p className="text-[15px] font-semibold num text-right py-2">
+                  {totalWeight ? fmtKg(totalWeight) : "—"}
+                </p>
+                <p className="text-muted text-[12px] mt-1">
+                  Return plus net — what arrived.
+                </p>
+                <input type="hidden" name="weight" value={totalWeight || ""} />
               </div>
             )}
             <div>
@@ -866,15 +878,33 @@ export function SaleForm({
               </p>
             </div>
             <div>
-              <span className={labelCls}>Net Weight</span>
-              {/* Derived, never typed. Three figures a clerk can enter
-                  independently are three figures that can disagree. */}
-              <p className="text-[15px] font-semibold num text-right py-2">
-                {netWeight ? fmtKg(netWeight) : "—"}
-              </p>
+              {factoryNetTyped ? (
+                <>
+                  <label htmlFor="netWeight" className={labelCls}>
+                    Net Weight
+                  </label>
+                  <input
+                    id="netWeight"
+                    name="netWeight"
+                    inputMode="decimal"
+                    value={netWeightTyped}
+                    onChange={(e) => setNetWeightTyped(e.target.value)}
+                    className={inputCls + " num text-right"}
+                  />
+                </>
+              ) : (
+                <>
+                  <span className={labelCls}>Net Weight</span>
+                  {/* Derived, never typed. Three figures a clerk can enter
+                      independently are three figures that can disagree. */}
+                  <p className="text-[15px] font-semibold num text-right py-2">
+                    {netWeight ? fmtKg(netWeight) : "—"}
+                  </p>
+                </>
+              )}
               <p className="text-muted text-[12px] mt-1">
                 {type === "FACTORY"
-                  ? "Total less the return. What they paid on."
+                  ? "What they accepted and paid on."
                   : "Total less water. What they paid on."}
               </p>
             </div>

@@ -58,8 +58,9 @@ export async function GET(
   if (anyBoat) columns.push({ label: "Boat", width: 90 });
   columns.push({ label: "Particulars", flex: 1 });
   if (anyBox) {
-    columns.push({ label: "Box", width: 40, align: "right" });
+    // Kg / Box first, then Box — the order the merchant's own bills state it.
     columns.push({ label: "Kg / Box", width: 54, align: "right" });
+    columns.push({ label: "Box", width: 40, align: "right" });
   }
   columns.push({ label: "Total Kg", width: 66, align: "right" });
   columns.push({ label: "Rate/kg", width: 58, align: "right" });
@@ -70,13 +71,13 @@ export async function GET(
     if (anyBoat) r.push(l.boat?.name ?? "—");
     r.push(l.particular);
     if (anyBox) {
-      r.push(l.box ? String(l.box) : "—");
       // Worked back out of the row's weight, never stored beside it.
       r.push(
         l.box > 0
           ? new Prisma.Decimal(l.qtyKg).div(l.box).toDecimalPlaces(3).toString()
           : "—"
       );
+      r.push(l.box ? String(l.box) : "—");
     }
     r.push(fmtKg(l.qtyKg));
     r.push(fmtMoney(l.pricePerKg));
@@ -89,7 +90,7 @@ export async function GET(
   if (anyBoat) totalRow.push("");
   totalRow.push("Total");
   if (anyBox) {
-    totalRow.push(String(purchase.lines.reduce((a, l) => a + l.box, 0)), "");
+    totalRow.push("", String(purchase.lines.reduce((a, l) => a + l.box, 0)));
   }
   totalRow.push(
     fmtKg(purchase.lines.reduce((a, l) => a.add(l.qtyKg), ZERO)),

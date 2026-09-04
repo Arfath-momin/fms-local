@@ -32,6 +32,9 @@ export default async function SalesPage({
       include: {
         party: { select: { name: true } },
         careOfParty: { select: { name: true } },
+        // The boxes this bill took. It is what a merchant reconciles a trip by,
+        // and the list is where they scan for it.
+        lines: { select: { box: true, pack: true } },
         // The trip's truck. `vehicleNo` on the sale is only filled when a bill
         // was typed WITHOUT a trip — choosing a trip means the vehicle is the
         // trip's, and reading the column alone left the list showing a dash for
@@ -83,6 +86,7 @@ export default async function SalesPage({
                 <th>Bill No.</th>
                 <th>Type</th>
                 <th>Party</th>
+                <th className="num-col">Box</th>
                 <th>Vehicle No.</th>
                 <th className="num-col">Amount</th>
                 <th className="w-16"></th>
@@ -104,6 +108,14 @@ export default async function SalesPage({
                           {" "}· c/o {s.careOfParty.name}
                         </span>
                       )}
+                    </td>
+                    <td className="num-col num">
+                      {/* LOOSE never went into a crate, so it counts none —
+                          the same rule the trip tally and the bill use. */}
+                      {s.lines.reduce(
+                        (a, l) => a + (l.pack === "LOOSE" ? 0 : (l.box ?? 0)),
+                        0
+                      ) || <span className="text-muted">—</span>}
                     </td>
                     <td className="num">
                       {s.deliveryNote?.vehicle.number ??

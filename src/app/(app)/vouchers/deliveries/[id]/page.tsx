@@ -267,8 +267,10 @@ export default async function DeliveryNotePage({
             <tr>
               <th>Pack</th>
               <th>Particulars</th>
-              <th className="num-col">Box</th>
+              {/* Kg / box first, then Box — the order the merchant's own
+                  bills state it in. */}
               <th className="num-col">Kg / box</th>
+              <th className="num-col">Box</th>
               <th className="num-col">Total Kg</th>
               <th className="num-col">Pcs</th>
             </tr>
@@ -278,12 +280,12 @@ export default async function DeliveryNotePage({
               <tr key={l.id}>
                 <td>{PACK_LABELS[l.pack]}</td>
                 <td className="font-medium">{l.particulars}</td>
-                <td className="num-col num">{l.box || "—"}</td>
                 {/* The per-box figure that was typed, worked back out of the
                     weight stored against the boxes it was spread over. */}
                 <td className="num-col num text-muted">
                   {lineKgPerBox(l).toString()}
                 </td>
+                <td className="num-col num">{l.box || "—"}</td>
                 <td className="num-col num font-semibold">
                   {lineTotalKg(l).toString()}
                 </td>
@@ -293,8 +295,8 @@ export default async function DeliveryNotePage({
             <tr className="border-t border-line-strong font-semibold">
               <td />
               <td className="text-right">Total</td>
-              <td className="num-col num">{totals.box}</td>
               <td className="num-col num" />
+              <td className="num-col num">{totals.box}</td>
               <td className="num-col num">{totals.totalKg.toString()}</td>
               <td className="num-col num">{totals.pcs}</td>
             </tr>

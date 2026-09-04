@@ -346,7 +346,17 @@ function readWeighingSlip(
       base.weight = null;
     }
   } else {
-    base.weight = parseMoney(clean(formData.get("weight"))) ?? null;
+    // A FACTORY states what it ACCEPTED and what it handed back; the total is
+    // the two added. The other way round — total typed, net derived — was how
+    // this read, and it asked the clerk for a figure the factory's paper does
+    // not give them: they know the net they were paid on and the kilos that
+    // came back, and were subtracting one from the other in their head.
+    base.netWeight = parseMoney(clean(formData.get("netWeight"))) ?? null;
+    base.weight =
+      base.netWeight !== null
+        ? base.netWeight.add(base.waterLess ?? ZERO)
+        : null;
+    return readTotalBox(formData, base);
   }
 
   if (base.waterLess && base.weight && base.waterLess.gt(base.weight))
@@ -363,6 +373,14 @@ function readWeighingSlip(
     ? base.weight.sub(base.waterLess ?? ZERO)
     : null;
 
+  return readTotalBox(formData, base);
+}
+
+/** The boxes this bill unloaded — the figure the Items rows must add up to. */
+function readTotalBox(
+  formData: FormData,
+  base: { totalBox: number | null }
+): { error: string } | null {
   const boxRaw = clean(formData.get("totalBox"));
   if (boxRaw) {
     if (!INT.test(boxRaw))
