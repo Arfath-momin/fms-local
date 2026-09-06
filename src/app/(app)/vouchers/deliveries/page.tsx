@@ -96,6 +96,13 @@ export default async function DeliveriesPage({
                     <td className="num-col num">
                       {t.totalKg.isZero() ? "—" : t.totalKg.toString()}
                     </td>
+                    {/* Pcs. Its heading was here and its cell was not, so every
+                        column after it sat one to the left of its own name: the
+                        advance printed under Pcs, the rent under Advance, and
+                        the View/PDF links under Rent. A table with more
+                        headings than cells does not look broken — it looks like
+                        the wrong figures. */}
+                    <td className="num-col num">{t.pcs || "—"}</td>
                     {/* The advance handed to the driver at departure, and the
                         trip's total rent once a bill has reported it. Without
                         these on the list, an advance could only be found by

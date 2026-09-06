@@ -43,14 +43,24 @@ export type TripTally = {
   /**
    * Whether the kilo comparison means anything on this trip.
    *
-   * True only when EVERY bill off it is a factory or fish mill bill — the ones
-   * that reweigh on arrival and pay by weight. A market bill is itemised in
-   * boxes and carries no kilos at all, so a trip with even one of them has a
-   * kgBilled that is short by whatever those markets took, and reporting the
-   * difference as "rejected" invents a rejection out of a unit mismatch.
+   * TWO conditions, and a real trip has broken each of them.
    *
-   * A real trip did exactly that: 500 kg out, one market bill and one mill
-   * bill, and the panel claimed 1,400 kg rejected worth −₹87,315.
+   * Every bill off it must be a factory or fish mill bill — the ones that
+   * reweigh on arrival and pay by weight. A market bill is itemised in boxes
+   * and carries no kilos at all, so a trip with even one of them has a kgBilled
+   * short by whatever those markets took. DN-00019 did that: 500 kg out, one
+   * market bill and one mill bill, and the panel claimed 1,400 kg rejected
+   * worth −₹87,315.
+   *
+   * And the NOTE itself must have recorded weights. A note can be raised with
+   * boxes and no kg-per-box — the field is optional, because at loading a
+   * merchant does not always know. DN-00083 was: 34 boxes, no weight, and its
+   * mill bill came back at 1,410 kg. The panel read "Kg out 0, Rejected −1,410,
+   * Gap value −₹83,190" — a rejection of fish that never went out, on a trip
+   * where nothing was wrong except that nobody typed a weight.
+   *
+   * Neither is an error worth refusing a voucher over. They are both reasons
+   * not to print a comparison.
    */
   weighedOnly: boolean;
   billCount: number;
@@ -104,7 +114,9 @@ export function tallyTrip(trip: {
     gapValue,
     weighedOnly:
       trip.sales.length > 0 &&
-      trip.sales.every((s) => s.type === "FACTORY" || s.type === "FISH_MILL"),
+      trip.sales.every((s) => s.type === "FACTORY" || s.type === "FISH_MILL") &&
+      // Nothing to compare against when the note never recorded a weight.
+      kgDispatched.greaterThan(0),
     billCount: trip.sales.length,
     billedAmount,
   };

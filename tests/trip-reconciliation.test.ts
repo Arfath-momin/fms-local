@@ -213,6 +213,25 @@ describe("a trip whose bills use different units", () => {
     expect(tally.kgBilled.toNumber()).toBe(380);
   });
 
+  it("compares nothing when the note recorded no weight", () => {
+    // DN-00083: 34 boxes dispatched, no kg-per-box typed, and a mill bill back
+    // at 1,410 kg. The panel read "Kg out 0, Rejected −1,410 kg, Gap value
+    // −₹83,190" — a rejection of fish that never went out, on a trip where
+    // nothing was wrong except that nobody typed a weight.
+    const trip = {
+      channel: null,
+      rentAmount: D(4_000),
+      advancePaid: D(2_000),
+      lines: [line(0, 34)],
+      sales: [bill(83_190, [{ qtyKg: 1_410, box: 34 }], null, "FISH_MILL")],
+    };
+    const tally = tallyTrip(trip);
+    expect(tally.weighedOnly).toBe(false);
+    // The BOXES still reconcile, which is the tally that means something here.
+    expect(tally.boxesDispatched).toBe(34);
+    expect(tally.boxesBilled).toBe(34);
+  });
+
   it("compares nothing on a trip with no bills yet", () => {
     // Vacuously "every bill is weighed" is not a useful thing to report, so a
     // trip with nothing billed does not offer the comparison either.
