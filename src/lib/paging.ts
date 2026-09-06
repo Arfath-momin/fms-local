@@ -40,15 +40,85 @@ function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
 
-/** The current India-time calendar month, as inclusive "YYYY-MM-DD" bounds. */
-function currentMonth(): { from: string; to: string } {
-  const [y, m] = businessToday().split("-").map(Number);
+export type Range = { from: string; to: string };
+
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+/**
+ * The ranges a merchant actually asks for.
+ *
+ * Every list opened on the current month and offered nothing but two date
+ * fields, so looking at last week meant typing two dates — every time, on every
+ * screen. These are the four periods anybody names out loud.
+ *
+ * All of them are computed from businessToday(), never from `new Date()`: the
+ * business day is decided on India time, and a server in another zone must not
+ * decide that "today" is yesterday.
+ */
+export function monthRange(year: number, month1to12: number): Range {
   // Date.UTC with a 1-based month and day 0 lands on the last day of that month.
-  const last = new Date(Date.UTC(y, m, 0));
+  const last = new Date(Date.UTC(year, month1to12, 0));
   return {
-    from: `${y}-${String(m).padStart(2, "0")}-01`,
-    to: last.toISOString().slice(0, 10),
+    from: `${year}-${String(month1to12).padStart(2, "0")}-01`,
+    to: iso(last),
   };
+}
+
+export function yearRange(year: number): Range {
+  return { from: `${year}-01-01`, to: `${year}-12-31` };
+}
+
+export function todayRange(): Range {
+  const t = businessToday();
+  return { from: t, to: t };
+}
+
+/**
+ * The calendar week containing today, Monday to Sunday.
+ *
+ * Monday rather than a rolling seven days: a merchant comparing "this week" to
+ * "last week" wants two weeks that begin in the same place, and a rolling
+ * window never gives them that.
+ */
+export function weekRange(): Range {
+  const t = new Date(`${businessToday()}T00:00:00.000Z`);
+  // getUTCDay: 0 is Sunday, so Sunday sits at the END of its week.
+  const back = (t.getUTCDay() + 6) % 7;
+  const monday = new Date(t);
+  monday.setUTCDate(t.getUTCDate() - back);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  return { from: iso(monday), to: iso(sunday) };
+}
+
+export function currentMonthRange(): Range {
+  const [y, m] = businessToday().split("-").map(Number);
+  return monthRange(y, m);
+}
+
+export type PresetKind = "today" | "week" | "month" | "year";
+
+export function presetRange(kind: PresetKind): Range {
+  const [y, m] = businessToday().split("-").map(Number);
+  if (kind === "today") return todayRange();
+  if (kind === "week") return weekRange();
+  if (kind === "year") return yearRange(y);
+  return monthRange(y, m);
+}
+
+/**
+ * Which preset a window IS, if any — for showing which one is in force.
+ *
+ * Compared by the dates themselves rather than remembered in the URL, so a
+ * hand-typed range that happens to be exactly this month still lights up "This
+ * month", and a link shared between two people means the same thing to both.
+ */
+export function activePreset(w: { from: string; to: string }): PresetKind | null {
+  for (const k of ["today", "week", "month", "year"] as const) {
+    const r = presetRange(k);
+    if (r.from === w.from && r.to === w.to) return k;
+  }
+  return null;
 }
 
 /**
@@ -57,12 +127,31 @@ function currentMonth(): { from: string; to: string } {
  * hand-edited URL should show the default window, not an error page.
  */
 export function parseListWindow(params: SearchParams): ListWindow {
-  const month = currentMonth();
+  // Three ways to say the same thing, in the order they win:
+  //
+  //   ?from=&to=       an explicit range, including the preset links
+  //   ?year=&month=    the month picker; ?year= alone is the whole year
+  //   nothing          this month, as it always was
+  //
+  // Each control submits only its own fields, so two of these can never arrive
+  // together and disagree. Anything malformed falls through to the default
+  // rather than erroring: a hand-edited URL should show a list, not a stack
+  // trace.
+  let base = currentMonthRange();
+
+  const rawYear = Number(first(params.year));
+  if (Number.isInteger(rawYear) && rawYear >= 2000 && rawYear <= 2100) {
+    const rawMonth = Number(first(params.month));
+    base =
+      Number.isInteger(rawMonth) && rawMonth >= 1 && rawMonth <= 12
+        ? monthRange(rawYear, rawMonth)
+        : yearRange(rawYear);
+  }
 
   const rawFrom = first(params.from);
   const rawTo = first(params.to);
-  const from = rawFrom && DATE_RE.test(rawFrom) ? rawFrom : month.from;
-  const to = rawTo && DATE_RE.test(rawTo) ? rawTo : month.to;
+  const from = rawFrom && DATE_RE.test(rawFrom) ? rawFrom : base.from;
+  const to = rawTo && DATE_RE.test(rawTo) ? rawTo : base.to;
 
   const rawPage = Number(first(params.page));
   const page =

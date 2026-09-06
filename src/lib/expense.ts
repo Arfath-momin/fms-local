@@ -211,6 +211,45 @@ export const EXPENSE_SPECS: Record<string, ExpenseCategorySpec> = {
 };
 
 /**
+ * The one thing worth seeing on a list, per head.
+ *
+ * A list of expenses showed a category, a vendor and an amount — and to find
+ * out how many blocks of ice that ₹4,000 bought, you opened the voucher. Every
+ * head already records the figure that explains its own total; this is which
+ * one that is:
+ *
+ *   ICE      the blocks, and the truck they went on
+ *   LOADERS  the boxes loaded
+ *   LADIES   the boxes handled
+ *   anything else — the note, because there is no such figure to show
+ *
+ * Returns null when the head has nothing of its own, so the caller falls back
+ * to the note rather than printing an empty cell.
+ */
+export function expenseHighlight(
+  code: string,
+  details: Record<string, string> | null | undefined
+): string | null {
+  const d = details ?? {};
+  const has = (k: string) => {
+    const v = (d[k] ?? "").trim();
+    return v === "" ? null : v;
+  };
+
+  if (code === "ICE") {
+    const parts = [
+      has("blocks") && `${has("blocks")} blocks`,
+      has("vehicleNo"),
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }
+  if (code === "LOADERS" || code === "LADIES") {
+    return has("boxes") ? `${has("boxes")} boxes` : null;
+  }
+  return null;
+}
+
+/**
  * How much of an expense total has already been handed over, from the detail
  * fields named by `prepaidFrom`. Zero for every category that has none.
  */

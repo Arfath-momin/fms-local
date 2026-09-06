@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
+import { expenseHighlight } from "@/lib/expense";
 import { prisma } from "@/lib/db";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
@@ -39,7 +40,7 @@ export default async function ExpenseCategoryPage({
   const code = (await params).category.toUpperCase();
   const category = await prisma.expenseCategory.findUnique({
     where: { companyId_code: { companyId: company.id, code } },
-    select: { id: true, name: true, kind: true },
+    select: { id: true, name: true, kind: true, code: true },
   });
   if (!category) notFound();
 
@@ -272,7 +273,19 @@ export default async function ExpenseCategoryPage({
                       </span>
                     )}
                   </td>
-                  <td className="text-muted">{e.notes ?? "—"}</td>
+                  {/* The one figure that explains this head's total — the
+                      blocks of ice, the boxes loaded — falling back to the note
+                      for a head that has no such figure. Finding out what a
+                      ₹4,000 ice bill actually bought used to mean opening the
+                      voucher. */}
+                  <td className="text-muted">
+                    {expenseHighlight(
+                      category.code,
+                      e.details as Record<string, string> | null
+                    ) ??
+                      e.notes ??
+                      "—"}
+                  </td>
                   <td className="num-col num text-debit">
                     {fmtMoney(e.amount)}
                   </td>

@@ -1,5 +1,13 @@
 import Link from "next/link";
-import { PAGE_SIZE, listHref, type ListWindow } from "@/lib/paging";
+import {
+  PAGE_SIZE,
+  activePreset,
+  listHref,
+  presetRange,
+  type ListWindow,
+  type PresetKind,
+} from "@/lib/paging";
+import { businessToday } from "@/lib/format";
 import { DateField } from "./date-field";
 
 // Shared controls for the voucher and ledger lists. Both are plain server
@@ -14,45 +22,136 @@ export function DateWindow({
   basePath: string;
   window: ListWindow;
 }) {
-  return (
-    <form
-      method="get"
-      action={basePath}
-      className="flex items-end gap-2 mb-4 text-[13px]"
-    >
-      <label className="flex flex-col gap-1">
-        <span className="text-muted text-[12px]">From</span>
-        <DateField
-          
-          name="from"
-          defaultValue={w.from}
-          className="border border-line-strong bg-surface px-2 py-1"
-        />
-      </label>
-      <label className="flex flex-col gap-1">
-        <span className="text-muted text-[12px]">To</span>
-        <DateField
-          
-          name="to"
-          defaultValue={w.to}
-          className="border border-line-strong bg-surface px-2 py-1"
-        />
-      </label>
-      <button
-        type="submit"
-        className="border border-line-strong px-3 py-1.5 font-medium hover:bg-line-strong/10"
-      >
-        Apply
-      </button>
+  const active = activePreset(w);
+  const [thisYear, thisMonth] = businessToday().split("-").map(Number);
+  // Enough history to reach any book a merchant still argues about, and this
+  // year. Offering years with nothing in them is clutter, but guessing which
+  // ones have data would cost a query on every list.
+  const years = Array.from({ length: 6 }, (_, i) => thisYear - i);
+
+  const preset = (kind: PresetKind, label: string) => {
+    const r = presetRange(kind);
+    return (
       <Link
-        href={basePath}
-        className="text-accent underline underline-offset-2 text-[12px] pb-2"
+        key={kind}
+        href={`${basePath}?from=${r.from}&to=${r.to}`}
+        className={
+          "border px-3 py-1.5 font-medium " +
+          (active === kind
+            ? "border-accent text-accent"
+            : "border-line-strong hover:bg-line-strong/10")
+        }
       >
-        This month
+        {label}
       </Link>
-    </form>
+    );
+  };
+
+  return (
+    <div className="mb-4 text-[13px]">
+      {/* The four periods anybody names out loud. Plain links, so they work
+          without JavaScript and can be bookmarked or sent to somebody. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {preset("today", "Today")}
+        {preset("week", "This week")}
+        {preset("month", "This month")}
+        {preset("year", "This year")}
+
+        {/* Its own form, submitting only month and year. Keeping it separate
+            from the range below is what stops the two disagreeing: whichever
+            control was used is the only one that sends anything. */}
+        <form
+          method="get"
+          action={basePath}
+          className="flex items-center gap-1 ml-auto"
+        >
+          <select
+            name="month"
+            defaultValue={String(thisMonth)}
+            aria-label="Month"
+            className="border border-line-strong bg-surface px-2 py-1.5"
+          >
+            {MONTHS.map((m, i) => (
+              <option key={m} value={i + 1}>
+                {m}
+              </option>
+            ))}
+          </select>
+          <select
+            name="year"
+            defaultValue={String(thisYear)}
+            aria-label="Year"
+            className="border border-line-strong bg-surface px-2 py-1.5"
+          >
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            className="border border-line-strong px-3 py-1.5 font-medium hover:bg-line-strong/10"
+          >
+            Show
+          </button>
+        </form>
+      </div>
+
+      {/* Still here, still the same two fields and the same ?from=&to=, so
+          every link already bookmarked resolves to what it always did. Folded
+          away because it is the rare case now, not the only one. */}
+      <details className="mt-2">
+        <summary className="text-muted text-[12px] cursor-pointer">
+          {active ? "Or pick exact dates" : `Showing ${w.from} to ${w.to}`}
+        </summary>
+        <form
+          method="get"
+          action={basePath}
+          className="flex items-end gap-2 mt-2"
+        >
+          <label className="flex flex-col gap-1">
+            <span className="text-muted text-[12px]">From</span>
+            <DateField
+              name="from"
+              defaultValue={w.from}
+              className="border border-line-strong bg-surface px-2 py-1"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-muted text-[12px]">To</span>
+            <DateField
+              name="to"
+              defaultValue={w.to}
+              className="border border-line-strong bg-surface px-2 py-1"
+            />
+          </label>
+          <button
+            type="submit"
+            className="border border-line-strong px-3 py-1.5 font-medium hover:bg-line-strong/10"
+          >
+            Apply
+          </button>
+        </form>
+      </details>
+    </div>
   );
 }
+
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
 export function Pager({
   basePath,

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { VoucherRowActions } from "../row-actions";
+import { expenseHighlight } from "@/lib/expense";
 import { prisma } from "@/lib/db";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
@@ -32,7 +33,7 @@ export default async function ExpensesPage({
       skip: listWindow.skip,
       take: listWindow.take,
       // One query with the category joined, never one lookup per row.
-      include: { category: { select: { name: true } } },
+      include: { category: { select: { name: true, code: true } } },
     }),
     prisma.expense.count({ where }),
   ]);
@@ -84,7 +85,19 @@ export default async function ExpensesPage({
                       {fmtDate(e.date)}
                     </td>
                     <td className="font-medium">{e.category.name}</td>
-                    <td className="text-muted">{e.notes ?? "—"}</td>
+                    {/* The one figure that explains this head's total — the
+                        blocks of ice, the boxes loaded — falling back to the note
+                        for a head that has no such figure. Finding out what a
+                        ₹4,000 ice bill actually bought used to mean opening the
+                        voucher. */}
+                    <td className="text-muted">
+                      {expenseHighlight(
+                        e.category.code,
+                        e.details as Record<string, string> | null
+                      ) ??
+                        e.notes ??
+                        "—"}
+                    </td>
                     <td className="num-col num text-debit">
                       {fmtMoney(e.amount)}
                     </td>
