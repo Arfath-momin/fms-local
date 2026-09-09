@@ -1,6 +1,7 @@
 "use client";
 
 import { useStickyFields } from "../use-sticky-fields";
+import { SavedNotice, useSaveNotice } from "../saved-notice";
 
 import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
@@ -217,8 +218,12 @@ export function ExpenseForm({
   const setField = (name: string, value: string) =>
     setDetails((d) => ({ ...d, [name]: value }));
 
+
+  // An edit stays put and says it saved; Escape then goes back to the screen
+  // the correction was noticed on. Cleared as soon as anything is typed again.
+  const saveNotice = useSaveNotice(state);
   return (
-    <form action={formAction} className="max-w-lg space-y-4">
+    <form action={formAction} onInput={saveNotice.clear} className="max-w-lg space-y-4">
       <ScopeFields scope={scope} />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
@@ -567,6 +572,7 @@ export function ExpenseForm({
       )}
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}
+      <SavedNotice showing={saveNotice.showing} />
 
       <div className="flex gap-3 items-center">
         <button

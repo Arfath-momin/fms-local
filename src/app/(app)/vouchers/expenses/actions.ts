@@ -23,7 +23,12 @@ import {
   validateImageFile,
 } from "@/lib/attachments";
 
-export type ExpenseFormState = { error: string } | null;
+/**
+ * `saved` marks an edit that committed and did NOT navigate away, so the form
+ * can say so in place. Optional rather than a union member, so every existing
+ * `state?.error` check still reads the same.
+ */
+export type ExpenseFormState = { error?: string; saved?: true } | null;
 
 type ParsedLine = { description: string; amount: Prisma.Decimal };
 
@@ -407,5 +412,9 @@ export async function updateExpense(
   revalidatePath("/vouchers/expenses");
   revalidatePath("/ledgers", "layout");
   revalidatePath("/dashboard");
-  redirect("/vouchers/expenses");
+  // Stays on the voucher instead of jumping to the list. An edit is started
+  // from wherever the mistake was noticed — most often a filtered ledger — and
+  // redirecting threw that place away for a correction that took one field.
+  // Escape goes back to it, because this save added no history entry.
+  return { saved: true };
 }

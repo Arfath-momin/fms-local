@@ -35,7 +35,12 @@ import {
   validateImageFile,
 } from "@/lib/attachments";
 
-export type SaleFormState = { error: string } | null;
+/**
+ * `saved` marks an edit that committed and did NOT navigate away, so the form
+ * can say so in place. Optional rather than a union member, so every existing
+ * `state?.error` check still reads the same.
+ */
+export type SaleFormState = { error?: string; saved?: true } | null;
 
 const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
 const DECIMAL3 = /^\d+(\.\d{1,3})?$/;
@@ -1589,5 +1594,9 @@ export async function updateSale(
   revalidatePath("/vouchers/sales");
   revalidatePath("/ledgers", "layout");
   revalidatePath("/dashboard");
-  redirect(`/vouchers/sales/${saleId}`);
+  // Stays on the voucher instead of jumping to the list. An edit is started
+  // from wherever the mistake was noticed — most often a filtered ledger — and
+  // redirecting threw that place away for a correction that took one field.
+  // Escape goes back to it, because this save added no history entry.
+  return { saved: true };
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useStickyFields } from "../use-sticky-fields";
+import { SavedNotice, useSaveNotice } from "../saved-notice";
 
 import { DuplicateRow, duplicateAt } from "../duplicate-row";
 
@@ -165,8 +166,12 @@ export function PurchaseForm({
   const setLine = (i: number, patch: Partial<PurchaseLineInit>) =>
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
+
+  // An edit stays put and says it saved; Escape then goes back to the screen
+  // the correction was noticed on. Cleared as soon as anything is typed again.
+  const saveNotice = useSaveNotice(state);
   return (
-    <form action={formAction} className="max-w-3xl space-y-4">
+    <form action={formAction} onInput={saveNotice.clear} className="max-w-3xl space-y-4">
       <ScopeFields scope={scope} />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -517,6 +522,7 @@ export function PurchaseForm({
       )}
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}
+      <SavedNotice showing={saveNotice.showing} />
 
       <div className="flex gap-3 items-center">
         <button

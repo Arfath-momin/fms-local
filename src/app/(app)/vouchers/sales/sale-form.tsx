@@ -3,6 +3,7 @@
 import { TripPicker } from "../trip-picker";
 
 import { useStickyFields } from "../use-sticky-fields";
+import { SavedNotice, useSaveNotice } from "../saved-notice";
 
 import { DuplicateRow, duplicateAt } from "../duplicate-row";
 
@@ -432,8 +433,12 @@ export function SaleForm({
         ? n(factoryAmount)
         : lineTotal;
 
+
+  // An edit stays put and says it saved; Escape then goes back to the screen
+  // the correction was noticed on. Cleared as soon as anything is typed again.
+  const saveNotice = useSaveNotice(state);
   return (
-    <form action={formAction} className="max-w-3xl space-y-4">
+    <form action={formAction} onInput={saveNotice.clear} className="max-w-3xl space-y-4">
       <ScopeFields scope={scope} />
       <input type="hidden" name="type" value={type} />
 
@@ -1235,6 +1240,7 @@ export function SaleForm({
       )}
 
       {state?.error && <p className="text-debit text-[13px]">{state.error}</p>}
+      <SavedNotice showing={saveNotice.showing} />
 
       <div className="flex gap-3 items-center">
         <button type="submit" disabled={pending} className="bg-accent text-white px-5 py-2 text-[13px] font-semibold disabled:opacity-60">

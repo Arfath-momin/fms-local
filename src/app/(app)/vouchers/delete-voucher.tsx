@@ -2,7 +2,12 @@
 
 import { useActionState, useState } from "react";
 
-export type DeleteState = { error: string } | null;
+/**
+ * A delete either navigates away or comes back with a reason, so `error` is
+ * all it can carry. Optional to match the voucher form states it shares an
+ * action with — a delete never sets `saved`, and never needs to.
+ */
+export type DeleteState = { error?: string } | null;
 
 /**
  * Two-step delete, shared by every voucher detail page.

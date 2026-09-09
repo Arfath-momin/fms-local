@@ -19,7 +19,12 @@ import {
   isSettlementKind,
 } from "@/lib/settlement";
 
-export type SettlementFormState = { error: string } | null;
+/**
+ * `saved` marks an edit that committed and did NOT navigate away, so the form
+ * can say so in place. Optional rather than a union member, so every existing
+ * `state?.error` check still reads the same.
+ */
+export type SettlementFormState = { error?: string; saved?: true } | null;
 
 const DECIMAL2 = /^\d+(\.\d{1,2})?$/;
 
@@ -255,5 +260,9 @@ export async function updateSettlement(
   revalidatePath(SETTLEMENT_PATH[kind]);
   revalidatePath("/ledgers", "layout");
   revalidatePath("/dashboard");
-  redirect(SETTLEMENT_PATH[kind]);
+  // Stays on the voucher instead of jumping to the list. An edit is started
+  // from wherever the mistake was noticed — most often a filtered ledger — and
+  // redirecting threw that place away for a correction that took one field.
+  // Escape goes back to it, because this save added no history entry.
+  return { saved: true };
 }

@@ -27,7 +27,12 @@ import {
   validateImageFile,
 } from "@/lib/attachments";
 
-export type PurchaseFormState = { error: string } | null;
+/**
+ * `saved` marks an edit that committed and did NOT navigate away, so the form
+ * can say so in place. Optional rather than a union member, so every existing
+ * `state?.error` check still reads the same.
+ */
+export type PurchaseFormState = { error?: string; saved?: true } | null;
 
 const PURCHASE_TYPES: PurchaseType[] = ["SOCIETY", "KFDC", "PRIVATE", "LOCAL"];
 
@@ -467,5 +472,9 @@ export async function updatePurchase(
   revalidatePath("/vouchers/purchases");
   revalidatePath("/ledgers", "layout");
   revalidatePath("/dashboard");
-  redirect("/vouchers/purchases");
+  // Stays on the voucher instead of jumping to the list. An edit is started
+  // from wherever the mistake was noticed — most often a filtered ledger — and
+  // redirecting threw that place away for a correction that took one field.
+  // Escape goes back to it, because this save added no history entry.
+  return { saved: true };
 }
