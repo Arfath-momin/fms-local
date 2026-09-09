@@ -63,13 +63,16 @@ export async function GET(
   );
   const scope = { companyId: company.id, centreId: centre.id, partyId: id };
 
-  const [entries, latest] = await Promise.all([
+  const [entries, prior] = await Promise.all([
     prisma.ledgerEntry.findMany({
       where: { ...scope, ...dateWhere(listWindow) },
       orderBy: [{ date: "asc" }, { seq: "asc" }],
     }),
+    // Where the account stood the day BEFORE this window opened — the last
+    // entry strictly earlier than `from`, in the same (date, seq) order the
+    // running balance is built in.
     prisma.ledgerEntry.findFirst({
-      where: scope,
+      where: { ...scope, date: { lt: listWindow.fromDate } },
       orderBy: [{ date: "desc" }, { seq: "desc" }],
       select: { runningBalance: true },
     }),
@@ -204,19 +207,22 @@ export async function GET(
     if (h) itemsFor.set(x.id, [{ text: h, amount: "" }]);
   }
 
-  // The balance before the window opened, worked back off its first row so the
-  // statement starts from a real position rather than from zero.
-  const first = entries[0];
-  const opening = first
-    ? first.runningBalance.sub(
-        first.type === "DEBIT" ? first.amount : first.amount.negated()
-      )
-    : (latest?.runningBalance ?? ZERO);
+  /**
+   * Where the account stood when this window opened.
+   *
+   * Read from the last entry BEFORE the window rather than worked back off the
+   * window's first row. Both give the same answer when the window has rows —
+   * and when it has none, working back has nothing to work from. It used to
+   * fall back to the balance as at today, so a September statement for a party
+   * with no September activity opened at October's figure.
+   */
+  const opening = prior?.runningBalance ?? ZERO;
 
   const columns: Column[] = [
-    // Wide enough for "16 Aug 2026" on one line. At 58 it wrapped, putting the
-    // year on a second line and pushing every row of a long statement taller.
-    { label: "Date", width: 68 },
+    // Wide enough for the LONGEST month name, not the shortest. At 68 it fitted
+    // "16 Aug 2026" and overflowed "05 Sept 2026", so a September statement had
+    // every row's particulars shunted left of the heading above them.
+    { label: "Date", width: 82 },
     { label: "Particulars", flex: 1 },
     // Wide enough for a lakh figure with its padding: ₹16,16,001.00 is
     // thirteen characters, and a month of a society's trading is full of them.
@@ -270,7 +276,21 @@ export async function GET(
   const credits = entries
     .filter((e) => e.type === "CREDIT")
     .reduce((a, e) => a.add(e.amount), ZERO);
-  const balance = latest?.runningBalance ?? ZERO;
+
+  /**
+   * Where the account stood at the END of the window asked for.
+   *
+   * The last row's running balance — or the opening figure when the window
+   * holds no rows at all, because an account nothing happened to closes where
+   * it opened.
+   *
+   * This replaces the balance "as at today", which was the fault. A statement
+   * for September footed with a figure that included October: thirty September
+   * transactions, and then five made in October quietly moved the total the
+   * seller was being asked to agree with. A statement has to be answerable from
+   * itself — opening, what happened, closing — or the reader cannot check it.
+   */
+  const closing = entries.at(-1)?.runningBalance ?? opening;
 
   const letterhead = await letterheadFor(company.id);
 
@@ -287,22 +307,33 @@ export async function GET(
         partyTitle: "Statement for",
         partyName: party.name,
         partySub: null,
-        details: [{ label: "Opening balance", value: fmtMoney(opening) }],
+        // Opening is stated twice already — as the table's first row and in the
+        // summary below it — so it does not belong up here as well.
+        details: [],
         columns,
         rows,
         totalRow: ["", "Total", fmtMoney(debits), fmtMoney(credits), ""],
         working: [
+          // No dates repeated in these labels: the head of the sheet already
+          // states From and To in the place a reader looks for them, and
+          // "Closing balance · 30 Sept 2026" beside a lakh figure left the two
+          // touching.
+          { label: "Opening balance", value: fmtMoney(opening) },
+          { label: "Debits in this period", value: fmtMoney(debits) },
+          { label: "Credits in this period", value: fmtMoney(credits) },
           {
-            // Named, not left as a bare figure: a statement is read by somebody
-            // who wants to know which way round the money goes.
-            label: balance.greaterThan(0) ? "They owe us" : "We owe them",
-            value: fmtMoney(balance.abs()),
+            label: "Closing balance",
+            value: fmtMoney(closing),
+            rule: true,
             strong: true,
           },
         ],
         amountInWords: null,
         footNote:
-          "Balance shown is the position as at today across all periods, not the closing balance of the window above.",
+          "Opening, the movements above and closing are all within the From " +
+          "and To dates at the head of this statement — nothing outside them " +
+          "is counted. A positive balance is what this party owes; a negative " +
+          "one is what is owed to them.",
         notes: null,
         signLeft: null,
         signRight: `FOR ${company.name.toUpperCase()}`,
