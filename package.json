@@ -15,6 +15,7 @@
     "db:check": "tsx --conditions=react-server scripts/check-ledger.ts",
     "db:verify": "tsx --conditions=react-server scripts/verify-ledger.ts",
     "db:backfill-kind": "tsx scripts/backfill-party-kind.ts",
+    "db:find-day": "tsx --conditions=react-server scripts/find-day.ts",
     "user:create": "tsx --conditions=react-server scripts/create-user.ts",
     "bootstrap": "tsx --conditions=react-server scripts/bootstrap.ts",
     "test": "vitest run",
