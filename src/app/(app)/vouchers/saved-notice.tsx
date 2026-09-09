@@ -45,16 +45,15 @@ export function useSaveNotice(state: { saved?: true } | null | undefined) {
   return { showing, clear };
 }
 
-/** The confirmation itself, and what to press next. */
+/** The confirmation itself. Just that it saved — Escape needs no caption. */
 export function SavedNotice({ showing }: { showing: boolean }) {
   if (!showing) return null;
   return (
     <p
       role="status"
-      className="text-credit text-[13px] border border-credit/40 bg-credit/5 px-3 py-2"
+      className="text-credit text-[13px] font-semibold border border-credit/40 bg-credit/5 px-3 py-2"
     >
-      Saved. Press <kbd className="font-semibold">Esc</kbd> to go back to where
-      you were.
+      Saved
     </p>
   );
 }
