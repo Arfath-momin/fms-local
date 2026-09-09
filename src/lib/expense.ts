@@ -244,7 +244,13 @@ export function expenseHighlight(
     return parts.length > 0 ? parts.join(" · ") : null;
   }
   if (code === "LOADERS" || code === "LADIES") {
-    return has("boxes") ? `${has("boxes")} boxes` : null;
+    const boxes = has("boxes");
+    if (!boxes) return null;
+    // The rate too, because "120 boxes · ₹1,500" leaves the reader dividing to
+    // find out what was paid per box — which is the figure that gets agreed
+    // with a loading gang and the one worth checking at a glance.
+    const rate = has("ratePerBox");
+    return rate ? `${boxes} boxes @ ${rate}/box` : `${boxes} boxes`;
   }
   return null;
 }

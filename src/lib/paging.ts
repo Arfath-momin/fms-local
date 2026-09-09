@@ -186,3 +186,18 @@ export function listHref(
   });
   return `${basePath}?${q.toString()}`;
 }
+
+/**
+ * The party a list is narrowed to, if any.
+ *
+ * Validated as a uuid rather than trusted: it goes straight into a `where`, and
+ * an id that is not one should show the whole list rather than an error page —
+ * the same rule the dates follow.
+ */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function parsePartyFilter(params: SearchParams): string {
+  const raw = first(params.party);
+  return raw && UUID_RE.test(raw) ? raw : "";
+}

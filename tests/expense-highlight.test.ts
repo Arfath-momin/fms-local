@@ -21,13 +21,19 @@ describe("what an expense row shows", () => {
     ).toBe("40 blocks · KA20A9087");
   });
 
-  it("gives loaders and ladies their boxes", () => {
+  it("gives loaders and ladies their boxes and the rate per box", () => {
+    // The rate is what gets agreed with a gang, so it is the figure worth
+    // seeing without dividing the total by the boxes to find it.
     expect(expenseHighlight("LOADERS", { boxes: "120", ratePerBox: "12.5" })).toBe(
-      "120 boxes"
+      "120 boxes @ 12.5/box"
     );
     expect(expenseHighlight("LADIES", { boxes: "80", ratePerBox: "10" })).toBe(
-      "80 boxes"
+      "80 boxes @ 10/box"
     );
+  });
+
+  it("still shows the boxes when no rate was recorded", () => {
+    expect(expenseHighlight("LOADERS", { boxes: "120" })).toBe("120 boxes");
   });
 
   it("says nothing for a head with no such figure, so the note shows instead", () => {

@@ -8,9 +8,10 @@ import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import {
   dateWhere,
   parseListWindow,
+  parsePartyFilter,
   type SearchParams,
 } from "@/lib/paging";
-import { DateWindow, Pager } from "../../list-controls";
+import { DateWindow, PartyFilter, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
 const TYPE_LABELS = {
@@ -31,11 +32,23 @@ export default async function PurchasesPage({
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
   const listWindow = parseListWindow(await searchParams);
+  const partyId = parsePartyFilter(await searchParams);
   const where = {
     companyId: company.id,
     centreId: centre.id,
     ...dateWhere(listWindow),
+
+    ...(partyId ? { partyId } : {}),
   };
+
+  // Offered by kind rather than by who happens to appear in this window: a
+  // merchant narrowing to a seller usually wants to find out they have no
+  // entries this month, and a list that hid them could not answer that.
+  const parties = await prisma.party.findMany({
+    where: { type: { in: ["PURCHASE_GROUP"] }, archivedAt: null },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
 
   const [purchases, total] = await Promise.all([
     prisma.purchase.findMany({
@@ -80,7 +93,14 @@ export default async function PurchasesPage({
         )}
       </div>
 
-      <DateWindow basePath="/vouchers/purchases" window={listWindow} />
+      <DateWindow keep={{ party: partyId }} basePath="/vouchers/purchases" window={listWindow} />
+      <PartyFilter
+        basePath="/vouchers/purchases"
+        window={listWindow}
+        parties={parties}
+        selected={partyId}
+        label="Seller"
+      />
 
       {purchases.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">

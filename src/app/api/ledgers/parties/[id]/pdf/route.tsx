@@ -3,7 +3,7 @@ import type { LedgerSourceType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import {
   VoucherDocument,
@@ -11,8 +11,7 @@ import {
   type Column,
   type Row,
 } from "@/pdf/voucher-doc";
-import { PACK_LABELS } from "@/lib/pack";
-import { expenseHighlight } from "@/lib/expense";
+import { carriesItems, statementSources } from "@/lib/statement";
 import { pdfFilename, pdfResponse } from "@/pdf/render";
 import { letterheadFor } from "@/pdf/letterhead";
 
@@ -81,131 +80,11 @@ export async function GET(
   // What each row is FOR. "Sale ₹75,000" is not a statement line: a buyer
   // disputing it is holding a bill with a number on it, and a row they cannot
   // match to that number is a row they will query.
-  const sourceIds = [...new Set(entries.map((e) => e.sourceId))];
-  const [sales, purchases, expenses, settlements, trips] = await Promise.all([
-    // The LINES come back too, because a statement now itemises each voucher
-    // under its own row. Still one query per voucher kind over the ids on this
-    // statement, never one per row.
-    prisma.sale.findMany({
-      where: { id: { in: sourceIds } },
-      select: {
-        id: true,
-        billNo: true,
-        type: true,
-        lines: {
-          orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
-          select: {
-            pack: true,
-            particular: true,
-            box: true,
-            qtyKg: true,
-            ratePerKg: true,
-            total: true,
-          },
-        },
-      },
-    }),
-    prisma.purchase.findMany({
-      where: { id: { in: sourceIds } },
-      select: {
-        id: true,
-        billNo: true,
-        lines: {
-          orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
-          select: {
-            particular: true,
-            box: true,
-            qtyKg: true,
-            pricePerKg: true,
-            total: true,
-            boat: { select: { name: true } },
-          },
-        },
-      },
-    }),
-    prisma.expense.findMany({
-      where: { id: { in: sourceIds } },
-      select: {
-        id: true,
-        details: true,
-        category: { select: { name: true, code: true } },
-      },
-    }),
-    prisma.settlement.findMany({ where: { id: { in: sourceIds } }, select: { id: true, reference: true } }),
-    prisma.deliveryNote.findMany({
-      where: { id: { in: sourceIds } },
-      select: { id: true, billNo: true, vehicle: { select: { number: true } } },
-    }),
+  // Resolved by the shared reader, so the printed statement and the one on
+  // screen cannot say different things about the same month.
+  const { detail, items } = await statementSources([
+    ...new Set(entries.map((e) => e.sourceId)),
   ]);
-  const detail = new Map<string, string>();
-  for (const x of sales) if (x.billNo) detail.set(x.id, `Bill ${x.billNo}`);
-  for (const x of purchases) if (x.billNo) detail.set(x.id, `Bill ${x.billNo}`);
-  for (const x of expenses) detail.set(x.id, x.category.name);
-  for (const x of settlements) if (x.reference) detail.set(x.id, x.reference);
-  for (const x of trips) detail.set(x.id, `${x.billNo} · ${x.vehicle.number}`);
-
-  /**
-   * What each voucher's lines say, ready to print under its entry.
-   *
-   * A statement used to name the bill and stop there, so "Purchase · Bill
-   * S-1042 · ₹1,85,000" told a seller the total and nothing about the fish. A
-   * merchant disputing a figure wants the lots.
-   *
-   * Each line is [what it was, what came, what it cost] and the amount goes in
-   * the SAME money column as the entry above it, so the lines visibly add up to
-   * the row they belong to.
-   */
-  const itemsFor = new Map<string, { text: string; amount: string }[]>();
-
-  for (const p of purchases) {
-    itemsFor.set(
-      p.id,
-      p.lines.map((l) => {
-        const bits = [l.boat?.name, l.particular].filter(Boolean);
-        const qty = [
-          l.box > 0 ? `${l.box} box` : null,
-          `${fmtKg(l.qtyKg)} @ ${fmtMoney(l.pricePerKg)}`,
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        return { text: `${bits.join(" · ")} — ${qty}`, amount: fmtMoney(l.total) };
-      })
-    );
-  }
-
-  for (const sale of sales) {
-    const isMarket = sale.type === "MARKET";
-    itemsFor.set(
-      sale.id,
-      sale.lines.map((l) => {
-        const qty = [
-          l.pack !== "BOX" ? PACK_LABELS[l.pack] : null,
-          l.pack !== "LOOSE" && (l.box ?? 0) > 0 ? `${l.box} box` : null,
-          Number(l.qtyKg) > 0 ? fmtKg(l.qtyKg) : null,
-          // A market bill has no per-row price: its money is the net it paid.
-          !isMarket && Number(l.ratePerKg) > 0
-            ? `@ ${fmtMoney(l.ratePerKg)}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        return {
-          text: qty ? `${l.particular} — ${qty}` : l.particular,
-          amount: !isMarket && Number(l.total) > 0 ? fmtMoney(l.total) : "",
-        };
-      })
-    );
-  }
-
-  for (const x of expenses) {
-    // An expense has no lines of its own; what explains its total is the head's
-    // own figure — the blocks of ice, the boxes loaded.
-    const h = expenseHighlight(
-      x.category.code,
-      x.details as Record<string, string> | null
-    );
-    if (h) itemsFor.set(x.id, [{ text: h, amount: "" }]);
-  }
 
   /**
    * Where the account stood when this window opened.
@@ -252,11 +131,9 @@ export async function GET(
     // journey, not the fish. Printing the sale's lots under a transporter's
     // rent said his ₹20,000 was made of eighteen boxes of prawns, which is not
     // a claim anybody would recognise.
-    const carriesItems =
-      e.sourceType === "SALE" ||
-      e.sourceType === "PURCHASE" ||
-      e.sourceType === "EXPENSE";
-    for (const item of carriesItems ? (itemsFor.get(e.sourceId) ?? []) : []) {
+    for (const item of carriesItems(e.sourceType)
+      ? (items.get(e.sourceId) ?? [])
+      : []) {
       rows.push({
         muted: true,
         cells: [

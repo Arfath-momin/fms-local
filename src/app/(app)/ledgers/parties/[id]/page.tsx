@@ -1,8 +1,10 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { LedgerSourceType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
+import { carriesItems, statementSources } from "@/lib/statement";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { ledgerSectionFor, PARTY_TYPE_LABELS } from "@/lib/party";
@@ -149,11 +151,15 @@ export default async function PartyStatementPage({
   // What each row is FOR, where the source type alone does not say it. A
   // transporter's statement is otherwise a column of "Payment" and "Vehicle
   // rent" with no way to tell one trip's from another's.
-  const detailBySource = new Map<string, string>();
+  // The same reader the printed statement uses, so the paper and the screen
+  // cannot say different things about one month. It resolves purchases,
+  // expenses and settlements too, which this page never named — an expense row
+  // read simply "Expense", with no way to tell ice from a canteen bill.
+  const { detail: detailBySource, items: itemsBySource } =
+    await statementSources([...new Set(entries.map((e) => e.sourceId))]);
   for (const t of trips)
     detailBySource.set(t.id, `${t.billNo} · ${t.vehicle.number}`);
-  for (const s2 of sales)
-    if (s2.billNo) detailBySource.set(s2.id, `Bill ${s2.billNo}`);
+
 
   const balance = latest?.runningBalance ?? new Prisma.Decimal(0);
 
@@ -284,8 +290,17 @@ export default async function PartyStatementPage({
               {entries.map((e) => {
                 const href = links.get(e.sourceId);
                 const label = SOURCE_LABELS[e.sourceType];
+                // What this voucher was made of — the lots on a purchase, the
+                // boxes on a bill, the blocks of ice. Only where the entry IS
+                // the voucher: a rent credit carries a sale's id so it can be
+                // undone with it, and printing that sale's fish under a
+                // transporter's rent claims his ₹20,000 was made of prawns.
+                const lines = carriesItems(e.sourceType)
+                  ? (itemsBySource.get(e.sourceId) ?? [])
+                  : [];
                 return (
-                  <tr key={e.id}>
+                  <Fragment key={e.id}>
+                  <tr>
                     <td className="whitespace-nowrap">{fmtDate(e.date)}</td>
                     <td>
                       {href ? (
@@ -327,6 +342,25 @@ export default async function PartyStatementPage({
                       {fmtMoney(e.runningBalance)}
                     </td>
                   </tr>
+
+                  {/* Indented under the row they belong to, with each amount in
+                      the same money column, so the lines visibly add up to the
+                      entry above them. */}
+                  {lines.map((item, i) => (
+                    <tr key={i} className="text-muted text-[12px]">
+                      <td />
+                      <td className="pl-6">{item.text}</td>
+                      {showBoat && <td />}
+                      <td className="num-col num">
+                        {e.type === "DEBIT" ? item.amount : ""}
+                      </td>
+                      <td className="num-col num">
+                        {e.type === "CREDIT" ? item.amount : ""}
+                      </td>
+                      <td />
+                    </tr>
+                  ))}
+                  </Fragment>
                 );
               })}
             </tbody>

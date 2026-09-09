@@ -18,10 +18,24 @@ import { DateField } from "./date-field";
 export function DateWindow({
   basePath,
   window: w,
+  keep,
 }: {
   basePath: string;
   window: ListWindow;
+  /**
+   * Other filters in force, carried through every link and form here.
+   *
+   * Without it, narrowing to one party and then clicking "This week" would
+   * silently drop the party — the merchant would be looking at everybody's week
+   * while believing they were looking at one seller's.
+   */
+  keep?: Record<string, string>;
 }) {
+  const extra = Object.entries(keep ?? {}).filter(([, v]) => v !== "");
+  const carry = extra.map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join("");
+  const hidden = extra.map(([k, v]) => (
+    <input key={k} type="hidden" name={k} value={v} />
+  ));
   const active = activePreset(w);
   const [thisYear, thisMonth] = businessToday().split("-").map(Number);
   // Enough history to reach any book a merchant still argues about, and this
@@ -34,7 +48,7 @@ export function DateWindow({
     return (
       <Link
         key={kind}
-        href={`${basePath}?from=${r.from}&to=${r.to}`}
+        href={`${basePath}?from=${r.from}&to=${r.to}${carry}`}
         className={
           "border px-3 py-1.5 font-medium " +
           (active === kind
@@ -65,6 +79,7 @@ export function DateWindow({
           action={basePath}
           className="flex items-center gap-1 ml-auto"
         >
+          {hidden}
           <select
             name="month"
             defaultValue={String(thisMonth)}
@@ -110,6 +125,7 @@ export function DateWindow({
           action={basePath}
           className="flex items-end gap-2 mt-2"
         >
+          {hidden}
           <label className="flex flex-col gap-1">
             <span className="text-muted text-[12px]">From</span>
             <DateField
@@ -207,5 +223,69 @@ export function Pager({
         )}
       </span>
     </div>
+  );
+}
+
+/**
+ * Narrow a list to one party.
+ *
+ * A merchant looking for what they bought from one society, or every bill to
+ * one market, was reading a whole month and picking the rows out by eye.
+ *
+ * A GET form carrying the date window in hidden fields, so choosing a party
+ * keeps the period you were looking at — and DateWindow carries the party back
+ * the other way, so the two controls compose instead of undoing each other.
+ */
+export function PartyFilter({
+  basePath,
+  window: w,
+  parties,
+  selected,
+  label = "Party",
+}: {
+  basePath: string;
+  window: ListWindow;
+  parties: { id: string; name: string }[];
+  selected: string;
+  label?: string;
+}) {
+  if (parties.length === 0) return null;
+  return (
+    <form
+      method="get"
+      action={basePath}
+      className="flex items-center gap-2 mb-4 text-[13px]"
+    >
+      <input type="hidden" name="from" value={w.from} />
+      <input type="hidden" name="to" value={w.to} />
+      <span className="text-muted text-[12px]">{label}</span>
+      <select
+        name="party"
+        defaultValue={selected}
+        aria-label={label}
+        className="border border-line-strong bg-surface px-2 py-1.5 max-w-64"
+      >
+        <option value="">Everyone</option>
+        {parties.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="submit"
+        className="border border-line-strong px-3 py-1.5 font-medium hover:bg-line-strong/10"
+      >
+        Show
+      </button>
+      {selected !== "" && (
+        <Link
+          href={`${basePath}?from=${w.from}&to=${w.to}`}
+          className="text-accent underline underline-offset-2 text-[12px]"
+        >
+          clear
+        </Link>
+      )}
+    </form>
   );
 }

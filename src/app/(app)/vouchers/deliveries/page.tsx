@@ -5,8 +5,9 @@ import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate, fmtMoney } from "@/lib/format";
-import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
-import { DateWindow, Pager } from "../../list-controls";
+import { dateWhere, parseListWindow,
+  parsePartyFilter, type SearchParams } from "@/lib/paging";
+import { DateWindow, PartyFilter, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
 export default async function DeliveriesPage({
@@ -20,11 +21,25 @@ export default async function DeliveriesPage({
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
   const listWindow = parseListWindow(await searchParams);
+  const partyId = parsePartyFilter(await searchParams);
   const where = {
     companyId: company.id,
     centreId: centre.id,
     ...dateWhere(listWindow),
+    // A note has no party of its own — it is a truck and a load. What it has
+    // is the BILLS raised off it, so "show me UMP Ullal's trips" means the
+    // trips whose bills went to them.
+    ...(partyId ? { sales: { some: { partyId } } } : {}),
   };
+
+  // Offered by kind rather than by who happens to appear in this window: a
+  // merchant narrowing to a seller usually wants to find out they have no
+  // entries this month, and a list that hid them could not answer that.
+  const parties = await prisma.party.findMany({
+    where: { type: { in: ["MARKET_BUYER", "FACTORY", "FISH_MILL", "LOCAL_BUYER"] }, archivedAt: null },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
 
   const [notes, total] = await Promise.all([
     prisma.deliveryNote.findMany({
@@ -57,7 +72,14 @@ export default async function DeliveriesPage({
         )}
       </div>
 
-      <DateWindow basePath="/vouchers/deliveries" window={listWindow} />
+      <DateWindow keep={{ party: partyId }} basePath="/vouchers/deliveries" window={listWindow} />
+      <PartyFilter
+        basePath="/vouchers/deliveries"
+        window={listWindow}
+        parties={parties}
+        selected={partyId}
+        label="Delivered to"
+      />
 
       {notes.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">

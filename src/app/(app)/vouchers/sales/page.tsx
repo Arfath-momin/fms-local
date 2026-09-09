@@ -5,8 +5,9 @@ import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
 import { fmtDate, fmtMoney } from "@/lib/format";
-import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
-import { DateWindow, Pager } from "../../list-controls";
+import { dateWhere, parseListWindow,
+  parsePartyFilter, type SearchParams } from "@/lib/paging";
+import { DateWindow, PartyFilter, Pager } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
 export default async function SalesPage({
@@ -20,11 +21,25 @@ export default async function SalesPage({
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
   const listWindow = parseListWindow(await searchParams);
+  const partyId = parsePartyFilter(await searchParams);
   const where = {
     companyId: company.id,
     centreId: centre.id,
     ...dateWhere(listWindow),
+    // A bill raised care-of somebody is still that buyer's bill, so both are
+    // matched — filtering on partyId alone would hide every care-of sale from
+    // the buyer whose fish it was.
+    ...(partyId ? { OR: [{ partyId }, { careOfPartyId: partyId }] } : {}),
   };
+
+  // Offered by kind rather than by who happens to appear in this window: a
+  // merchant narrowing to a seller usually wants to find out they have no
+  // entries this month, and a list that hid them could not answer that.
+  const parties = await prisma.party.findMany({
+    where: { type: { in: ["MARKET_BUYER", "FACTORY", "FISH_MILL", "LOCAL_BUYER", "CARE_OF"] }, archivedAt: null },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
 
   const [sales, total] = await Promise.all([
     prisma.sale.findMany({
@@ -69,7 +84,14 @@ export default async function SalesPage({
         )}
       </div>
 
-      <DateWindow basePath="/vouchers/sales" window={listWindow} />
+      <DateWindow keep={{ party: partyId }} basePath="/vouchers/sales" window={listWindow} />
+      <PartyFilter
+        basePath="/vouchers/sales"
+        window={listWindow}
+        parties={parties}
+        selected={partyId}
+        label="Buyer"
+      />
 
       {sales.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
