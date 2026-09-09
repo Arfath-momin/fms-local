@@ -218,7 +218,7 @@ export const EXPENSE_SPECS: Record<string, ExpenseCategorySpec> = {
  * head already records the figure that explains its own total; this is which
  * one that is:
  *
- *   ICE      the blocks, and the truck they went on
+ *   ICE      the blocks, what each cost, and the truck they went on
  *   LOADERS  the boxes loaded
  *   LADIES   the boxes handled
  *   anything else — the note, because there is no such figure to show
@@ -237,8 +237,13 @@ export function expenseHighlight(
   };
 
   if (code === "ICE") {
+    const blocks = has("blocks");
+    const rate = has("ratePerBlock");
     const parts = [
-      has("blocks") && `${has("blocks")} blocks`,
+      // The rate per block for the same reason loaders show the rate per box:
+      // it is the figure that gets agreed with the plant, and reading it off a
+      // statement should not mean dividing the total by the blocks.
+      blocks && (rate ? `${blocks} blocks @ ${rate}/block` : `${blocks} blocks`),
       has("vehicleNo"),
     ].filter(Boolean);
     return parts.length > 0 ? parts.join(" · ") : null;

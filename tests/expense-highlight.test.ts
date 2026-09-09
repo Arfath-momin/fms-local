@@ -10,7 +10,7 @@ import { expenseHighlight } from "@/lib/expense";
  * one that is, and the lists print it where the note used to sit.
  */
 describe("what an expense row shows", () => {
-  it("gives ice its blocks and its truck", () => {
+  it("gives ice its blocks, the rate per block and its truck", () => {
     expect(
       expenseHighlight("ICE", {
         blocks: "40",
@@ -18,7 +18,27 @@ describe("what an expense row shows", () => {
         plantName: "Malpe Ice",
         vehicleNo: "KA20A9087",
       })
-    ).toBe("40 blocks · KA20A9087");
+    ).toBe("40 blocks @ 100/block · KA20A9087");
+  });
+
+  it("still shows ice's blocks when no rate was recorded", () => {
+    // Rows entered before the rate field existed, and rows where it was left
+    // blank, must not print "40 blocks @ /block".
+    expect(expenseHighlight("ICE", { blocks: "40", vehicleNo: "KA1" })).toBe(
+      "40 blocks · KA1"
+    );
+    expect(expenseHighlight("ICE", { blocks: "40", ratePerBlock: "  " })).toBe(
+      "40 blocks"
+    );
+  });
+
+  it("does not print a rate with no blocks behind it", () => {
+    // A rate alone says nothing about what was bought, and "@ 100/block" on
+    // its own would read as a quantity.
+    expect(expenseHighlight("ICE", { ratePerBlock: "100" })).toBeNull();
+    expect(expenseHighlight("ICE", { ratePerBlock: "100", vehicleNo: "KA1" })).toBe(
+      "KA1"
+    );
   });
 
   it("gives loaders and ladies their boxes and the rate per box", () => {
