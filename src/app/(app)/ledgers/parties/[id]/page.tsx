@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { LedgerSourceType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { carriesItems, statementSources } from "@/lib/statement";
+import { statementLines, statementSources } from "@/lib/statement";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { ledgerSectionFor, PARTY_TYPE_LABELS } from "@/lib/party";
@@ -155,8 +155,10 @@ export default async function PartyStatementPage({
   // cannot say different things about one month. It resolves purchases,
   // expenses and settlements too, which this page never named — an expense row
   // read simply "Expense", with no way to tell ice from a canteen bill.
-  const { detail: detailBySource, items: itemsBySource } =
-    await statementSources([...new Set(entries.map((e) => e.sourceId))]);
+  const sources = await statementSources([
+    ...new Set(entries.map((e) => e.sourceId)),
+  ]);
+  const detailBySource = sources.detail;
   for (const t of trips)
     detailBySource.set(t.id, `${t.billNo} · ${t.vehicle.number}`);
 
@@ -290,14 +292,13 @@ export default async function PartyStatementPage({
               {entries.map((e) => {
                 const href = links.get(e.sourceId);
                 const label = SOURCE_LABELS[e.sourceType];
-                // What this voucher was made of — the lots on a purchase, the
-                // boxes on a bill, the blocks of ice. Only where the entry IS
-                // the voucher: a rent credit carries a sale's id so it can be
-                // undone with it, and printing that sale's fish under a
-                // transporter's rent claims his ₹20,000 was made of prawns.
-                const lines = carriesItems(e.sourceType)
-                  ? (itemsBySource.get(e.sourceId) ?? [])
-                  : [];
+                // What this row was made of — the lots on a purchase, the
+                // boxes on a bill, the blocks of ice; and for the rent and the
+                // advance, what the truck carried, which is what a haulier is
+                // owed for. Never the SALE's fish under a rent, though the rent
+                // carries that sale's id: it would claim a transporter's
+                // ₹20,000 was made of eighteen boxes of prawns.
+                const lines = statementLines(sources, e.sourceType, e.sourceId);
                 return (
                   <Fragment key={e.id}>
                   <tr>

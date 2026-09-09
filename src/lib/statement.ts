@@ -21,21 +21,49 @@ export type StatementItem = { text: string; amount: string };
 export type StatementSources = {
   /** sourceId → what to append to the row's kind: "Bill S-1042", "Ice". */
   detail: Map<string, string>;
-  /** sourceId → the lines beneath it. */
+  /** sourceId → the voucher's own lines. */
   items: Map<string, StatementItem[]>;
+  /**
+   * sourceId → what the TRUCK carried.
+   *
+   * Keyed by the trip's id and, for a rent raised on a bill, by that bill's id
+   * as well — so a rent row finds the load however it was recorded.
+   */
+  loads: Map<string, StatementItem[]>;
 };
 
 /**
- * Whether a row itemises.
+ * The lines to print under one row.
  *
- * Only an entry that IS the voucher. A rent credit and the debit for what a
- * market handed the driver are both sourced from a SALE — they carry its id so
- * they can be found and undone with it — but they are about the journey, not
- * the fish. Printed naively, a transporter's statement said his ₹20,000 rent
- * was made of eighteen boxes of prawns.
+ * Two different questions, and which one a row is asking depends on what the
+ * row IS.
+ *
+ * An entry that is the voucher — a sale, a purchase, an expense — lists what
+ * the voucher was made of: the lots, the boxes, the blocks of ice.
+ *
+ * An entry about the JOURNEY — the rent, the advance handed over at loading,
+ * the debit for what a market paid the driver — lists what the truck carried.
+ * Those are all sourced from a sale or a trip and so could be made to print the
+ * sale's lots, which would say a transporter's ₹20,000 rent was made of
+ * eighteen boxes of prawns. What he is owed for is the load, and the load is
+ * what the delivery note recorded.
+ *
+ * Anything else — a cash payment, a receipt — is money and shows nothing.
  */
-export function carriesItems(t: LedgerSourceType): boolean {
-  return t === "SALE" || t === "PURCHASE" || t === "EXPENSE";
+export function statementLines(
+  sources: StatementSources,
+  sourceType: LedgerSourceType,
+  sourceId: string
+): StatementItem[] {
+  if (sourceType === "SALE" || sourceType === "PURCHASE" || sourceType === "EXPENSE")
+    return sources.items.get(sourceId) ?? [];
+  if (
+    sourceType === "RENT" ||
+    sourceType === "RENT_BY_PARTY" ||
+    sourceType === "PAYMENT"
+  )
+    return sources.loads.get(sourceId) ?? [];
+  return [];
 }
 
 /**
@@ -50,7 +78,8 @@ export async function statementSources(
 ): Promise<StatementSources> {
   const detail = new Map<string, string>();
   const items = new Map<string, StatementItem[]>();
-  if (sourceIds.length === 0) return { detail, items };
+  const loads = new Map<string, StatementItem[]>();
+  if (sourceIds.length === 0) return { detail, items, loads };
 
   const [sales, purchases, expenses, settlements, trips] = await Promise.all([
     prisma.sale.findMany({
@@ -59,6 +88,9 @@ export async function statementSources(
         id: true,
         billNo: true,
         type: true,
+        // The trip this bill came off, so a rent raised on it can name the load
+        // the transporter actually hauled.
+        deliveryNoteId: true,
         lines: {
           orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
           select: {
@@ -95,6 +127,10 @@ export async function statementSources(
       select: {
         id: true,
         details: true,
+        // The trip this was spent on — invariant 8. Rent posted as an ordinary
+        // expense read simply "Vehicle Rent" on a transporter's statement, with
+        // no way to tell one journey's from another's.
+        deliveryNoteId: true,
         category: { select: { name: true, code: true } },
       },
     }),
@@ -103,14 +139,39 @@ export async function statementSources(
       select: { id: true, reference: true },
     }),
     prisma.deliveryNote.findMany({
-      where: { id: { in: sourceIds } },
-      select: { id: true, billNo: true, vehicle: { select: { number: true } } },
+      // Trips reached directly by an entry, AND the trips behind this
+      // statement's bills and expenses — rent is recorded all three ways.
+      where: {
+        OR: [
+          { id: { in: sourceIds } },
+          { sales: { some: { id: { in: sourceIds } } } },
+          { expenses: { some: { id: { in: sourceIds } } } },
+        ],
+      },
+      select: {
+        id: true,
+        billNo: true,
+        vehicle: { select: { number: true } },
+        lines: {
+          orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+          select: { pack: true, particulars: true, box: true, kg: true },
+        },
+      },
     }),
   ]);
 
   for (const x of sales) if (x.billNo) detail.set(x.id, `Bill ${x.billNo}`);
   for (const x of purchases) if (x.billNo) detail.set(x.id, `Bill ${x.billNo}`);
-  for (const x of expenses) detail.set(x.id, x.category.name);
+  const tripById = new Map(trips.map((t) => [t.id, t]));
+  for (const x of expenses) {
+    // Named by its trip where it has one, so a column of "Vehicle Rent" on a
+    // haulier's statement becomes one journey per line.
+    const t = x.deliveryNoteId ? tripById.get(x.deliveryNoteId) : null;
+    detail.set(
+      x.id,
+      t ? `${x.category.name} · ${t.billNo} · ${t.vehicle.number}` : x.category.name
+    );
+  }
   for (const x of settlements) if (x.reference) detail.set(x.id, x.reference);
   for (const x of trips) detail.set(x.id, `${x.billNo} · ${x.vehicle.number}`);
 
@@ -164,5 +225,39 @@ export async function statementSources(
     if (h) items.set(x.id, [{ text: h, amount: "" }]);
   }
 
-  return { detail, items };
+  const loadByTrip = new Map(trips.map((t) => [t.id, loadOf(t)]));
+
+  // What each truck carried, for the rows that are about the journey.
+  function loadOf(t: (typeof trips)[number]): StatementItem[] {
+    return t.lines.map((l) => {
+      const qty = [
+        l.pack !== "BOX" ? PACK_LABELS[l.pack] : null,
+        l.pack !== "LOOSE" && l.box > 0 ? `${l.box} box` : null,
+        Number(l.kg) > 0 ? fmtKg(l.kg) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      // No amount: a transporter is owed for the journey, not for the fish.
+      return { text: qty ? `${l.particulars} — ${qty}` : l.particulars, amount: "" };
+    });
+  }
+
+  for (const [id, load] of loadByTrip) loads.set(id, load);
+  // A rent expense has no figure of its own to explain it, so it lists what the
+  // truck carried — the same claim the RENT row above makes, and the reason the
+  // haulier is owed anything. An expense that DOES explain itself keeps its own
+  // line: ice says how many blocks, not what the fish was.
+  for (const x of expenses) {
+    if (items.has(x.id) || !x.deliveryNoteId) continue;
+    const load = loadByTrip.get(x.deliveryNoteId);
+    if (load?.length) items.set(x.id, load);
+  }
+
+  // …and under the bill's id too, for a rent that was raised on the bill.
+  for (const sale of sales) {
+    const load = sale.deliveryNoteId && loadByTrip.get(sale.deliveryNoteId);
+    if (load) loads.set(sale.id, load);
+  }
+
+  return { detail, items, loads };
 }

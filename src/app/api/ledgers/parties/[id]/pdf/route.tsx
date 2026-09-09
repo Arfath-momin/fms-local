@@ -11,7 +11,7 @@ import {
   type Column,
   type Row,
 } from "@/pdf/voucher-doc";
-import { carriesItems, statementSources } from "@/lib/statement";
+import { statementLines, statementSources } from "@/lib/statement";
 import { pdfFilename, pdfResponse } from "@/pdf/render";
 import { letterheadFor } from "@/pdf/letterhead";
 
@@ -82,9 +82,10 @@ export async function GET(
   // match to that number is a row they will query.
   // Resolved by the shared reader, so the printed statement and the one on
   // screen cannot say different things about the same month.
-  const { detail, items } = await statementSources([
+  const sources = await statementSources([
     ...new Set(entries.map((e) => e.sourceId)),
   ]);
+  const detail = sources.detail;
 
   /**
    * Where the account stood when this window opened.
@@ -125,15 +126,12 @@ export async function GET(
     // The lines beneath, in the money column their entry used, so they add up
     // to it on the page.
     //
-    // Only for an entry that IS the voucher. A rent credit and the debit for
-    // what a market handed the driver are both sourced from a sale — they carry
-    // its id so they can be found and undone with it — but they are about the
-    // journey, not the fish. Printing the sale's lots under a transporter's
-    // rent said his ₹20,000 was made of eighteen boxes of prawns, which is not
-    // a claim anybody would recognise.
-    for (const item of carriesItems(e.sourceType)
-      ? (items.get(e.sourceId) ?? [])
-      : []) {
+    // What they list depends on what the row is: a voucher lists what it was
+    // made of, and a rent or an advance lists what the truck carried. Never the
+    // SALE's lots under a rent — the rent carries that sale's id so the two can
+    // be undone together, and printing them said a transporter's ₹20,000 was
+    // made of eighteen boxes of prawns.
+    for (const item of statementLines(sources, e.sourceType, e.sourceId)) {
       rows.push({
         muted: true,
         cells: [
