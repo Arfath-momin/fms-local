@@ -1,6 +1,6 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
-import type { PartyType } from "@/generated/prisma/enums";
+import type { PartyType, PurchaseType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 
 export type LedgerRow = {
@@ -9,6 +9,13 @@ export type LedgerRow = {
   type: PartyType;
   balance: Prisma.Decimal;
   entries: number;
+  /**
+   * Which kind of purchase this party sells through, for the sections on the
+   * purchase-party list. Null on every other party type, and on a purchase
+   * party that predates the field — which is why the list has a place to put
+   * one rather than dropping it.
+   */
+  purchaseKind: PurchaseType | null;
 };
 
 const ZERO = new Prisma.Decimal(0);
@@ -51,7 +58,7 @@ export async function sectionLedgers(
     prisma.party.findMany({
       where: { type: { in: types } },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, type: true },
+      select: { id: true, name: true, type: true, purchaseKind: true },
     }),
   ]);
 
@@ -67,6 +74,7 @@ export async function sectionLedgers(
       type: p.type,
       balance: balances.get(p.id) ?? ZERO,
       entries: entryCounts.get(p.id) ?? 0,
+      purchaseKind: p.purchaseKind,
     }));
 }
 

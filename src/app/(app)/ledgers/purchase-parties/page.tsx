@@ -5,14 +5,22 @@ import {
   FIXED_PURCHASE_PARTY,
   PURCHASE_LEDGER_TYPES,
 } from "@/lib/party";
-import { balanceClass, LedgerTable, SectionHeader } from "../ledger-list";
+import { groupPurchaseParties } from "@/lib/purchase";
+import {
+  balanceClass,
+  LedgerTable,
+  SectionHeader,
+  type LedgerGroup,
+} from "../ledger-list";
 import { NoCentreNotice } from "../../no-centre";
 
 /**
  * Who we buy from, and what is still owed to each of them.
  *
- * Society and KFDC are one counterparty each however many boats they send;
- * private owners get a ledger apiece; Local purchases roll into one account.
+ * Society and KFDC are one counterparty each however many boats they send.
+ * Private and local sellers get a ledger apiece — pooling them was wrong, since
+ * owing Ravi 40,000 and Raju 50,000 is not owing 90,000 to a group nobody can
+ * pay — so the list is grouped by which of the four a seller sells through.
  * The boat is a column on the statement inside, never a ledger of its own.
  */
 export default async function PurchasePartyLedgersPage() {
@@ -28,12 +36,24 @@ export default async function PurchasePartyLedgersPage() {
   );
 
   // The standing accounts sit at the top in a fixed order — they are the ones
-  // read every day — and the private parties follow alphabetically.
+  // read every day — and everyone else follows alphabetically.
   const rank = (name: string) => {
     const i = standing.indexOf(name);
     return i === -1 ? standing.length : i;
   };
   rows.sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
+
+  /**
+   * Filed by what they sell through, not run together in one alphabet.
+   *
+   * Society and KFDC are one account each and stay at the top unheaded, where
+   * they are looked up every day. Private and Local are a different question —
+   * each is a list of individuals that grows every season, and a merchant
+   * asking "who have I still to pay for local fish" was reading a single
+   * A-to-Z column and picking the names out by memory. Now each kind is its
+   * own section with its own subtotal.
+   */
+  const groups: LedgerGroup[] = groupPurchaseParties(rows, standing);
 
   const total = totalBalance(rows);
 
@@ -51,6 +71,7 @@ export default async function PurchasePartyLedgersPage() {
 
       <LedgerTable
         rows={rows}
+        groups={groups}
         empty={`No purchases recorded for ${company.name} · ${centre.name} yet.`}
       />
 
