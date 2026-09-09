@@ -100,6 +100,20 @@ export const s = StyleSheet.create({
     // of a month's trading is exactly that, read down.
     paddingVertical: 3.5,
   },
+  /**
+   * An item line belonging to the row above it.
+   *
+   * No rule underneath and less height, so a voucher and its lines read as one
+   * block. A rule under every line would turn a statement into a grid of forty
+   * equal rows with no way to see which belongs to which.
+   */
+  trDetail: {
+    flexDirection: "row",
+    paddingTop: 1,
+    paddingBottom: 1,
+  },
+  detailText: { fontSize: 8, color: MUTED },
+
   tfoot: {
     flexDirection: "row",
     borderTopWidth: 1,

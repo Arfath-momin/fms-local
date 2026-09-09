@@ -27,6 +27,19 @@ export type Column = {
   align?: "left" | "right";
 };
 
+/**
+ * A table row.
+ *
+ * A plain array of cells, as every voucher uses — or the same with `muted` set,
+ * which is how a statement prints the ITEMS belonging to the entry above it:
+ * lighter, smaller, and without a rule under each one, so a voucher and its
+ * lines read as one block rather than five unrelated rows.
+ */
+export type Row = string[] | { cells: string[]; muted?: boolean };
+
+const cellsOf = (r: Row) => (Array.isArray(r) ? r : r.cells);
+const isMuted = (r: Row) => !Array.isArray(r) && r.muted === true;
+
 export type WorkingRow = {
   label: string;
   value: string;
@@ -49,7 +62,7 @@ export type VoucherDoc = {
   details: { label: string; value: string }[];
 
   columns: Column[];
-  rows: string[][];
+  rows: Row[];
   /** The table's own total line, aligned to the same columns. */
   totalRow: string[] | null;
 
@@ -180,15 +193,34 @@ export function VoucherDocument({ d }: { d: VoucherDoc }) {
                 ) : null
               }
             />
-            {d.rows.map((row, i) => (
-              <View style={s.tr} key={i} wrap={false}>
-                {row.map((v, j) => (
-                  <Text key={j} style={cell(d.columns[j])}>
-                    {v}
-                  </Text>
-                ))}
-              </View>
-            ))}
+            {d.rows.map((row, i) => {
+              const muted = isMuted(row);
+              return (
+                <View
+                  style={muted ? s.trDetail : s.tr}
+                  key={i}
+                  wrap={false}
+                >
+                  {cellsOf(row).map((v, j) => (
+                    <Text
+                      key={j}
+                      style={[
+                        cell(d.columns[j]),
+                        ...(muted ? [s.detailText] : []),
+                        // The indent belongs to the description cell alone.
+                        // Leading spaces do not survive: this font's space is
+                        // narrow and a PDF reader collapses them, so the lines
+                        // sat flush under the voucher they belong to and read
+                        // as more vouchers.
+                        ...(muted && j === 1 ? [{ paddingLeft: 16 }] : []),
+                      ]}
+                    >
+                      {v}
+                    </Text>
+                  ))}
+                </View>
+              );
+            })}
             {d.totalRow && (
               <View style={s.tfoot}>
                 {d.totalRow.map((v, j) => (
