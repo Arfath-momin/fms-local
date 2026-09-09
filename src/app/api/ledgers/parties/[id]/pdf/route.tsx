@@ -14,6 +14,7 @@ import {
 import { statementLines, statementSources } from "@/lib/statement";
 import { pdfFilename, pdfResponse } from "@/pdf/render";
 import { letterheadFor } from "@/pdf/letterhead";
+import { partyCategory } from "@/lib/party";
 
 /**
  * A party's statement of account, as a downloadable PDF.
@@ -52,7 +53,7 @@ export async function GET(
 
   const party = await prisma.party.findUnique({
     where: { id },
-    select: { id: true, name: true, type: true },
+    select: { id: true, name: true, type: true, purchaseKind: true },
   });
   if (!party) return new Response("Not found.", { status: 404 });
 
@@ -61,6 +62,24 @@ export async function GET(
     Object.fromEntries(url.searchParams) as SearchParams
   );
   const scope = { companyId: company.id, centreId: centre.id, partyId: id };
+
+  /**
+   * What kind of account this is, printed under the name and carried into the
+   * filename. For an expense vendor that means the heads they have actually
+   * been paid under — an ice plant is ice — read across ALL dates rather than
+   * the window, because what a party IS does not change with the month asked
+   * for, and a statement for a quiet month should not lose its category.
+   */
+  const heads = await prisma.expense.findMany({
+    where: { companyId: company.id, centreId: centre.id, partyId: id },
+    select: { category: { select: { name: true } } },
+    distinct: ["categoryId"],
+  });
+  const category = partyCategory(
+    party.type,
+    party.purchaseKind,
+    heads.map((h) => h.category.name)
+  );
 
   const [entries, prior] = await Promise.all([
     prisma.ledgerEntry.findMany({
@@ -181,7 +200,7 @@ export async function GET(
         ],
         partyTitle: "Statement for",
         partyName: party.name,
-        partySub: null,
+        partySub: category,
         // Opening is stated twice already — as the table's first row and in the
         // summary below it — so it does not belong up here as well.
         details: [],
@@ -223,6 +242,8 @@ export async function GET(
 
   return pdfResponse(
     doc,
-    pdfFilename(company.name, "statement", party.name, listWindow.to)
+    // Category before the name, so a folder of statements groups every market
+    // buyer together rather than sorting the ice plant next to a boat owner.
+    pdfFilename(company.name, "statement", category, party.name, listWindow.to)
   );
 }

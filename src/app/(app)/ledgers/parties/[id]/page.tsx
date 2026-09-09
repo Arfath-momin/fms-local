@@ -7,7 +7,7 @@ import { prisma } from "@/lib/db";
 import { statementLines, statementSources } from "@/lib/statement";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { ledgerSectionFor, PARTY_TYPE_LABELS } from "@/lib/party";
+import { ledgerSectionFor, partyCategory } from "@/lib/party";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import { DateWindow, Pager } from "../../../list-controls";
@@ -46,6 +46,21 @@ export default async function PartyStatementPage({
 
   const listWindow = parseListWindow(await searchParams);
   const scope = { companyId: company.id, centreId: centre.id, partyId: id };
+
+  // What kind of account this is — the same line the printed statement carries
+  // in its head, from the same function, so the paper and the screen cannot
+  // describe one party two ways. Read across all dates: what a party IS does
+  // not change with the month asked for.
+  const expenseHeads = await prisma.expense.findMany({
+    where: { companyId: company.id, centreId: centre.id, partyId: id },
+    select: { category: { select: { name: true } } },
+    distinct: ["categoryId"],
+  });
+  const category = partyCategory(
+    party.type,
+    party.purchaseKind,
+    expenseHeads.map((h) => h.category.name)
+  );
   const where = { ...scope, ...dateWhere(listWindow) };
 
   // The statement is windowed, but the headline balance must not be: it is what
@@ -191,8 +206,7 @@ export default async function PartyStatementPage({
         <div>
           <h1 className="heading text-xl font-semibold">{party.name}</h1>
           <p className="text-muted text-[13px]">
-            {PARTY_TYPE_LABELS[party.type]} · statement for {company.name} ·{" "}
-            {centre.name}
+            {category} · statement for {company.name} · {centre.name}
           </p>
           <div className="mt-1 flex items-center gap-3">
             <a

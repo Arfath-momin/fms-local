@@ -1,4 +1,5 @@
 import type { PartyType, PurchaseType } from "@/generated/prisma/enums";
+import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 
 export const PARTY_TYPE_LABELS: Record<PartyType, string> = {
   BOAT: "Boat",
@@ -132,4 +133,51 @@ export function purchaseHasLineBoats(type: PurchaseType): boolean {
  */
 export function purchaseHasLineBoxes(type: PurchaseType): boolean {
   return purchasePartyIsTyped(type);
+}
+
+/**
+ * What KIND of account a party is, for the head of their statement and the
+ * name of the file it downloads as.
+ *
+ * "Statement for Cool Ice" does not say, to anyone but the person who typed
+ * it, whether Cool Ice is a boat owner, a buyer or the plant the ice comes
+ * from — and a folder holding fifty statements sorts them by nothing useful.
+ * The party type alone was not enough either: every seller printed as
+ * "Purchase Party" whether the fish came through the Society, KFDC or a man on
+ * the beach, and those are the three things a merchant is separating.
+ *
+ * `expenseHeads` is the distinct expense categories this vendor has actually
+ * been paid under. One of them names the account — an ice plant is ice — while
+ * several means the vendor does more than one thing and only "Expense" is
+ * true of all of them.
+ */
+export function partyCategory(
+  type: PartyType,
+  purchaseKind: PurchaseType | null = null,
+  expenseHeads: string[] = []
+): string {
+  switch (type) {
+    case "PURCHASE_GROUP":
+      // Society and KFDC buy differently from a private owner or a beach
+      // seller, and the statement is read by different people in each case.
+      return purchaseKind
+        ? `${PURCHASE_TYPE_LABELS[purchaseKind]} Purchase`
+        : "Purchase";
+    case "MARKET_BUYER":
+      return "Market Sale";
+    case "FACTORY":
+      return "Factory Sale";
+    case "FISH_MILL":
+      return "Fish Mill Sale";
+    case "LOCAL_BUYER":
+      return "Local Sale";
+    case "TRANSPORTER":
+      return "Transport";
+    case "EXPENSE_VENDOR": {
+      const heads = [...new Set(expenseHeads.filter((h) => h.trim() !== ""))];
+      return heads.length === 1 ? `${heads[0]} Expense` : "Expense";
+    }
+    default:
+      return PARTY_TYPE_LABELS[type];
+  }
 }
