@@ -6,7 +6,7 @@ import { computeDayBook } from "@/lib/report";
 import { NoCentreNotice } from "../../no-centre";
 import { PURCHASE_TYPE_LABELS } from "@/lib/purchase";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
-import { businessTodayDate, fmtMoney, toInputDate } from "@/lib/format";
+import { businessToday, businessTodayDate, fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { DateField } from "../../date-field";
 
 const ZERO = new Prisma.Decimal(0);
@@ -27,6 +27,20 @@ export default async function DayBookPage({
       : businessTodayDate();
 
   const d = await computeDayBook(company.id, centre.id, date);
+
+  /**
+   * Whether the day has any vouchers at all.
+   *
+   * Read off the breakdowns, not the totals: they come from a groupBy, so an
+   * empty array means nothing was recorded, while a zero total can equally
+   * mean a sale that exactly covered its costs. The two are different answers
+   * and must not print the same.
+   */
+  const noVouchers =
+    d.purchaseByType.length === 0 &&
+    d.expenseByCategory.length === 0 &&
+    d.saleByType.length === 0;
+  const isToday = toInputDate(date) === businessToday();
   const pfCls = d.grossProfit.greaterThan(0)
     ? "text-credit"
     : d.grossProfit.lessThan(0)
@@ -65,6 +79,24 @@ export default async function DayBookPage({
         </form>
       </div>
 
+      {/*
+        A day with nothing on it, said in words.
+        Four ₹0.00 figures and three em-dashes are what this screen showed for
+        an empty day, which reads as a broken page rather than as an answer —
+        and most often it is simply today, opened a few hours after the date
+        rolled over in India while the last entries are still yesterday's.
+      */}
+      {noVouchers ? (
+        <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
+          No purchases, sales or expenses recorded for {company.name} ·{" "}
+          {centre.name} on {fmtDate(date)}.
+          {isToday &&
+            " The Day Book opens on today's date in India, which rolls over at" +
+              " midnight IST — pick an earlier date above to see the last day" +
+              " traded."}
+        </p>
+      ) : (
+      <>
       {/* The daily row: Sale − (Purchase + Expense) = Profit */}
       <div className="border border-line-strong bg-surface overflow-x-auto">
         <table className="ledger-table">
@@ -138,6 +170,8 @@ export default async function DayBookPage({
           total={d.sale}
         />
       </div>
+      </>
+      )}
     </div>
   );
 }
