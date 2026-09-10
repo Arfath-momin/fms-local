@@ -2,6 +2,7 @@
 
 import { useStickyFields } from "../use-sticky-fields";
 import { SavedNotice, useSaveNotice } from "../saved-notice";
+import { Combobox } from "../../combobox";
 
 import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
@@ -315,22 +316,23 @@ export function ExpenseForm({
           is how one man ends up with two ledgers. */}
       {isRent && vehicles.length > 0 && (
         <div>
-          <label htmlFor="vehicleId" className={labelCls}>
-            Vehicle
-          </label>
-          <select
+          {/* Typed, not scrolled. A scroll box is fine for five trucks and
+              useless for forty, and the merchant always knows the number. */}
+          <Combobox
             id="vehicleId"
+            label="Vehicle"
+            options={vehicles.map((v) => ({
+              id: v.id,
+              label: `${v.number} · ${v.transporterName}`,
+              // So the owner's name finds his lorry too, for the merchant who
+              // remembers the man rather than the plate.
+              keywords: v.transporterName,
+            }))}
             value={vehicleId}
-            onChange={(e) => applyVehicle(e.target.value)}
-            className={inputCls}
-          >
-            <option value="">Choose the truck…</option>
-            {vehicles.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.number} · {v.transporterName}
-              </option>
-            ))}
-          </select>
+            onChange={applyVehicle}
+            placeholder="Type a number — KA47A finds it"
+            emptyLabel="Choose the truck…"
+          />
           <p className="text-muted text-[12px] mt-1">
             Its owner fills in below — the rent is owed to him.
           </p>

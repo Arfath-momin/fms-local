@@ -236,56 +236,8 @@ export function Pager({
  * keeps the period you were looking at — and DateWindow carries the party back
  * the other way, so the two controls compose instead of undoing each other.
  */
-export function PartyFilter({
-  basePath,
-  window: w,
-  parties,
-  selected,
-  label = "Party",
-}: {
-  basePath: string;
-  window: ListWindow;
-  parties: { id: string; name: string }[];
-  selected: string;
-  label?: string;
-}) {
-  if (parties.length === 0) return null;
-  return (
-    <form
-      method="get"
-      action={basePath}
-      className="flex items-center gap-2 mb-4 text-[13px]"
-    >
-      <input type="hidden" name="from" value={w.from} />
-      <input type="hidden" name="to" value={w.to} />
-      <span className="text-muted text-[12px]">{label}</span>
-      <select
-        name="party"
-        defaultValue={selected}
-        aria-label={label}
-        className="border border-line-strong bg-surface px-2 py-1.5 max-w-64"
-      >
-        <option value="">Everyone</option>
-        {parties.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
-      <button
-        type="submit"
-        className="border border-line-strong px-3 py-1.5 font-medium hover:bg-line-strong/10"
-      >
-        Show
-      </button>
-      {selected !== "" && (
-        <Link
-          href={`${basePath}?from=${w.from}&to=${w.to}`}
-          className="text-accent underline underline-offset-2 text-[12px]"
-        >
-          clear
-        </Link>
-      )}
-    </form>
-  );
-}
+
+// Lives in its own file because it is interactive — the party box narrows as
+// you type, which a server component cannot do. Re-exported here so the four
+// list pages carry on importing their controls from one place.
+export { PartyFilter } from "./party-filter";

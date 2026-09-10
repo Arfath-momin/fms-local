@@ -124,6 +124,27 @@ export default async function ExpenseDetailPage({
   // the voucher already had.
   const trips = await tripOptions({ companyId: company.id, centreId: centre.id });
 
+  // The vehicle master, for the same reason. Editing a rent voucher offered no
+  // truck picker at all, so correcting one meant retyping the number into a
+  // free-text field — and "KA20B5521" typed as "KA 20 B 5521" is a second
+  // lorry with a second transporter behind it, which is how one man ends up
+  // with two ledgers.
+  const vehicles = (
+    await prisma.vehicle.findMany({
+      where: { companyId: company.id, archivedAt: null },
+      orderBy: { number: "asc" },
+      select: {
+        id: true,
+        number: true,
+        transporter: { select: { name: true } },
+      },
+    })
+  ).map((v) => ({
+    id: v.id,
+    number: v.number,
+    transporterName: v.transporter.name,
+  }));
+
   const initial = {
     categoryId: expense.categoryId,
     deliveryNoteId: expense.deliveryNoteId,
@@ -149,6 +170,7 @@ export default async function ExpenseDetailPage({
         action={updateExpense.bind(null, expense.id)}
         initial={initial}
         trips={trips}
+        vehicles={vehicles}
         submitLabel="Save Changes"
         scope={scopeFieldValues({ company, centre })}
         // The Attachments panel below is the single place images are managed
