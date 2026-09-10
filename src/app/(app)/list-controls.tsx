@@ -38,6 +38,12 @@ export function DateWindow({
   ));
   const active = activePreset(w);
   const [thisYear, thisMonth] = businessToday().split("-").map(Number);
+  // The picker opens on the window actually being shown, not on today: a
+  // merchant who asked for one day in August and then wants the day after
+  // should not have to set the month again.
+  const [wYear, wMonth, wDay] = w.from.split("-").map(Number);
+  const singleDay = w.from === w.to;
+  const dayInWindow = singleDay ? String(wDay) : "";
   // Enough history to reach any book a merchant still argues about, and this
   // year. Offering years with nothing in them is clutter, but guessing which
   // ones have data would cost a query on every list.
@@ -71,9 +77,9 @@ export function DateWindow({
         {preset("month", "This month")}
         {preset("year", "This year")}
 
-        {/* Its own form, submitting only month and year. Keeping it separate
-            from the range below is what stops the two disagreeing: whichever
-            control was used is the only one that sends anything. */}
+        {/* Its own form, submitting only day, month and year. Keeping it
+            separate from the range below is what stops the two disagreeing:
+            whichever control was used is the only one that sends anything. */}
         <form
           method="get"
           action={basePath}
@@ -82,7 +88,7 @@ export function DateWindow({
           {hidden}
           <select
             name="month"
-            defaultValue={String(thisMonth)}
+            defaultValue={String(wMonth || thisMonth)}
             aria-label="Month"
             className="border border-line-strong bg-surface px-2 py-1.5"
           >
@@ -94,13 +100,36 @@ export function DateWindow({
           </select>
           <select
             name="year"
-            defaultValue={String(thisYear)}
+            defaultValue={String(wYear || thisYear)}
             aria-label="Year"
             className="border border-line-strong bg-surface px-2 py-1.5"
           >
             {years.map((y) => (
               <option key={y} value={y}>
                 {y}
+              </option>
+            ))}
+          </select>
+          {/* After the year, and empty by default. One day was reachable only
+              by typing the same date into both boxes of the range form below —
+              "1 Sept 2026 to 1 Sept 2026" — every time somebody wanted a single
+              day's notes. Leaving it on "All month" is the behaviour that was
+              there before, so nothing changes for anyone who ignores it.
+
+              31 is always offered rather than the month's real length: the
+              month can be changed after the day, and a list that silently
+              renumbered itself under the cursor is worse than one that falls
+              back to the whole month for a date that does not exist. */}
+          <select
+            name="day"
+            defaultValue={dayInWindow}
+            aria-label="Day"
+            className="border border-line-strong bg-surface px-2 py-1.5"
+          >
+            <option value="">All month</option>
+            {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+              <option key={d} value={d}>
+                {d}
               </option>
             ))}
           </select>

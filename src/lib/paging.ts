@@ -64,6 +64,28 @@ export function monthRange(year: number, month1to12: number): Range {
   };
 }
 
+/**
+ * One single day, as a range whose ends are the same date.
+ *
+ * A merchant looking for one day's delivery notes was setting the exact-dates
+ * form to "1 Sept 2026" twice — the same date typed into both boxes, every
+ * time. The day is just the third field of a date, and the picker already asks
+ * for the other two.
+ *
+ * Returns null for a day that month does not have, so 31 February falls back
+ * to the whole month rather than producing a range nothing can be in.
+ */
+export function dayRange(
+  year: number,
+  month1to12: number,
+  day: number
+): Range | null {
+  const daysInMonth = new Date(Date.UTC(year, month1to12, 0)).getUTCDate();
+  if (!Number.isInteger(day) || day < 1 || day > daysInMonth) return null;
+  const iso1 = `${year}-${String(month1to12).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return { from: iso1, to: iso1 };
+}
+
 export function yearRange(year: number): Range {
   return { from: `${year}-01-01`, to: `${year}-12-31` };
 }
@@ -129,9 +151,11 @@ export function activePreset(w: { from: string; to: string }): PresetKind | null
 export function parseListWindow(params: SearchParams): ListWindow {
   // Three ways to say the same thing, in the order they win:
   //
-  //   ?from=&to=       an explicit range, including the preset links
-  //   ?year=&month=    the month picker; ?year= alone is the whole year
-  //   nothing          this month, as it always was
+  //   ?from=&to=          an explicit range, including the preset links
+  //   ?year=&month=&day=  the picker; each field narrows the one before it, so
+  //                       ?year= alone is a whole year and adding a month or a
+  //                       day closes it down without a range being typed
+  //   nothing             this month, as it always was
   //
   // Each control submits only its own fields, so two of these can never arrive
   // together and disagree. Anything malformed falls through to the default
@@ -142,10 +166,15 @@ export function parseListWindow(params: SearchParams): ListWindow {
   const rawYear = Number(first(params.year));
   if (Number.isInteger(rawYear) && rawYear >= 2000 && rawYear <= 2100) {
     const rawMonth = Number(first(params.month));
-    base =
-      Number.isInteger(rawMonth) && rawMonth >= 1 && rawMonth <= 12
-        ? monthRange(rawYear, rawMonth)
-        : yearRange(rawYear);
+    if (Number.isInteger(rawMonth) && rawMonth >= 1 && rawMonth <= 12) {
+      // A day only means anything inside a month, and an impossible one falls
+      // back to that month rather than to a range with nothing in it.
+      const rawDay = Number(first(params.day));
+      base =
+        dayRange(rawYear, rawMonth, rawDay) ?? monthRange(rawYear, rawMonth);
+    } else {
+      base = yearRange(rawYear);
+    }
   }
 
   const rawFrom = first(params.from);
