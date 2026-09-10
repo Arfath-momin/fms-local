@@ -41,7 +41,7 @@ export default async function DeliveriesPage({
     select: { id: true, name: true },
   });
 
-  const [notes, total] = await Promise.all([
+  const [notes, total, filteredLines] = await Promise.all([
     prisma.deliveryNote.findMany({
       where,
       include: { lines: true, vehicle: { select: { number: true, transporter: { select: { name: true } } } } },
@@ -50,7 +50,17 @@ export default async function DeliveriesPage({
       take: listWindow.take,
     }),
     prisma.deliveryNote.count({ where }),
+    // Every line the filters match, not just the page on screen. A merchant
+    // asking "how many boxes went to this party on that day" wants the answer
+    // for what they filtered to — a total that only added up the visible page
+    // would change when they turned to the next one, which is worse than no
+    // total at all.
+    prisma.deliveryNoteLine.findMany({
+      where: { deliveryNote: where },
+      select: { pack: true, box: true, kg: true, pcs: true },
+    }),
   ]);
+  const filteredTotals = sumDeliveryLines(filteredLines);
 
   return (
     <div>
@@ -78,7 +88,12 @@ export default async function DeliveriesPage({
         window={listWindow}
         parties={parties}
         selected={partyId}
-        label="Delivered to"
+        // "Delivered to" was a lie by one word: a note names a recipient as
+        // free text — a place, often — while this matches the BILLS raised
+        // off the note. DN-00016 went to Suraksha and was billed to Shree
+        // Matha, so filtering on Suraksha did not return it and the label
+        // was the reason that looked wrong.
+        label="Billed to"
       />
 
       {notes.length === 0 ? (
@@ -149,6 +164,31 @@ export default async function DeliveriesPage({
                 );
               })}
             </tbody>
+            {/* What the filters add up to, in the columns the rows use.
+                One cell per column, in the header's order, rather than colSpan
+                arithmetic — the columns on this table moved once before and
+                the figures silently landed under the wrong headings. */}
+            <tfoot>
+              <tr className="border-t border-line-strong font-semibold">
+                <td className="whitespace-nowrap">Total</td>
+                <td></td>
+                <td className="text-muted text-[12px]">
+                  {total} note{total === 1 ? "" : "s"}
+                  {total > notes.length ? " (all pages)" : ""}
+                </td>
+                <td></td>
+                <td className="num-col num">{filteredTotals.box || "—"}</td>
+                <td className="num-col num">
+                  {filteredTotals.totalKg.isZero()
+                    ? "—"
+                    : filteredTotals.totalKg.toString()}
+                </td>
+                <td className="num-col num">{filteredTotals.pcs || "—"}</td>
+                <td></td>
+                <td></td>
+                <td></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
