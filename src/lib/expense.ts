@@ -221,6 +221,7 @@ export const EXPENSE_SPECS: Record<string, ExpenseCategorySpec> = {
  *   ICE      the blocks, what each cost, and the truck they went on
  *   LOADERS  the boxes loaded
  *   LADIES   the boxes handled
+ *   RENT     the truck, its owner, and what has already been handed over
  *   anything else — the note, because there is no such figure to show
  *
  * Returns null when the head has nothing of its own, so the caller falls back
@@ -245,6 +246,20 @@ export function expenseHighlight(
       // statement should not mean dividing the total by the blocks.
       blocks && (rate ? `${blocks} blocks @ ${rate}/block` : `${blocks} blocks`),
       has("vehicleNo"),
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }
+  if (code === "RENT") {
+    // A list of rent vouchers read as a column of "Vehicle Rent — —": every
+    // row the same words and a figure, with no way to tell one journey from
+    // another without opening it. The truck and its owner are what name a
+    // trip; the advance is the part of that figure already handed over, so
+    // what is still owed is the rest of it.
+    const parts = [
+      has("vehicleNo"),
+      has("transporter"),
+      has("advance") && `${has("advance")} advance`,
+      has("paidByMarket") && `${has("paidByMarket")} by market`,
     ].filter(Boolean);
     return parts.length > 0 ? parts.join(" · ") : null;
   }

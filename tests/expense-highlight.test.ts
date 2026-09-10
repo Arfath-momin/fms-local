@@ -62,7 +62,37 @@ describe("what an expense row shows", () => {
     expect(expenseHighlight("CANTEEN", {})).toBeNull();
     expect(expenseHighlight("BATHA", {})).toBeNull();
     expect(expenseHighlight("SALARY", {})).toBeNull();
-    expect(expenseHighlight("RENT", { vehicleNo: "KA20A9087" })).toBeNull();
+  });
+
+  it("gives vehicle rent the truck, its owner and what is already paid", () => {
+    // A list of rent vouchers was a column of "Vehicle Rent — —": the same two
+    // words on every row, with no way to tell one journey from another.
+    expect(
+      expenseHighlight("RENT", {
+        vehicleNo: "KA20A9087",
+        transporter: "Shetty Carriers",
+        advance: "5000",
+      })
+    ).toBe("KA20A9087 · Shetty Carriers · 5000 advance");
+  });
+
+  it("names what a market handed the driver, when it did", () => {
+    expect(
+      expenseHighlight("RENT", {
+        vehicleNo: "KA20A9087",
+        transporter: "Shetty Carriers",
+        advance: "5000",
+        paidByMarket: "3000",
+      })
+    ).toBe("KA20A9087 · Shetty Carriers · 5000 advance · 3000 by market");
+  });
+
+  it("prints whichever part of a rent voucher was filled in", () => {
+    expect(expenseHighlight("RENT", { vehicleNo: "KA20A9087" })).toBe("KA20A9087");
+    expect(expenseHighlight("RENT", { transporter: "NIMSHAN" })).toBe("NIMSHAN");
+    // Nothing recorded at all still falls back to the note.
+    expect(expenseHighlight("RENT", {})).toBeNull();
+    expect(expenseHighlight("RENT", { vehicleNo: "  " })).toBeNull();
   });
 
   it("prints whichever half of an ice row was filled in", () => {

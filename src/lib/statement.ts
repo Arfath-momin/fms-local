@@ -248,7 +248,14 @@ export async function statementSources(
   // haulier is owed anything. An expense that DOES explain itself keeps its own
   // line: ice says how many blocks, not what the fish was.
   for (const x of expenses) {
-    if (items.has(x.id) || !x.deliveryNoteId) continue;
+    if (!x.deliveryNoteId) continue;
+    // Rent is the one head whose own figures do NOT explain it. A statement
+    // already names the trip and the truck in the row above, so repeating them
+    // underneath says nothing; what the haulier is owed for is the load. Every
+    // other head explains itself — ice says how many blocks — and keeps its own
+    // line, taking the load only when it has nothing of its own.
+    const isRent = x.category.code === "RENT";
+    if (items.has(x.id) && !isRent) continue;
     const load = loadByTrip.get(x.deliveryNoteId);
     if (load?.length) items.set(x.id, load);
   }
