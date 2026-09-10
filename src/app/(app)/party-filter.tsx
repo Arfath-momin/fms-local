@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ListWindow } from "@/lib/paging";
+import { partyFilterHref } from "@/lib/list-href";
 import { Combobox } from "./combobox";
 
 /**
@@ -13,8 +14,21 @@ import { Combobox } from "./combobox";
  * a merchant looking for SHREE MATHA MARINE scrolled past forty names to find
  * it, having known exactly what they wanted before they started.
  *
- * Choosing submits. The Show button stays for anyone who tabs to it, and the
- * clear link is still a plain href so it works whatever happens to the box.
+ * Choosing navigates. It used to call requestSubmit() on the surrounding form
+ * in the same handler that set the state behind the hidden field — so the form
+ * posted the value the field had BEFORE the choice, which on a first pick was
+ * the empty string: ?party= , and a list that had filtered to nobody. React had
+ * not re-rendered yet, and it never would have in time.
+ *
+ * Building the URL and pushing it depends on nothing having flushed. The form
+ * around it stays exactly as it was, so the Show button and a browser with no
+ * JavaScript still post the hidden field the ordinary way, and the clear link
+ * is still a plain href.
+ *
+ * What is shown comes from `selected` — the URL — and never from state of its
+ * own. These navigations are soft, so the component is not remounted and any
+ * local copy would outlive the thing it was copying: pressing "clear" would
+ * leave the party's name sitting in a box that no longer filters by it.
  *
  * The dates ride along as hidden fields rather than being rebuilt from the
  * URL, so changing the party keeps the window and changing the window keeps
@@ -33,14 +47,12 @@ export function PartyFilter({
   selected: string;
   label?: string;
 }) {
-  const form = useRef<HTMLFormElement>(null);
-  const [party, setParty] = useState(selected);
+  const router = useRouter();
 
   if (parties.length === 0) return null;
 
   return (
     <form
-      ref={form}
       method="get"
       action={basePath}
       className="flex items-center gap-2 mb-4 text-[13px]"
@@ -51,15 +63,15 @@ export function PartyFilter({
       <Combobox
         name="party"
         options={parties.map((p) => ({ id: p.id, label: p.name }))}
-        value={party}
+        value={selected}
         onChange={(id) => {
-          setParty(id);
-          // Submitted from here rather than on every keystroke: the box is
+          // Navigated from here rather than on every keystroke: the box is
           // being typed INTO while it narrows, and a list that reloaded under
           // each letter would throw away what was half typed.
-          // requestSubmit, not submit, so the form's own validation and the
-          // GET action run exactly as a click on Show would.
-          form.current?.requestSubmit();
+          //
+          // Built from `id` — the value just chosen — and never read back out
+          // of the field, which at this instant still holds the old one.
+          router.push(partyFilterHref(basePath, w, id));
         }}
         placeholder="Type a name…"
         emptyLabel="Everyone"
