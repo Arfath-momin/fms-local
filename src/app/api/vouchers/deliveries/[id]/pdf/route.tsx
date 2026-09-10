@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney, toInputDate } from "@/lib/format";
 import { lineKgPerBox, lineTotalKg, sumDeliveryLines } from "@/lib/delivery";
 import { PACK_LABELS } from "@/lib/pack";
 import { VoucherDocument, sheetsFor, type Column } from "@/pdf/voucher-doc";
@@ -114,6 +114,9 @@ export async function GET(
 
   return pdfResponse(
     doc,
-    pdfFilename(note.company.name, "delivery-note", note.billNo)
+    // Dated, so a folder of these sorts by when the fish moved rather than
+    // by a bill number that means nothing to anyone outside the office. No
+    // "delivery-note" any more: the number already begins DN-.
+    pdfFilename(note.company.name, note.billNo, toInputDate(note.date))
   );
 }

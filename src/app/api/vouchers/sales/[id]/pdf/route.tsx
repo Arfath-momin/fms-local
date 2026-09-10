@@ -2,7 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
 import { rupeesInWords } from "@/lib/amount-words";
 import { SALE_TYPE_LABELS, saleLineTotalKg } from "@/lib/sale";
 import { PACK_LABELS } from "@/lib/pack";
@@ -234,6 +234,14 @@ export async function GET(
 
   return pdfResponse(
     doc,
-    pdfFilename(sale.company.name, sale.type.toLowerCase(), sale.billNo)
+    // The date the PDF itself shows at its head, so the file and the
+    // document cannot disagree about which day a bill is. The channel stays
+    // in the name because a bare bill number does not say what it is.
+    pdfFilename(
+      sale.company.name,
+      sale.type.toLowerCase(),
+      sale.billNo,
+      toInputDate(sale.saleDate ?? sale.date)
+    )
   );
 }

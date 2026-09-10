@@ -2,7 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
-import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtKg, fmtMoney, toInputDate } from "@/lib/format";
 import { rupeesInWords } from "@/lib/amount-words";
 import {
   VoucherDocument,
@@ -146,6 +146,13 @@ export async function GET(
 
   return pdfResponse(
     doc,
-    pdfFilename(purchase.company.name, "purchase", purchase.billNo ?? fmtDate(purchase.date))
+    // The buying day, in sortable form. It was only used as a stand-in when
+    // a bill had no number; it belongs on every one of them.
+    pdfFilename(
+      purchase.company.name,
+      "purchase",
+      purchase.billNo,
+      toInputDate(purchase.date)
+    )
   );
 }
