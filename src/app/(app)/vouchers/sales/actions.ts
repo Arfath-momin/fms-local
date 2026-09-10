@@ -57,6 +57,8 @@ type ParsedLine = {
   qtyKg: Prisma.Decimal;
   ratePerKg: Prisma.Decimal;
   count: number | null;
+  /** FACTORY (graded): the size the buyer paid at, as they write it. */
+  countLabel: string | null;
   total: Prisma.Decimal;
 };
 
@@ -602,6 +604,8 @@ function parseLines(
   const kgPerBoxes = formData.getAll("kgPerBox").map(String);
   const boxes = formData.getAll("box").map(String);
   const counts = formData.getAll("count").map(String);
+  // Only a graded factory bill sends these, and it sends one per row.
+  const countLabels = formData.getAll("countLabel").map(String);
 
   const lines: ParsedLine[] = [];
   for (let i = 0; i < particulars.length; i++) {
@@ -611,11 +615,13 @@ function parseLines(
     const kgPerBoxRaw = (kgPerBoxes[i] ?? "").trim();
     const boxRaw = (boxes[i] ?? "").trim();
     const countRaw = (counts[i] ?? "").trim();
+    const countLabelRaw = (countLabels[i] ?? "").trim();
     const pack = PACK_TYPES.includes(packs[i] as PackType)
       ? (packs[i] as PackType)
       : "BOX";
 
-    if (!p && !qtyRaw && !rateRaw && !boxRaw && !countRaw) continue;
+    if (!p && !qtyRaw && !rateRaw && !boxRaw && !countRaw && !countLabelRaw)
+      continue;
     if (!p) return { error: "Every line needs a particular." };
     if (boxesOnly) {
       // A LOOSE row has no boxes to state. Fish too big to crate goes straight
@@ -682,6 +688,9 @@ function parseLines(
       qtyKg,
       ratePerKg,
       count,
+      // Kept as typed, trimmed. "8/10" is a range and its halves mean nothing
+      // apart, so it is never parsed into a number.
+      countLabel: countLabelRaw || null,
       // A market row carries no money of its own: the bill's money is the net
       // the market paid, and a per-row amount beside it would invite adding the
       // rows up and asking why the two disagree.
@@ -890,13 +899,37 @@ async function parse(
     // factory reweighs on arrival and pays for what it accepts, and without
     // rows there was no record of how many BOXES that was — so a factory trip
     // could never be reconciled by box the way a market trip is.
-    const parsedLines = parseLines(formData, true, false, true);
+    /**
+     * Which factory layout this bill was entered on.
+     *
+     * GRADED rows state their own kilos and carry no boxes: one lot of 200
+     * boxes of bangda is graded into 8/10 and 4/5 by weight, and nobody can say
+     * which boxes were which. BOXED rows are the older shape, where the rows
+     * carry boxes and take their weight from the slip's average.
+     *
+     * The form says which it sent rather than the server guessing from whether
+     * boxes happen to be present — a guess would misread a graded bill whose
+     * clerk left a stray box figure behind, and rewrite its weights.
+     */
+    const graded = clean(formData.get("factoryGraded")) === "1";
+    const parsedLines = parseLines(formData, true, false, !graded);
     if ("error" in parsedLines) return { error: parsedLines.error };
 
     if (parsedLines.lines.length > 0) {
       base.lines = parsedLines.lines;
-      const applied = applyWeighingSlip(base);
-      if (applied) return applied;
+      if (graded) {
+        // The rows ARE the net: the factory weighed each grade and paid on it.
+        // Recomputed here rather than taken from the form, which sends the same
+        // figure only as a starting value — two figures that can disagree are
+        // two figures that will.
+        base.netWeight = base.lines.reduce((a, l) => a.add(l.qtyKg), ZERO);
+        // What they kept plus what they handed back. Same arithmetic the boxed
+        // layout already used, read the same way round.
+        base.weight = base.netWeight.add(base.waterLess ?? ZERO);
+      } else {
+        const applied = applyWeighingSlip(base);
+        if (applied) return applied;
+      }
       amount = base.lines.reduce((a, l) => a.add(l.total), ZERO);
     } else {
       // A bill entered before itemisation existed keeps its single figure.
@@ -1300,6 +1333,7 @@ function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
         qtyKg: l.qtyKg,
         ratePerKg: l.ratePerKg,
         count: l.count,
+        countLabel: l.countLabel,
         total: l.total,
       })),
     },

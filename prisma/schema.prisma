@@ -868,6 +868,12 @@ model SaleLine {
   qtyKg      Decimal  @map("qty_kg") @db.Decimal(12, 3)
   ratePerKg  Decimal  @map("rate_per_kg") @db.Decimal(12, 2)
   count      Int? // Fish Mill only
+  /// FACTORY: the size grade the buyer paid at, written as they write it —
+  /// "8/10", "4/5". Free text, not a number: it is a range, and the two halves
+  /// mean nothing apart. One particular arrives as one lot of boxes and is
+  /// graded into several of these, which is why a factory row can no longer say
+  /// how many boxes it is.
+  countLabel String?  @map("count_label")
   total      Decimal  @db.Decimal(14, 2)
 
   sale Sale @relation(fields: [saleId], references: [id], onDelete: Cascade)

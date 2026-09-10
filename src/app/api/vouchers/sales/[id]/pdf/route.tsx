@@ -61,6 +61,11 @@ export async function GET(
 
   const isMarket = sale.type === "MARKET";
   const anyBox = sale.lines.some((l) => l.pack !== "LOOSE" && (l.box ?? 0) > 0);
+  // A graded factory bill prices by size — "8/10", "4/5" — and the buyer's own
+  // paper is laid out that way, so a statement they cannot line up against it
+  // is a statement they will query. Absent on every other channel, and on the
+  // boxed factory bills that came before, so the column simply does not appear.
+  const anyCountLabel = sale.lines.some((l) => (l.countLabel ?? "").trim() !== "");
   const anyPack = sale.lines.some((l) => l.pack !== "BOX");
   const totalBoxes = sale.lines.reduce(
     (a, l) => a + (l.pack === "LOOSE" ? 0 : (l.box ?? 0)),
@@ -78,6 +83,7 @@ export async function GET(
   const columns: Column[] = [{ label: "Sr No", width: 42, align: "right" }];
   if (anyPack) columns.push({ label: "Pack", width: 48 });
   columns.push({ label: "Particulars", flex: 1 });
+  if (anyCountLabel) columns.push({ label: "Count", width: 52 });
   if (anyBox) columns.push({ label: "Box", width: 44, align: "right" });
   // Kgs on every channel — a market row's weight comes off the delivery note.
   // Rate and amount only where the money IS a rate times a weight: a market's
@@ -95,6 +101,7 @@ export async function GET(
     const r = [String(i + 1)];
     if (anyPack) r.push(PACK_LABELS[l.pack]);
     r.push(l.particular);
+    if (anyCountLabel) r.push(l.countLabel ?? "");
     if (anyBox) r.push(l.pack === "LOOSE" ? "—" : String(l.box ?? 0));
     r.push(fmtKg(saleLineTotalKg({ qtyKg: Number(l.qtyKg), box: l.box })));
     if (!isMarket) {
@@ -107,6 +114,7 @@ export async function GET(
   const totalRow: string[] = [""];
   if (anyPack) totalRow.push("");
   totalRow.push("Total");
+  if (anyCountLabel) totalRow.push("");
   if (anyBox) totalRow.push(String(totalBoxes));
   totalRow.push(fmtKg(totalKg));
   if (!isMarket) {

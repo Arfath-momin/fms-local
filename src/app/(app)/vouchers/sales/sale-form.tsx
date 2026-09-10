@@ -53,6 +53,8 @@ export type SaleLineInit = {
   /** MARKET: what one box weighed, carried from the delivery note. */
   kgPerBox: string;
   count: string;
+  /** FACTORY (graded): the size the buyer paid at — "8/10". Free text. */
+  countLabel: string;
 };
 
 export type SaleInit = {
@@ -100,6 +102,7 @@ const BLANK_LINE: SaleLineInit = {
   ratePerKg: "",
   kgPerBox: "",
   count: "",
+  countLabel: "",
 };
 
 const n = (v: string) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -169,6 +172,30 @@ export function SaleForm({
   // on edit and absent on new, which is exactly the distinction.
   const factoryLumpSum =
     type === "FACTORY" && !!initial && (initial.lines?.length ?? 0) === 0;
+
+  /**
+   * A factory bill graded by weight rather than counted in boxes.
+   *
+   * One particular arrives as one lot — 200 boxes of bangda — and the factory
+   * grades it into several sizes and pays a different rate for each. Nobody can
+   * say how many of those 200 boxes were the 8/10 and how many the 4/5; what
+   * the paper gives is kilos per grade. So a graded row states its own weight
+   * and carries no boxes, and the boxes stay a bill-level figure taken from the
+   * delivery note.
+   *
+   * OLD BILLS ARE LEFT EXACTLY AS THEY WERE. A factory bill entered under the
+   * boxed layout has rows with boxes on them, and that is the discriminator:
+   * re-opening one keeps the boxed form, its derived weights and its box
+   * reconciliation. Only bills with no boxes on any row — every new one, and
+   * any saved since — use the graded layout.
+   */
+  const factoryBoxedLegacy =
+    type === "FACTORY" &&
+    !!initial &&
+    (initial.lines?.length ?? 0) > 0 &&
+    (initial.lines ?? []).some((l) => Number(l.box) > 0);
+  const factoryGraded =
+    type === "FACTORY" && !factoryLumpSum && !factoryBoxedLegacy;
 
   // MARKET is in here now: a market bill is counted in boxes, and those box
   // counts are what tally against the boxes the trip dispatched. Without them
@@ -276,6 +303,9 @@ export function SaleForm({
             : "",
         ratePerKg: "",
         count: "",
+        // A grade is what the FACTORY paid at, so it comes off their bill,
+        // never off the delivery note.
+        countLabel: "",
       }))
     );
   };
@@ -299,16 +329,30 @@ export function SaleForm({
   // two added. Which way round the arithmetic runs follows the paper: a mill's
   // slip gives the weighings and leaves the net to be worked out, a factory's
   // gives the net and the return.
-  const factoryNetTyped = type === "FACTORY";
+  // Typed on the boxed layout, where the paper gives the net and the rows are
+  // spread across it. On a graded bill the rows ARE the net, so typing it again
+  // would be a second figure that can disagree with them.
+  const factoryNetTyped = type === "FACTORY" && !factoryGraded;
+
+  // Summed straight off what was typed into the rows, before avgKgPerBox is
+  // worked out — that reads netWeight, and on a graded bill netWeight reads
+  // this. Going through rowKg here instead would be a cycle.
+  const gradedKgTotal = factoryGraded
+    ? lines.reduce((sum, l) => sum + n(l.qtyKg), 0)
+    : 0;
   // Neither channel types it any more: a mill's is the gap between its two
   // weighings, a factory's is what it accepted plus what it sent back. There is
   // no third case — only those two channels weigh at all.
   const totalWeight = twoWeighings
     ? Math.max(0, n(weightFirst) - n(weightSecond))
-    : n(netWeightTyped) + n(waterLess);
-  const netWeight = factoryNetTyped
-    ? n(netWeightTyped)
-    : Math.max(0, totalWeight - n(waterLess));
+    : factoryGraded
+      ? gradedKgTotal + n(waterLess)
+      : n(netWeightTyped) + n(waterLess);
+  const netWeight = factoryGraded
+    ? gradedKgTotal
+    : factoryNetTyped
+      ? n(netWeightTyped)
+      : Math.max(0, totalWeight - n(waterLess));
 
   // What one box weighs, worked out from the lot. This is the way round the
   // mill actually works: they weigh the whole consignment on arrival and
@@ -327,6 +371,10 @@ export function SaleForm({
    * Local bills keep typing it: there is no weighing slip to derive from.
    */
   const rowKg = (l: SaleLineInit) => {
+    // A graded row is weighed as itself. There is no average to spread: the
+    // grades are what the factory weighed, and the average runs the other way
+    // — off these rows and the boxes the note recorded.
+    if (factoryGraded) return n(l.qtyKg);
     if (weighed && l.pack !== "LOOSE") return avgKgPerBox * n(l.box);
     // A market bill states what one box weighed, so the row's weight is that
     // times the boxes. A loose row has no boxes to multiply and carries the
@@ -390,7 +438,8 @@ export function SaleForm({
 
   // The Items rows have to add up to the boxes this bill unloaded. Off by any
   // amount and either the count or a row is wrong.
-  const boxesOff = n(totalBox) > 0 && boxTotal !== n(totalBox);
+  const boxesOff =
+    !factoryGraded && n(totalBox) > 0 && boxTotal !== n(totalBox);
 
   // Same helper the action stores with, so the figure approved on screen and
   // the figure written to the database are never two calculations.
@@ -758,6 +807,17 @@ export function SaleForm({
         </div>
       )}
 
+      {/* Which factory layout this bill was entered on, so the server never
+          has to guess it from whether boxes happen to be present. An old boxed
+          bill re-opened sends "0" and is read exactly as it always was. */}
+      {type === "FACTORY" && (
+        <input
+          type="hidden"
+          name="factoryGraded"
+          value={factoryGraded ? "1" : "0"}
+        />
+      )}
+
       {/* ---- Factory ---- */}
       {type === "FACTORY" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -978,9 +1038,20 @@ export function SaleForm({
             <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="items-head text-muted text-[12px] uppercase tracking-wide">
-                  <th className="text-left font-semibold px-2 py-2 w-28">Pack</th>
-                  <th className="text-right font-semibold px-2 py-2 w-16">Box</th>
+                  {/* A graded factory row has no pack and no boxes of its
+                      own: one lot of 200 boxes becomes several grades, and
+                      nobody can say which boxes were which. What it has instead
+                      is the size the factory paid at. */}
+                  {!factoryGraded && (
+                    <th className="text-left font-semibold px-2 py-2 w-28">Pack</th>
+                  )}
+                  {!factoryGraded && (
+                    <th className="text-right font-semibold px-2 py-2 w-16">Box</th>
+                  )}
                   <th className="text-left font-semibold px-3 py-2">Particular</th>
+                  {factoryGraded && (
+                    <th className="text-left font-semibold px-2 py-2 w-24">Count</th>
+                  )}
                   {/* Kgs on every channel. A market row's weight comes from
                       the delivery note, which recorded what one box weighed
                       when the truck was loaded — so it is not asked for twice.
@@ -1003,6 +1074,16 @@ export function SaleForm({
                   const rowTotal = rowAmount(l);
                   return (
                     <tr key={i} className="border-t border-line">
+                      {factoryGraded ? (
+                        // Still submitted, never shown. Rows travel as repeated
+                        // fields paired up BY POSITION, so a row that sends
+                        // nothing for pack or box shifts every row after it.
+                        <>
+                          <input type="hidden" name="pack" value="BOX" />
+                          <input type="hidden" name="box" value="" />
+                        </>
+                      ) : (
+                      <>
                       <td className="px-1 py-1">
                         <select
                           name="pack"
@@ -1046,9 +1127,25 @@ export function SaleForm({
                           placeholder={l.pack === "LOOSE" ? "—" : undefined}
                         />
                       </td>
+                      </>
+                      )}
                       <td className="px-2 py-1">
                         <input name="particular" value={l.particular} onChange={(e) => setLine(i, { particular: e.target.value })} className={inputCls} placeholder="e.g. Prawn" />
                       </td>
+                      {factoryGraded && (
+                        <td className="px-1 py-1">
+                          {/* Free text, and deliberately so: "8/10" is a range
+                              and its two halves mean nothing apart. It is what
+                              the factory's own paper says, copied across. */}
+                          <input
+                            name="countLabel"
+                            value={l.countLabel}
+                            onChange={(e) => setLine(i, { countLabel: e.target.value })}
+                            className={inputCls}
+                            placeholder="8/10"
+                          />
+                        </td>
+                      )}
                       {/* What one box weighed, carried from the delivery note
                           rather than asked for again: it was recorded when the
                           truck was loaded, and the market's bill does not
@@ -1062,7 +1159,19 @@ export function SaleForm({
                         />
                       )}
                       <td className="px-1 py-1">
-                        {weighed && l.pack !== "LOOSE" ? (
+                        {factoryGraded ? (
+                          // Typed. The grades ARE what the factory weighed;
+                          // there is no average to spread across them, and the
+                          // average runs the other way on this layout — off
+                          // these rows and the boxes the note recorded.
+                          <input
+                            name="qtyKg"
+                            inputMode="decimal"
+                            value={l.qtyKg}
+                            onChange={(e) => setLine(i, { qtyKg: e.target.value })}
+                            className={cell}
+                          />
+                        ) : weighed && l.pack !== "LOOSE" ? (
                             // Derived: the average off the weighing slip times
                             // this row's boxes. The mill weighed the lot and
                             // never weighed a box, so this is not typed.
@@ -1132,9 +1241,12 @@ export function SaleForm({
                     colSpan arithmetic — the columns moved once and the totals
                     silently landed under the wrong headings. */}
                 <tr className="border-t border-line-strong font-semibold">
-                  <td />
-                  <td className="px-2 py-2 num text-right">{boxTotal || ""}</td>
+                  {!factoryGraded && <td />}
+                  {!factoryGraded && (
+                    <td className="px-2 py-2 num text-right">{boxTotal || ""}</td>
+                  )}
                   <td className="px-3 py-2 text-right">Total</td>
+                  {factoryGraded && <td />}
                   <td className="px-2 py-2 num text-right">
                     {kgTotal ? fmtKg(kgTotal) : ""}
                   </td>

@@ -168,6 +168,7 @@ export default async function EditSalePage({
                     .toString()
                 : "",
             count: l.count != null ? String(l.count) : "",
+            countLabel: l.countLabel ?? "",
           })),
         }}
         submitLabel="Save Changes"
