@@ -202,11 +202,15 @@ export const EXPENSE_SPECS: Record<string, ExpenseCategorySpec> = {
   // several trips reads as one man's account.
   LINE_MAN: {
     label: "Line Man",
-    fields: [t("lineManName", "Line Man Name")],
+    fields: [
+      t("lineManName", "Line Man Name"),
+      n("paidByParty", "Paid by Party", false),
+    ],
     amountEntered: true,
     vendorFrom: "lineManName",
     vendorType: "LINE_MAN",
     tripLinked: true,
+    prepaidFrom: ["paidByParty"],
   },
 };
 
@@ -229,7 +233,8 @@ export const EXPENSE_SPECS: Record<string, ExpenseCategorySpec> = {
  */
 export function expenseHighlight(
   code: string,
-  details: Record<string, string> | null | undefined
+  details: Record<string, string> | null | undefined,
+  billNo?: string | null
 ): string | null {
   const d = details ?? {};
   const has = (k: string) => {
@@ -260,6 +265,13 @@ export function expenseHighlight(
       has("transporter"),
       has("advance") && `${has("advance")} advance`,
       has("paidByMarket") && `${has("paidByMarket")} by market`,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }
+  if (code === "LINE_MAN") {
+    const parts = [
+      has("lineManName"),
+      billNo && `Bill ${billNo}`,
     ].filter(Boolean);
     return parts.length > 0 ? parts.join(" · ") : null;
   }

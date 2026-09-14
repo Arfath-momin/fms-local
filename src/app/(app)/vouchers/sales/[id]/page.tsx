@@ -164,6 +164,9 @@ export default async function SalePage({
         {sale.careOfParty && <Field label="CareOf" value={sale.careOfParty.name} />}
         {sale.place && <Field label="Place" value={sale.place} />}
         {vehicleNo && <Field label="Vehicle No." value={vehicleNo} />}
+        {sale.type === "FACTORY" && sale.totalBox && (
+          <Field label="Total Box" value={String(sale.totalBox)} />
+        )}
         {/* No weights here. They are the weighing panel's, below, and were
             being printed in both places — a bill showing "Weight 770.7" at the
             top and "Total Weight 770.7" again underneath reads as two figures

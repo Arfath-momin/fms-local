@@ -249,12 +249,16 @@ export function ExpenseDrawer({
                 types={[
                   spec.vendorType === "TRANSPORTER"
                     ? "TRANSPORTER"
-                    : "EXPENSE_VENDOR",
+                    : spec.vendorType === "LINE_MAN"
+                      ? "LINE_MAN"
+                      : "EXPENSE_VENDOR",
                 ]}
                 defaultType={
                   spec.vendorType === "TRANSPORTER"
                     ? "TRANSPORTER"
-                    : "EXPENSE_VENDOR"
+                    : spec.vendorType === "LINE_MAN"
+                      ? "LINE_MAN"
+                      : "EXPENSE_VENDOR"
                 }
                 expenseCategoryId={row.categoryId || undefined}
                 value={row.details[f.name] ?? ""}

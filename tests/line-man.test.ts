@@ -4,6 +4,7 @@ import {
   DIRECT_CODES,
   EXPENSE_SPECS,
   expensePrepaid,
+  expenseHighlight,
   expenseVendorName,
 } from "@/lib/expense";
 import { EXPENSE_LEDGER_TYPES, PARTY_TYPE_LABELS } from "@/lib/party";
@@ -25,9 +26,12 @@ describe("the line man head", () => {
     expect(DIRECT_CODES).toContain("LINE_MAN");
   });
 
-  it("takes a name and a payment, and nothing else", () => {
+  it("takes a name and an optional party-paid amount", () => {
     const spec = EXPENSE_SPECS.LINE_MAN;
-    expect(spec.fields.map((f) => f.name)).toEqual(["lineManName"]);
+    expect(spec.fields.map((f) => f.name)).toEqual([
+      "lineManName",
+      "paidByParty",
+    ]);
     // The amount is typed: there is no quantity and rate to multiply, he is
     // paid what he is paid.
     expect(spec.amountEntered).toBe(true);
@@ -59,10 +63,23 @@ describe("the line man head", () => {
     ).toBe("Suresh");
   });
 
-  it("has nothing prepaid against it", () => {
-    // Unlike the rent, which is settled by an advance and by whatever a market
-    // hands the driver, a line man is simply paid.
-    expect(EXPENSE_SPECS.LINE_MAN.prepaidFrom).toBeUndefined();
+  it("treats a party-paid amount as a settlement", () => {
+    expect(EXPENSE_SPECS.LINE_MAN.prepaidFrom).toEqual(["paidByParty"]);
     expect(expensePrepaid("LINE_MAN", { lineManName: "Suresh" })).toBe(0);
+    expect(
+      expensePrepaid("LINE_MAN", {
+        lineManName: "Suresh",
+        paidByParty: "750",
+      })
+    ).toBe(750);
+  });
+
+  it("shows the originating bill on the expense list", () => {
+    expect(
+      expenseHighlight("LINE_MAN", {
+        lineManName: "Suresh",
+        paidByParty: "750",
+      }, "610")
+    ).toBe("Suresh · Bill 610");
   });
 });

@@ -14,7 +14,11 @@ import {
   type PostLedgerArgs,
 } from "@/lib/ledger";
 import { findOrCreateParty } from "@/lib/party-db";
-import { expenseEntryAmount, expenseEntryVendor } from "@/lib/expense-entry";
+import {
+  expenseEntryAmount,
+  expenseEntryVendor,
+} from "@/lib/expense-entry";
+import { expensePrepaid, EXPENSE_SPECS } from "@/lib/expense";
 import { nextDocumentNo, saleSeriesPrefix } from "@/lib/document-series";
 import { refreshTripStatus } from "@/lib/trip";
 import {
@@ -140,6 +144,7 @@ async function writeSaleExpenses(
     date: Date;
     rows: ParsedExpense[];
     userId: string;
+    settlementPartyId: string;
   }
 ) {
   const existing = await tx.expense.findMany({
@@ -185,11 +190,12 @@ async function writeSaleExpenses(
           { code: category.code, name: category.name, allowsLines: false },
           details
         );
+    const vendorType = EXPENSE_SPECS[category.code]?.vendorType ?? "EXPENSE_VENDOR";
     const partyId = vendor
       ? await findOrCreateParty(
           tx,
           vendor,
-          isRent ? "TRANSPORTER" : "EXPENSE_VENDOR"
+          vendorType
         )
       : null;
 
@@ -215,7 +221,17 @@ async function writeSaleExpenses(
     // Nothing is PAID here — the vendor is credited what he is owed, and
     // settling is a Payment voucher against him, as everywhere else.
     if (partyId) {
-      await postLedgerEntries(tx, [
+      const prepaid = new Prisma.Decimal(
+        category.code === "LINE_MAN"
+          ? expensePrepaid(category.code, details)
+          : 0
+      );
+      if (prepaid.greaterThan(row.amount))
+        throw new Error(
+          `Paid by party cannot exceed the ${category.name} total.`
+        );
+
+      const ledgerEntries: PostLedgerArgs[] = [
         {
           companyId: e.companyId,
           centreId: e.centreId,
@@ -226,7 +242,36 @@ async function writeSaleExpenses(
           amount: row.amount,
           date: e.date,
         },
-      ]);
+        ...(prepaid.greaterThan(0)
+          ? [
+              {
+                companyId: e.companyId,
+                centreId: e.centreId,
+                partyId,
+                type: "DEBIT" as const,
+                sourceType: "EXPENSE" as const,
+                sourceId: expense.id,
+                amount: prepaid,
+                date: e.date,
+              },
+              ...(category.code === "LINE_MAN"
+                ? [
+                    {
+                      companyId: e.companyId,
+                      centreId: e.centreId,
+                      partyId: e.settlementPartyId,
+                      type: "CREDIT" as const,
+                      sourceType: "RECEIPT" as const,
+                      sourceId: expense.id,
+                      amount: prepaid,
+                      date: e.date,
+                    },
+                  ]
+                : []),
+            ]
+          : []),
+      ];
+      await postLedgerEntries(tx, ledgerEntries);
     }
   }
 }
@@ -557,6 +602,10 @@ async function parseExpenses(
     );
     if ("error" in computed)
       return { error: `${category.name}: ${computed.error}` };
+
+    const prepaid = new Prisma.Decimal(expensePrepaid(category.code, details));
+    if (prepaid.greaterThan(new Prisma.Decimal(computed.amount)))
+      return { error: `${category.name}: paid by party cannot exceed the total.` };
 
     expenses.push({
       categoryId: category.id,
@@ -1421,6 +1470,7 @@ export async function createSale(
         date: d.date,
         rows: d.expenses,
         userId: session.userId,
+        settlementPartyId: careOfId ?? buyerId,
       });
 
       // The trip moves DISPATCHED → PART_BILLED → CLOSED as its bills land.
@@ -1601,6 +1651,7 @@ export async function updateSale(
         date: d.date,
         rows: d.expenses,
         userId: session.userId,
+        settlementPartyId: careOfId ?? buyerId,
       });
 
       // Both trips, because an edit can move a bill from one to another: the

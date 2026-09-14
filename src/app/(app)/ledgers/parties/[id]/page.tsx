@@ -66,7 +66,7 @@ export default async function PartyStatementPage({
   // The statement is windowed, but the headline balance must not be: it is what
   // the party owes *now*, not at the end of whichever month is on screen. So it
   // comes from the newest entry overall rather than from the last row rendered.
-  const [entries, total, latest, totals] = await Promise.all([
+  const [entries, total, latest, totals, windowTotals] = await Promise.all([
     prisma.ledgerEntry.findMany({
       where,
       orderBy: [{ date: "asc" }, { seq: "asc" }],
@@ -86,6 +86,11 @@ export default async function PartyStatementPage({
     prisma.ledgerEntry.groupBy({
       by: ["type"],
       where: scope,
+      _sum: { amount: true },
+    }),
+    prisma.ledgerEntry.groupBy({
+      by: ["type"],
+      where,
       _sum: { amount: true },
     }),
   ]);
@@ -188,6 +193,11 @@ export default async function PartyStatementPage({
     totals.find((g) => g.type === t)?._sum.amount ?? ZERO;
   const totalDebit = sumOf("DEBIT");
   const totalCredit = sumOf("CREDIT");
+  const windowSumOf = (t: "DEBIT" | "CREDIT") =>
+    windowTotals.find((g) => g.type === t)?._sum.amount ?? ZERO;
+  const windowDebit = windowSumOf("DEBIT");
+  const windowCredit = windowSumOf("CREDIT");
+  const windowBalance = windowDebit.sub(windowCredit);
 
   return (
     <div className="max-w-3xl">
@@ -275,6 +285,24 @@ export default async function PartyStatementPage({
           label="Payable"
           value={balance.lessThan(0) ? balance.negated() : ZERO}
           cls={balance.lessThan(0) ? "text-credit" : "text-muted"}
+        />
+      </div>
+
+      <div className="mb-1 text-[11px] uppercase tracking-wide text-muted font-semibold">
+        Selected period · {listWindow.from} to {listWindow.to}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <Summary label="Period billed" value={windowDebit} cls="text-debit" />
+        <Summary label="Period settled" value={windowCredit} cls="text-credit" />
+        <Summary
+          label="Period receivable"
+          value={windowBalance.greaterThan(0) ? windowBalance : ZERO}
+          cls={windowBalance.greaterThan(0) ? "text-debit" : "text-muted"}
+        />
+        <Summary
+          label="Period payable"
+          value={windowBalance.lessThan(0) ? windowBalance.negated() : ZERO}
+          cls={windowBalance.lessThan(0) ? "text-credit" : "text-muted"}
         />
       </div>
 

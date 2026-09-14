@@ -46,7 +46,10 @@ export default async function ExpensesPage({
       skip: listWindow.skip,
       take: listWindow.take,
       // One query with the category joined, never one lookup per row.
-      include: { category: { select: { name: true, code: true } } },
+      include: {
+        category: { select: { name: true, code: true } },
+        sale: { select: { billNo: true } },
+      },
     }),
     prisma.expense.count({ where }),
   ]);
@@ -113,7 +116,8 @@ export default async function ExpensesPage({
                     <td className="text-muted">
                       {expenseHighlight(
                         e.category.code,
-                        e.details as Record<string, string> | null
+                        e.details as Record<string, string> | null,
+                        e.sale?.billNo
                       ) ??
                         e.notes ??
                         "—"}

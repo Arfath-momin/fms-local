@@ -48,7 +48,9 @@ export default async function SalesPage({
         party: { select: { name: true } },
         careOfParty: { select: { name: true } },
         // The boxes this bill took. It is what a merchant reconciles a trip by,
-        // and the list is where they scan for it.
+        // and the list is where they scan for it. Graded factory bills read
+        // their bill-level totalBox scalar because their rows are grades, not
+        // box counts.
         lines: { select: { box: true, pack: true } },
         // The trip's truck. `vehicleNo` on the sale is only filled when a bill
         // was typed WITHOUT a trip — choosing a trip means the vehicle is the
@@ -133,11 +135,15 @@ export default async function SalesPage({
                     </td>
                     <td className="num-col num">
                       {/* LOOSE never went into a crate, so it counts none —
-                          the same rule the trip tally and the bill use. */}
-                      {s.lines.reduce(
-                        (a, l) => a + (l.pack === "LOOSE" ? 0 : (l.box ?? 0)),
-                        0
-                      ) || <span className="text-muted">—</span>}
+                          the same rule the trip tally and the bill use. New
+                          graded factory bills use their bill-level totalBox;
+                          older boxed bills continue using their row totals. */}
+                      {s.totalBox ??
+                        (s.lines.reduce(
+                          (a, l) =>
+                            a + (l.pack === "LOOSE" ? 0 : (l.box ?? 0)),
+                          0
+                        ) || <span className="text-muted">—</span>)}
                     </td>
                     <td className="num">
                       {s.deliveryNote?.vehicle.number ??
