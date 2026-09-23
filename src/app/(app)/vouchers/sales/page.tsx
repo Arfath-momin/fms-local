@@ -41,7 +41,7 @@ export default async function SalesPage({
     select: { id: true, name: true },
   });
 
-  const [sales, total] = await Promise.all([
+  const [sales, total, filteredAmount, filteredSales] = await Promise.all([
     prisma.sale.findMany({
       where,
       include: {
@@ -64,7 +64,26 @@ export default async function SalesPage({
       take: listWindow.take,
     }),
     prisma.sale.count({ where }),
+    prisma.sale.aggregate({ where, _sum: { amount: true } }),
+    prisma.sale.findMany({
+      where,
+      select: {
+        totalBox: true,
+        lines: { select: { box: true, pack: true } },
+      },
+    }),
   ]);
+  const filteredBoxes = filteredSales.reduce(
+    (sum, sale) =>
+      sum +
+      (sale.totalBox ??
+        sale.lines.reduce(
+          (lineSum, line) =>
+            lineSum + (line.pack === "LOOSE" ? 0 : (line.box ?? 0)),
+          0
+        )),
+    0
+  );
 
   return (
     <div>
@@ -162,6 +181,15 @@ export default async function SalesPage({
                 );
               })}
             </tbody>
+            <tfoot>
+              <tr className="border-t border-line-strong font-semibold">
+                <td colSpan={4}>Total shown ({total} sale{total === 1 ? "" : "s"})</td>
+                <td className="num-col num">{filteredBoxes || "—"}</td>
+                <td />
+                <td className="num-col num text-credit">{fmtMoney(filteredAmount._sum.amount ?? 0)}</td>
+                <td />
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}

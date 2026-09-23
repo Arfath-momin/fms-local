@@ -167,6 +167,15 @@ export function saleRevenue(sale: {
   return sale.amount;
 }
 
+/** Amount a buyer paid directly to the line man on this sale. */
+export function lineManPaidByParty(
+  details: Record<string, unknown> | null | undefined
+): number {
+  const value = details?.paidByParty;
+  const amount = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
 /**
  * The two profit tiers (spec §2).
  *

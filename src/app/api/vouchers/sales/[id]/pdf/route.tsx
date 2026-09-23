@@ -1,3 +1,4 @@
+import { lineManPaidByParty } from "@/lib/sale";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
@@ -47,6 +48,10 @@ export async function GET(
       careOfParty: { select: { name: true } },
       lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       deliveryNote: { select: { billNo: true, vehicle: { select: { number: true } } } },
+          expenses: {
+            where: { category: { code: { in: ["RENT", "LINE_MAN"] } } },
+            select: { details: true, category: { select: { code: true } } },
+          },
     },
   });
   if (!sale) return new Response("Not found.", { status: 404 });
@@ -58,6 +63,20 @@ export async function GET(
     select: { runningBalance: true },
   });
   const outstanding = latest?.runningBalance ?? ZERO;
+  const lineManPaid = lineManPaidByParty(
+    sale.expenses.find((e) => e.category.code === "LINE_MAN")?.details as
+      | Record<string, unknown>
+      | null
+  );
+  const receiptRows = [
+    gt0(sale.rentDeducted)
+      ? { label: "Less receipt — paid the driver", amount: sale.rentDeducted! }
+      : null,
+    lineManPaid > 0
+      ? { label: "Less receipt — paid the line man", amount: new Prisma.Decimal(lineManPaid) }
+      : null,
+  ].filter((r): r is { label: string; amount: Prisma.Decimal } => r !== null);
+  const receiptTotal = receiptRows.reduce((sum, r) => sum.add(r.amount), ZERO);
 
   const isMarket = sale.type === "MARKET";
   const anyBox = sale.lines.some((l) => l.pack !== "LOOSE" && (l.box ?? 0) > 0);
@@ -157,14 +176,16 @@ export async function GET(
       rule: true,
       strong: true,
     });
-    if (gt0(sale.rentDeducted)) {
+    for (const receipt of receiptRows) {
       working.push({
-        label: "Less receipt — paid the driver",
-        value: `−${fmtMoney(sale.rentDeducted!)}`,
+        label: receipt.label,
+        value: `−${fmtMoney(receipt.amount)}`,
       });
+    }
+    if (receiptRows.length > 0) {
       working.push({
         label: "Still owed on this bill",
-        value: fmtMoney(sale.amount.sub(sale.rentDeducted!)),
+        value: fmtMoney(sale.amount.sub(receiptTotal)),
         rule: true,
         strong: true,
       });
@@ -175,6 +196,20 @@ export async function GET(
       value: fmtMoney(sale.amount),
       strong: true,
     });
+    for (const receipt of receiptRows) {
+      working.push({
+        label: receipt.label,
+        value: `−${fmtMoney(receipt.amount)}`,
+      });
+    }
+    if (receiptRows.length > 0) {
+      working.push({
+        label: "Still owed on this bill",
+        value: fmtMoney(sale.amount.sub(receiptTotal)),
+        rule: true,
+        strong: true,
+      });
+    }
   }
 
   const details: { label: string; value: string }[] = [];

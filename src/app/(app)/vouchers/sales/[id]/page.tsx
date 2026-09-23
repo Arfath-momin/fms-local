@@ -4,7 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { getActiveScope } from "@/lib/centre";
 import { canEdit, canEnter, requireSession } from "@/lib/session";
-import { SALE_TYPE_LABELS } from "@/lib/sale";
+import { lineManPaidByParty, SALE_TYPE_LABELS } from "@/lib/sale";
 import { PACK_LABELS } from "@/lib/pack";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import { getAttachments } from "@/lib/attachments";
@@ -108,6 +108,20 @@ export default async function SalePage({
   // the sale itself is only for bills entered while that field existed.
   const rentDetails = (sale.expenses.find((e) => e.category.code === "RENT")
     ?.details ?? {}) as Record<string, string>;
+  const lineManPaid = lineManPaidByParty(
+    sale.expenses.find((e) => e.category.code === "LINE_MAN")?.details as
+      | Record<string, unknown>
+      | null
+  );
+  const receipts = [
+    sale.rentDeducted && Number(sale.rentDeducted) > 0
+      ? { label: "Less receipt — paid the driver", amount: Number(sale.rentDeducted) }
+      : null,
+    lineManPaid > 0
+      ? { label: "Less receipt — paid the line man", amount: lineManPaid }
+      : null,
+  ].filter((r): r is { label: string; amount: number } => r !== null);
+  const receiptTotal = receipts.reduce((sum, r) => sum + r.amount, 0);
   const vehicleNo =
     sale.deliveryNote?.vehicle.number ?? rentDetails.vehicleNo ?? sale.vehicleNo;
 
@@ -217,22 +231,39 @@ export default async function SalePage({
             <span>Net bill</span>
             <span className="num">{fmtMoney(sale.amount)}</span>
           </div>
-          {sale.rentDeducted && Number(sale.rentDeducted) > 0 && (
+          {receipts.length > 0 && (
             <>
-              <div className="flex justify-between border-t border-line mt-1 pt-1">
-                <span className="text-muted">Less receipt — paid the driver</span>
-                <span className="num">{fmtMoney(sale.rentDeducted)}</span>
-              </div>
+              {receipts.map((receipt) => (
+                <div key={receipt.label} className="flex justify-between border-t border-line mt-1 pt-1">
+                  <span className="text-muted">{receipt.label}</span>
+                  <span className="num">{fmtMoney(receipt.amount)}</span>
+                </div>
+              ))}
               <div className="flex justify-between font-semibold">
                 <span>Still owed on this bill</span>
-                <span className="num">
-                  {fmtMoney(
-                    Number(sale.amount) - Number(sale.rentDeducted)
-                  )}
-                </span>
+                <span className="num">{fmtMoney(Number(sale.amount) - receiptTotal)}</span>
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {sale.type !== "MARKET" && receipts.length > 0 && (
+        <div className="border border-line-strong bg-surface px-4 py-3 text-[13px] mb-4">
+          <div className="flex justify-between font-semibold">
+            <span>Bill amount</span>
+            <span className="num">{fmtMoney(sale.amount)}</span>
+          </div>
+          {receipts.map((receipt) => (
+            <div key={receipt.label} className="flex justify-between border-t border-line mt-1 pt-1">
+              <span className="text-muted">{receipt.label}</span>
+              <span className="num">{fmtMoney(receipt.amount)}</span>
+            </div>
+          ))}
+          <div className="flex justify-between font-semibold">
+            <span>Still owed on this bill</span>
+            <span className="num">{fmtMoney(Number(sale.amount) - receiptTotal)}</span>
+          </div>
         </div>
       )}
 

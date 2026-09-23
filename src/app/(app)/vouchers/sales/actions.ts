@@ -1343,6 +1343,25 @@ async function resolveSaleBillNo(
   return d.billNo || (await nextDocumentNo(tx, companyId, prefix));
 }
 
+async function ensureSaleBillNoAvailable(
+  tx: Prisma.TransactionClient,
+  scope: { companyId: string; centreId: string; partyId: string },
+  billNo: string,
+  excludeId?: string
+) {
+  const duplicate = await tx.sale.findFirst({
+    where: {
+      companyId: scope.companyId,
+      centreId: scope.centreId,
+      partyId: scope.partyId,
+      billNo,
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
+    select: { id: true },
+  });
+  if (duplicate) throw new Error("This party already has a sale with that bill number.");
+}
+
 function saleData(d: Parsed, buyerId: string, careOfId: string | null) {
   return {
     type: d.type,
@@ -1437,6 +1456,12 @@ export async function createSale(
       const careOfId = d.careOfName
         ? await findOrCreateParty(tx, d.careOfName, "CARE_OF")
         : null;
+      const billNo = await resolveSaleBillNo(tx, company.id, d);
+      await ensureSaleBillNoAvailable(
+        tx,
+        { companyId: company.id, centreId: centre.id, partyId: buyerId },
+        billNo
+      );
       const sale = await tx.sale.create({
         data: {
           companyId: company.id,
@@ -1444,7 +1469,7 @@ export async function createSale(
           ...saleData(d, buyerId, careOfId),
           // Issued inside the transaction for a LOCAL sale, so a failed save
           // rolls the number back rather than leaving a gap in the series.
-          billNo: await resolveSaleBillNo(tx, company.id, d),
+          billNo,
           createdById: session.userId,
         },
       });
@@ -1615,16 +1640,23 @@ export async function updateSale(
       const careOfId = d.careOfName
         ? await findOrCreateParty(tx, d.careOfName, "CARE_OF")
         : null;
+      const billNo = await resolveSaleBillNo(tx, company.id, {
+        type: d.type,
+        billNo: d.billNo || existing.billNo,
+      });
+      await ensureSaleBillNoAvailable(
+        tx,
+        { companyId: company.id, centreId: centre.id, partyId: buyerId },
+        billNo,
+        saleId
+      );
       await tx.sale.update({
         where: { id: saleId },
         data: {
           ...saleData(d, buyerId, careOfId),
           // An issued number is fixed. A market, factory or mill bill keeps
           // whatever the counterparty's paper says, which stays editable.
-          billNo: await resolveSaleBillNo(tx, company.id, {
-            type: d.type,
-            billNo: d.billNo || existing.billNo,
-          }),
+          billNo,
           updatedById: session.userId,
           updatedAt: new Date(),
         },

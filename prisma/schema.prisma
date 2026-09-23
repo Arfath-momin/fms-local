@@ -335,6 +335,7 @@ model Purchase {
 
   @@index([companyId, centreId, date])
   @@map("purchases")
+  @@unique([companyId, centreId, partyId, billNo])
 }
 
 // One row of a purchase bill.
@@ -846,6 +847,7 @@ model Sale {
   @@index([companyId, centreId, type])
   @@index([deliveryNoteId])
   @@map("sales")
+  @@unique([companyId, centreId, partyId, billNo])
 }
 
 // Line items for Fish Mill and Local sales.

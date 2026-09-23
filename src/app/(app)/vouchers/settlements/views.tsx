@@ -133,7 +133,9 @@ export async function SettlementListPage({
                 </tr>
               ))}
               <tr className="border-t border-line-strong font-semibold">
-                <td colSpan={4}>Total shown</td>
+                <td colSpan={4}>
+                  Total shown ({total} {SETTLEMENT_KIND_PLURALS[kind].toLowerCase()})
+                </td>
                 <td
                   className={`num-col num ${isPayment ? "text-debit" : "text-credit"}`}
                 >

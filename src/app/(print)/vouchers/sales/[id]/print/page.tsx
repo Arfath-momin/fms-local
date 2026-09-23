@@ -5,6 +5,7 @@ import { getActiveScope } from "@/lib/centre";
 import { requireSession } from "@/lib/session";
 import { SALE_TYPE_LABELS, saleLineTotalKg } from "@/lib/sale";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
+import { lineManPaidByParty } from "@/lib/sale";
 import { rupeesInWords } from "@/lib/amount-words";
 import { docTitle, titleDate } from "@/lib/doc-title";
 import { PrintHeader } from "../../../../letterhead";
@@ -84,13 +85,28 @@ export default async function SaleBillPage({
       // rent recorded against the bill, which names the same truck.
       deliveryNote: { select: { vehicle: { select: { number: true } } } },
       expenses: {
-        where: { category: { code: "RENT" } },
-        select: { details: true },
-        take: 1,
+        where: { category: { code: { in: ["RENT", "LINE_MAN"] } } },
+        select: { details: true, category: { select: { code: true } } },
       },
     },
   });
   if (!sale) notFound();
+
+  const rentDetails = (sale.expenses.find((e) => e.category.code === "RENT")?.details ?? {}) as Record<string, string>;
+  const lineManPaid = lineManPaidByParty(
+    sale.expenses.find((e) => e.category.code === "LINE_MAN")?.details as
+      | Record<string, unknown>
+      | null
+  );
+  const receiptRows = [
+    sale.rentDeducted && Number(sale.rentDeducted) > 0
+      ? { label: "Less receipt — paid the driver", amount: Number(sale.rentDeducted) }
+      : null,
+    lineManPaid > 0
+      ? { label: "Less receipt — paid the line man", amount: lineManPaid }
+      : null,
+  ].filter((r): r is { label: string; amount: number } => r !== null);
+  const receiptTotal = receiptRows.reduce((sum, r) => sum + r.amount, 0);
 
   // What the party owes across every bill, not just this one — collection is
   // tracked against the party, so this is the figure they will recognise.
@@ -108,7 +124,6 @@ export default async function SaleBillPage({
 
   // Trip first, then the rent row, then whatever an older bill typed for
   // itself — the column is still there for bills entered while it existed.
-  const rentDetails = (sale.expenses[0]?.details ?? {}) as Record<string, string>;
   const vehicleNo =
     sale.deliveryNote?.vehicle.number ?? rentDetails.vehicleNo ?? sale.vehicleNo;
 
@@ -418,22 +433,47 @@ export default async function SaleBillPage({
                 <td className="font-semibold">Net bill</td>
                 <td className="r num font-semibold">{fmtMoney(sale.amount)}</td>
               </tr>
-              {sale.rentDeducted && Number(sale.rentDeducted) > 0 && (
+              {receiptRows.map((receipt) => (
+                <tr key={receipt.label}>
+                  <td>{receipt.label}</td>
+                  <td className="r num">−{fmtMoney(receipt.amount)}</td>
+                </tr>
+              ))}
+              {receiptRows.length > 0 && (
                 <>
-                  <tr>
-                    <td>Less receipt — paid the driver</td>
-                    <td className="r num">−{fmtMoney(sale.rentDeducted)}</td>
-                  </tr>
                   <tr>
                     <td className="font-semibold">Still owed on this bill</td>
                     <td className="r num font-semibold">
-                      {fmtMoney(
-                        Number(sale.amount) - Number(sale.rentDeducted)
-                      )}
+                      {fmtMoney(Number(sale.amount) - receiptTotal)}
                     </td>
                   </tr>
                 </>
               )}
+            </tbody>
+          </table>
+        )}
+        {!sale.totalBill && receiptRows.length > 0 && (
+          <table
+            className="bill-table mt-3"
+            style={{ maxWidth: "24rem", marginLeft: "auto" }}
+          >
+            <tbody>
+              <tr>
+                <td>Bill amount</td>
+                <td className="r num">{fmtMoney(sale.amount)}</td>
+              </tr>
+              {receiptRows.map((receipt) => (
+                <tr key={receipt.label}>
+                  <td>{receipt.label}</td>
+                  <td className="r num">−{fmtMoney(receipt.amount)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td className="font-semibold">Still owed on this bill</td>
+                <td className="r num font-semibold">
+                  {fmtMoney(Number(sale.amount) - receiptTotal)}
+                </td>
+              </tr>
             </tbody>
           </table>
         )}

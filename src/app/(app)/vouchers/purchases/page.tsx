@@ -50,7 +50,7 @@ export default async function PurchasesPage({
     select: { id: true, name: true },
   });
 
-  const [purchases, total] = await Promise.all([
+  const [purchases, total, filteredAmount, filteredLines] = await Promise.all([
     prisma.purchase.findMany({
       where,
       include: {
@@ -71,7 +71,16 @@ export default async function PurchasesPage({
       take: listWindow.take,
     }),
     prisma.purchase.count({ where }),
+    prisma.purchase.aggregate({ where, _sum: { amount: true } }),
+    prisma.purchaseLine.findMany({
+      where: { purchase: where },
+      select: { qtyKg: true },
+    }),
   ]);
+  const filteredKg = filteredLines.reduce(
+    (sum, line) => sum.add(line.qtyKg),
+    new Prisma.Decimal(0)
+  );
 
   return (
     <div>
@@ -173,6 +182,14 @@ export default async function PurchasesPage({
                 );
               })}
             </tbody>
+            <tfoot>
+              <tr className="border-t border-line-strong font-semibold">
+                <td colSpan={4}>Total shown ({total} purchase{total === 1 ? "" : "s"})</td>
+                <td className="num-col num">{filteredKg.greaterThan(0) ? fmtKg(filteredKg) : "—"}</td>
+                <td className="num-col num text-debit">{fmtMoney(filteredAmount._sum.amount ?? 0)}</td>
+                <td />
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}

@@ -219,6 +219,26 @@ async function resolvePurchaseBillNo(
   return d.billNo ?? (await nextDocumentNo(tx, companyId, prefix));
 }
 
+async function ensurePurchaseBillNoAvailable(
+  tx: Prisma.TransactionClient,
+  scope: { companyId: string; centreId: string; partyId: string },
+  billNo: string | null,
+  excludeId?: string
+) {
+  if (!billNo) return;
+  const duplicate = await tx.purchase.findFirst({
+    where: {
+      companyId: scope.companyId,
+      centreId: scope.centreId,
+      partyId: scope.partyId,
+      billNo,
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
+    select: { id: true },
+  });
+  if (duplicate) throw new Error("This party already has a purchase with that bill number.");
+}
+
 /** The line rows to write, with each boat already resolved to an id. */
 async function lineData(tx: Prisma.TransactionClient, lines: ParsedLine[]) {
   const boatIds = await resolveLineBoats(tx, lines);
@@ -297,6 +317,12 @@ export async function createPurchase(
         "PURCHASE_GROUP",
         d.type
       );
+      const billNo = await resolvePurchaseBillNo(tx, company.id, d);
+      await ensurePurchaseBillNoAvailable(
+        tx,
+        { companyId: company.id, centreId: centre.id, partyId },
+        billNo
+      );
       const purchase = await tx.purchase.create({
         data: {
           companyId: company.id,
@@ -305,7 +331,7 @@ export async function createPurchase(
           // Private and Local purchases have no supplier bill to copy a number
           // from, so BFM issues one. Society and KFDC bills arrive with the
           // society's own number and keep whatever was typed.
-          billNo: await resolvePurchaseBillNo(tx, company.id, d),
+          billNo,
           notes: d.notes,
           type: d.type,
           amount: d.amount,
@@ -426,6 +452,16 @@ export async function updatePurchase(
         "PURCHASE_GROUP",
         d.type
       );
+      const billNo = await resolvePurchaseBillNo(tx, company.id, {
+        type: d.type,
+        billNo: d.billNo ?? existing.billNo,
+      });
+      await ensurePurchaseBillNoAvailable(
+        tx,
+        { companyId: company.id, centreId: centre.id, partyId },
+        billNo,
+        purchaseId
+      );
       const purchase = await tx.purchase.update({
         where: { id: purchaseId },
         data: {
@@ -433,10 +469,7 @@ export async function updatePurchase(
           // An issued number is fixed — it identifies this voucher on paper
           // that may already have gone out. Only a Society or KFDC bill, whose
           // number is the society's, can be corrected here.
-          billNo: await resolvePurchaseBillNo(tx, company.id, {
-            type: d.type,
-            billNo: d.billNo ?? existing.billNo,
-          }),
+          billNo,
           notes: d.notes,
           type: d.type,
           amount: d.amount,

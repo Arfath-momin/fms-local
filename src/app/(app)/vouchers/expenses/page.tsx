@@ -39,7 +39,7 @@ export default async function ExpensesPage({
     select: { id: true, name: true },
   });
 
-  const [expenses, total] = await Promise.all([
+  const [expenses, total, filteredAmount] = await Promise.all([
     prisma.expense.findMany({
       where,
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
@@ -52,6 +52,7 @@ export default async function ExpensesPage({
       },
     }),
     prisma.expense.count({ where }),
+    prisma.expense.aggregate({ where, _sum: { amount: true } }),
   ]);
 
   return (
@@ -134,6 +135,13 @@ export default async function ExpensesPage({
                 );
               })}
             </tbody>
+            <tfoot>
+              <tr className="border-t border-line-strong font-semibold">
+                <td colSpan={3}>Total shown ({total} expense{total === 1 ? "" : "s"})</td>
+                <td className="num-col num text-debit">{fmtMoney(filteredAmount._sum.amount ?? 0)}</td>
+                <td />
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
