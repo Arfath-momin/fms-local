@@ -5,9 +5,9 @@ import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate, fmtMoney } from "@/lib/format";
-import { dateWhere, parseListWindow,
+import { dateWhere, parseBillNo, parseListWindow,
   parsePartyFilter, type SearchParams } from "@/lib/paging";
-import { DateWindow, PartyFilter, Pager } from "../../list-controls";
+import { DateWindow, Pager, VoucherFilter } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
 export default async function DeliveriesPage({
@@ -22,10 +22,12 @@ export default async function DeliveriesPage({
 
   const listWindow = parseListWindow(await searchParams);
   const partyId = parsePartyFilter(await searchParams);
+  const billNo = parseBillNo(await searchParams);
   const where = {
     companyId: company.id,
     centreId: centre.id,
     ...dateWhere(listWindow),
+    ...(billNo ? { billNo: { contains: billNo, mode: "insensitive" as const } } : {}),
     // A note has no party of its own — it is a truck and a load. What it has
     // is the BILLS raised off it, so "show me UMP Ullal's trips" means the
     // trips whose bills went to them.
@@ -82,12 +84,13 @@ export default async function DeliveriesPage({
         )}
       </div>
 
-      <DateWindow keep={{ party: partyId }} basePath="/vouchers/deliveries" window={listWindow} />
-      <PartyFilter
+      <DateWindow keep={{ party: partyId, billNo }} basePath="/vouchers/deliveries" window={listWindow} />
+      <VoucherFilter
         basePath="/vouchers/deliveries"
         window={listWindow}
         parties={parties}
         selected={partyId}
+        billNo={billNo}
         // "Delivered to" was a lie by one word: a note names a recipient as
         // free text — a place, often — while this matches the BILLS raised
         // off the note. DN-00016 went to Suraksha and was billed to Shree

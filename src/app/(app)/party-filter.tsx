@@ -95,3 +95,86 @@ export function PartyFilter({
     </form>
   );
 }
+
+export function VoucherFilter({
+  basePath,
+  window: w,
+  parties,
+  selected,
+  billNo,
+  label = "Party",
+}: {
+  basePath: string;
+  window: ListWindow;
+  parties: { id: string; name: string }[];
+  selected: string;
+  billNo: string;
+  label?: string;
+}) {
+  const router = useRouter();
+  const activeCount = (selected ? 1 : 0) + (billNo ? 1 : 0);
+
+  return (
+    <details className="mb-4 text-[13px]" open={activeCount > 0}>
+      <summary className="inline-flex cursor-pointer list-none items-center gap-2 border border-line-strong bg-surface px-3 py-1.5 font-medium hover:border-accent">
+        <span aria-hidden="true">☷</span>
+        Filter
+        {activeCount > 0 && (
+          <span className="text-accent">{activeCount}</span>
+        )}
+      </summary>
+      <form
+        method="get"
+        action={basePath}
+        className="mt-2 flex flex-wrap items-end gap-3 border border-line bg-surface p-3"
+      >
+        <input type="hidden" name="from" value={w.from} />
+        <input type="hidden" name="to" value={w.to} />
+        <input type="hidden" name="party" value={selected} />
+        {parties.length > 0 && (
+          <label className="flex flex-col gap-1">
+            <span className="text-muted text-[12px]">{label}</span>
+            <Combobox
+              name="partyPicker"
+              options={parties.map((p) => ({ id: p.id, label: p.name }))}
+              value={selected}
+              onChange={(id) => {
+                const qs = new URLSearchParams({ from: w.from, to: w.to });
+                if (id) qs.set("party", id);
+                if (billNo) qs.set("billNo", billNo);
+                router.push(`${basePath}?${qs.toString()}`);
+              }}
+              placeholder="Type a name…"
+              emptyLabel="Everyone"
+              compact
+              className="w-64"
+            />
+          </label>
+        )}
+        <label className="flex flex-col gap-1">
+          <span className="text-muted text-[12px]">Bill No.</span>
+          <input
+            name="billNo"
+            defaultValue={billNo}
+            placeholder="Search bill number"
+            className="border border-line-strong bg-surface px-3 py-1.5"
+          />
+        </label>
+        <button
+          type="submit"
+          className="border border-line-strong px-3 py-1.5 font-medium hover:border-accent"
+        >
+          Apply
+        </button>
+        {activeCount > 0 && (
+          <Link
+            href={`${basePath}?from=${w.from}&to=${w.to}`}
+            className="text-muted underline underline-offset-2"
+          >
+            Clear
+          </Link>
+        )}
+      </form>
+    </details>
+  );
+}

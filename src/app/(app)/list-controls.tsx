@@ -183,6 +183,56 @@ export function DateWindow({
   );
 }
 
+export function BillNoFilter({
+  basePath,
+  window: w,
+  value,
+  keep,
+}: {
+  basePath: string;
+  window: ListWindow;
+  value: string;
+  keep?: Record<string, string>;
+}) {
+  return (
+    <form method="get" action={basePath} className="flex items-end gap-2 mb-4 text-[13px]">
+      <input type="hidden" name="from" value={w.from} />
+      <input type="hidden" name="to" value={w.to} />
+      {Object.entries(keep ?? {})
+        .filter(([, v]) => v !== "")
+        .map(([name, fieldValue]) => (
+          <input key={name} type="hidden" name={name} value={fieldValue} />
+        ))}
+      <label className="flex items-center gap-2">
+        <span className="text-muted">Bill No.</span>
+        <input
+          name="billNo"
+          defaultValue={value}
+          placeholder="Search bill number"
+          className="border border-line-strong bg-surface px-3 py-1.5"
+        />
+      </label>
+      <button
+        type="submit"
+        className="border border-line-strong px-3 py-1.5 font-medium hover:bg-line-strong/10"
+      >
+        Search
+      </button>
+      {value && (
+        <Link
+          href={`${basePath}?from=${w.from}&to=${w.to}${Object.entries(keep ?? {})
+            .filter(([, v]) => v !== "")
+            .map(([name, fieldValue]) => `&${name}=${encodeURIComponent(fieldValue)}`)
+            .join("")}`}
+          className="text-muted underline underline-offset-2"
+        >
+          Clear
+        </Link>
+      )}
+    </form>
+  );
+}
+
 const MONTHS = [
   "January",
   "February",
@@ -269,4 +319,4 @@ export function Pager({
 // Lives in its own file because it is interactive — the party box narrows as
 // you type, which a server component cannot do. Re-exported here so the four
 // list pages carry on importing their controls from one place.
-export { PartyFilter } from "./party-filter";
+export { PartyFilter, VoucherFilter } from "./party-filter";

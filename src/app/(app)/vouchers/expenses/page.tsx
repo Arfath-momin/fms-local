@@ -5,9 +5,9 @@ import { prisma } from "@/lib/db";
 import { canEnter, requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { fmtDate, fmtMoney } from "@/lib/format";
-import { dateWhere, parseListWindow,
+import { dateWhere, parseBillNo, parseListWindow,
   parsePartyFilter, type SearchParams } from "@/lib/paging";
-import { DateWindow, PartyFilter, Pager } from "../../list-controls";
+import { DateWindow, Pager, VoucherFilter } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
 export default async function ExpensesPage({
@@ -22,10 +22,12 @@ export default async function ExpensesPage({
 
   const listWindow = parseListWindow(await searchParams);
   const partyId = parsePartyFilter(await searchParams);
+  const billNo = parseBillNo(await searchParams);
   const where = {
     companyId: company.id,
     centreId: centre.id,
     ...dateWhere(listWindow),
+    ...(billNo ? { sale: { billNo: { contains: billNo, mode: "insensitive" as const } } } : {}),
 
     ...(partyId ? { partyId } : {}),
   };
@@ -74,12 +76,13 @@ export default async function ExpensesPage({
         )}
       </div>
 
-      <DateWindow keep={{ party: partyId }} basePath="/vouchers/expenses" window={listWindow} />
-      <PartyFilter
+      <DateWindow keep={{ party: partyId, billNo }} basePath="/vouchers/expenses" window={listWindow} />
+      <VoucherFilter
         basePath="/vouchers/expenses"
         window={listWindow}
         parties={parties}
         selected={partyId}
+        billNo={billNo}
         label="Paid to"
       />
 

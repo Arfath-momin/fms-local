@@ -7,11 +7,12 @@ import { getActiveScope } from "@/lib/centre";
 import { fmtDate, fmtKg, fmtMoney } from "@/lib/format";
 import {
   dateWhere,
+  parseBillNo,
   parseListWindow,
   parsePartyFilter,
   type SearchParams,
 } from "@/lib/paging";
-import { DateWindow, PartyFilter, Pager } from "../../list-controls";
+import { DateWindow, Pager, VoucherFilter } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
 const TYPE_LABELS = {
@@ -33,10 +34,12 @@ export default async function PurchasesPage({
 
   const listWindow = parseListWindow(await searchParams);
   const partyId = parsePartyFilter(await searchParams);
+  const billNo = parseBillNo(await searchParams);
   const where = {
     companyId: company.id,
     centreId: centre.id,
     ...dateWhere(listWindow),
+    ...(billNo ? { billNo: { contains: billNo, mode: "insensitive" as const } } : {}),
 
     ...(partyId ? { partyId } : {}),
   };
@@ -102,12 +105,13 @@ export default async function PurchasesPage({
         )}
       </div>
 
-      <DateWindow keep={{ party: partyId }} basePath="/vouchers/purchases" window={listWindow} />
-      <PartyFilter
+      <DateWindow keep={{ party: partyId, billNo }} basePath="/vouchers/purchases" window={listWindow} />
+      <VoucherFilter
         basePath="/vouchers/purchases"
         window={listWindow}
         parties={parties}
         selected={partyId}
+        billNo={billNo}
         label="Seller"
       />
 

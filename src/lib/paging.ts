@@ -230,3 +230,8 @@ export function parsePartyFilter(params: SearchParams): string {
   const raw = first(params.party);
   return raw && UUID_RE.test(raw) ? raw : "";
 }
+
+/** A trimmed bill-number search, kept short enough to avoid abusive queries. */
+export function parseBillNo(params: SearchParams): string {
+  return (first(params.billNo) ?? "").trim().slice(0, 100);
+}
