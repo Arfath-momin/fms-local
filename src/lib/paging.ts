@@ -235,3 +235,8 @@ export function parsePartyFilter(params: SearchParams): string {
 export function parseBillNo(params: SearchParams): string {
   return (first(params.billNo) ?? "").trim().slice(0, 100);
 }
+
+/** A trimmed free-text voucher search, case-insensitive in the database. */
+export function parseTextFilter(params: SearchParams, name: string): string {
+  return (first(params[name]) ?? "").trim().slice(0, 100);
+}

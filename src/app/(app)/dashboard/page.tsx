@@ -7,6 +7,8 @@ import { computeDayBook, getBalancesAsOf } from "@/lib/report";
 import { REVIEW_TYPE_LABELS, reviewVoucherPath } from "@/lib/review";
 import { getPendingReviews } from "@/lib/review-db";
 import { SALE_TYPE_LABELS } from "@/lib/sale";
+import { SALE_LEDGER_TYPES } from "@/lib/party";
+import { daysBetween, overdueReminder } from "@/lib/overdue-reminder";
 import {
   businessTodayDate,
   fmtDate,
@@ -52,7 +54,7 @@ export default async function DashboardPage() {
   if (!centre) return <NoCentreNotice companyName={company.name} />;
   const today = businessTodayDate();
 
-  const [day, balances, pendingReviews, recentSales] = await Promise.all([
+  const [day, balances, pendingReviews, recentSales, saleParties, latestReceipts, saleActivity] = await Promise.all([
     computeDayBook(company.id, centre.id, today),
     getBalancesAsOf(company.id, centre.id, today),
     getPendingReviews(company.id, centre.id),
@@ -64,6 +66,27 @@ export default async function DashboardPage() {
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       take: 8,
+    }),
+    prisma.party.findMany({
+      where: { type: { in: SALE_LEDGER_TYPES } },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.ledgerEntry.findMany({
+      where: {
+        companyId: company.id,
+        centreId: centre.id,
+        sourceType: "RECEIPT",
+        party: { type: { in: SALE_LEDGER_TYPES } },
+      },
+      orderBy: [{ date: "desc" }, { seq: "desc" }],
+      distinct: ["partyId"],
+      select: { partyId: true, date: true },
+    }),
+    prisma.sale.findMany({
+      where: { companyId: company.id, centreId: centre.id },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      select: { partyId: true, careOfPartyId: true, date: true },
     }),
   ]);
 
@@ -81,6 +104,35 @@ export default async function DashboardPage() {
     : day.grossProfit.lessThan(0)
       ? "text-debit"
       : "";
+
+  const receiptDates = new Map(latestReceipts.map((r) => [r.partyId, r.date]));
+  const saleDates = new Map<string, Date>();
+  for (const sale of saleActivity) {
+    const partyId = sale.careOfPartyId ?? sale.partyId;
+    if (!saleDates.has(partyId)) saleDates.set(partyId, sale.date);
+  }
+  const overdueSales = saleParties
+    .flatMap((party) => {
+      const balance = balances.get(party.id) ?? ZERO;
+      if (!balance.greaterThan(0)) return [];
+      const receiptDate = receiptDates.get(party.id);
+      const saleDate = saleDates.get(party.id);
+      const activityDate =
+        receiptDate && saleDate
+          ? receiptDate >= saleDate
+            ? receiptDate
+            : saleDate
+          : receiptDate ?? saleDate;
+      const days = activityDate ? daysBetween(activityDate, today) : null;
+      if (days !== null && days <= 3) return [];
+      const reminder = overdueReminder(
+        days,
+        activityDate ? fmtDate(activityDate) : undefined,
+        Boolean(receiptDate)
+      );
+      return [{ ...party, balance, receiptDate, saleDate, reminder }];
+    })
+    .sort((a, b) => b.reminder.sortAge - a.reminder.sortAge || b.balance.comparedTo(a.balance));
 
   return (
     <div className="max-w-4xl">
@@ -218,6 +270,65 @@ export default async function DashboardPage() {
                       >
                         Open
                       </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6">
+        <div className="flex items-end justify-between gap-3 mb-2">
+          <div>
+            <h2 className="heading text-[15px] font-semibold">Sale parties overdue</h2>
+            <p className="text-muted text-[12px]">
+              Parties with money still due and no receipt in the last 3 days.
+            </p>
+          </div>
+          {overdueSales.length > 0 && (
+            <span className="text-debit text-[12px] font-semibold">
+              {overdueSales.length} reminder{overdueSales.length === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
+        {overdueSales.length === 0 ? (
+          <p className="text-muted text-[13px] border border-line bg-surface px-4 py-3 max-w-lg">
+            No overdue sale parties.
+          </p>
+        ) : (
+          <div className="border border-line-strong bg-surface overflow-x-auto">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>Party</th>
+                  <th>Last receipt</th>
+                  <th>Reminder</th>
+                  <th className="num-col">Due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {overdueSales.map((party) => (
+                  <tr key={party.id}>
+                    <td className="font-medium">
+                      <Link
+                        href={`/ledgers/parties/${party.id}`}
+                        className="text-accent underline underline-offset-2"
+                      >
+                        {party.name}
+                      </Link>
+                    </td>
+                    <td className="whitespace-nowrap text-muted">
+                      {party.receiptDate ? fmtDate(party.receiptDate) : "Never paid"}
+                    </td>
+                    <td>
+                      <span className={`inline-block border px-2 py-1 text-[12px] font-semibold ${party.reminder.className}`}>
+                        {party.reminder.label}
+                      </span>
+                    </td>
+                    <td className="num-col num font-semibold text-debit">
+                      {fmtMoney(party.balance)}
                     </td>
                   </tr>
                 ))}

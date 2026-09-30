@@ -102,6 +102,9 @@ export function VoucherFilter({
   parties,
   selected,
   billNo,
+  textValue = "",
+  textLabel,
+  textName = "text",
   label = "Party",
 }: {
   basePath: string;
@@ -109,10 +112,13 @@ export function VoucherFilter({
   parties: { id: string; name: string }[];
   selected: string;
   billNo: string;
+  textValue?: string;
+  textLabel?: string;
+  textName?: string;
   label?: string;
 }) {
   const router = useRouter();
-  const activeCount = (selected ? 1 : 0) + (billNo ? 1 : 0);
+  const activeCount = (selected ? 1 : 0) + (billNo ? 1 : 0) + (textValue ? 1 : 0);
 
   return (
     <details className="mb-4 text-[13px]" open={activeCount > 0}>
@@ -130,8 +136,20 @@ export function VoucherFilter({
       >
         <input type="hidden" name="from" value={w.from} />
         <input type="hidden" name="to" value={w.to} />
-        <input type="hidden" name="party" value={selected} />
-        {parties.length > 0 && (
+        {textLabel ? (
+          <label className="flex flex-col gap-1">
+            <span className="text-muted text-[12px]">{textLabel}</span>
+            <input
+              name={textName}
+              defaultValue={textValue}
+              placeholder={`Search ${textLabel.toLowerCase()}`}
+              className="border border-line-strong bg-surface px-3 py-1.5"
+            />
+          </label>
+        ) : (
+          <input type="hidden" name="party" value={selected} />
+        )}
+        {!textLabel && parties.length > 0 && (
           <label className="flex flex-col gap-1">
             <span className="text-muted text-[12px]">{label}</span>
             <Combobox

@@ -3,6 +3,7 @@ import {
   activePreset,
   monthRange,
   parseListWindow,
+  parseTextFilter,
   weekRange,
   yearRange,
 } from "@/lib/paging";
@@ -100,6 +101,14 @@ describe("reading a list's window off the URL", () => {
   it("defaults to this month, which is what it always did", () => {
     const w = parseListWindow({});
     expect(activePreset(w)).toBe("month");
+  });
+});
+
+describe("reading free-text list filters", () => {
+  it("trims the To search without changing its case", () => {
+    expect(
+      parseTextFilter({ recipient: "  fayaz bangalore  " }, "recipient")
+    ).toBe("fayaz bangalore");
   });
 });
 

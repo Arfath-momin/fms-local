@@ -6,7 +6,7 @@ import { getActiveScope } from "@/lib/centre";
 import { sumDeliveryLines } from "@/lib/delivery";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseBillNo, parseListWindow,
-  parsePartyFilter, type SearchParams } from "@/lib/paging";
+  parseTextFilter, type SearchParams } from "@/lib/paging";
 import { DateWindow, Pager, VoucherFilter } from "../../list-controls";
 import { NoCentreNotice } from "../../no-centre";
 
@@ -21,28 +21,21 @@ export default async function DeliveriesPage({
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
   const listWindow = parseListWindow(await searchParams);
-  const partyId = parsePartyFilter(await searchParams);
+  const recipient = parseTextFilter(await searchParams, "recipient");
   const billNo = parseBillNo(await searchParams);
   const where = {
     companyId: company.id,
     centreId: centre.id,
     ...dateWhere(listWindow),
     ...(billNo ? { billNo: { contains: billNo, mode: "insensitive" as const } } : {}),
-    // A note has no party of its own — it is a truck and a load. What it has
-    // is the BILLS raised off it, so "show me UMP Ullal's trips" means the
-    // trips whose bills went to them.
-    ...(partyId ? { sales: { some: { partyId } } } : {}),
+    ...(recipient
+      ? { recipient: { contains: recipient, mode: "insensitive" as const } }
+      : {}),
   };
 
   // Offered by kind rather than by who happens to appear in this window: a
   // merchant narrowing to a seller usually wants to find out they have no
   // entries this month, and a list that hid them could not answer that.
-  const parties = await prisma.party.findMany({
-    where: { type: { in: ["MARKET_BUYER", "FACTORY", "FISH_MILL", "LOCAL_BUYER"] }, archivedAt: null },
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
-  });
-
   const [notes, total, filteredLines] = await Promise.all([
     prisma.deliveryNote.findMany({
       where,
@@ -84,19 +77,16 @@ export default async function DeliveriesPage({
         )}
       </div>
 
-      <DateWindow keep={{ party: partyId, billNo }} basePath="/vouchers/deliveries" window={listWindow} />
+      <DateWindow keep={{ recipient, billNo }} basePath="/vouchers/deliveries" window={listWindow} />
       <VoucherFilter
         basePath="/vouchers/deliveries"
         window={listWindow}
-        parties={parties}
-        selected={partyId}
+        parties={[]}
+        selected=""
         billNo={billNo}
-        // "Delivered to" was a lie by one word: a note names a recipient as
-        // free text — a place, often — while this matches the BILLS raised
-        // off the note. DN-00016 went to Suraksha and was billed to Shree
-        // Matha, so filtering on Suraksha did not return it and the label
-        // was the reason that looked wrong.
-        label="Billed to"
+        textValue={recipient}
+        textLabel="To"
+        textName="recipient"
       />
 
       {notes.length === 0 ? (
