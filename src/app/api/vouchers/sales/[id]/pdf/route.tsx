@@ -250,6 +250,7 @@ export async function GET(
         docKind: `${SALE_TYPE_LABELS[sale.type]} Sale Bill`,
         identity: [
           { label: "No.", value: sale.billNo },
+          ...(vehicleNo ? [{ label: "Vehicle", value: vehicleNo }] : []),
           { label: "Date", value: fmtDate(sale.saleDate ?? sale.date) },
           // Always, even when it matches. A reader seeing one date cannot tell
           // whether they agreed or whether the bill simply does not say.

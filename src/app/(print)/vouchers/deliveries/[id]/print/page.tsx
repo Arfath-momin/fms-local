@@ -112,6 +112,10 @@ export default async function DeliveryNotePrintPage({
                 <span className="opacity-75">No. </span>
                 <span className="font-semibold">{note.billNo}</span>
               </div>
+              <div className="num text-[12px]">
+                <span className="opacity-75">Vehicle </span>
+                <span className="font-semibold">{note.vehicle.number}</span>
+              </div>
               <div className="num text-[13px]">
                 <span className="opacity-75">Date </span>
                 <span className="font-semibold">{fmtDate(note.date)}</span>

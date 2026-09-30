@@ -91,6 +91,7 @@ export async function GET(
         docKind: "Delivery Note",
         identity: [
           { label: "No.", value: note.billNo },
+          { label: "Vehicle", value: note.vehicle.number },
           { label: "Date", value: fmtDate(note.date) },
         ],
         partyTitle: "Delivered to",

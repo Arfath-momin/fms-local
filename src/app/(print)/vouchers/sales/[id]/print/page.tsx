@@ -178,6 +178,12 @@ export default async function SaleBillPage({
                 <span className="opacity-75">No. </span>
                 <span className="font-semibold">{sale.billNo}</span>
               </div>
+              {vehicleNo && (
+                <div className="num text-[12px]">
+                  <span className="opacity-75">Vehicle </span>
+                  <span className="font-semibold">{vehicleNo}</span>
+                </div>
+              )}
               <div className="num text-[13px]">
                 <span className="opacity-75">Date </span>
                 <span className="font-semibold">

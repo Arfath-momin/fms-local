@@ -87,10 +87,12 @@ export async function statementSources(
       select: {
         id: true,
         billNo: true,
+        vehicleNo: true,
         type: true,
         // The trip this bill came off, so a rent raised on it can name the load
         // the transporter actually hauled.
         deliveryNoteId: true,
+        deliveryNote: { select: { vehicle: { select: { number: true } } } },
         lines: {
           orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
           select: {
@@ -160,7 +162,11 @@ export async function statementSources(
     }),
   ]);
 
-  for (const x of sales) if (x.billNo) detail.set(x.id, `Bill ${x.billNo}`);
+  for (const x of sales) {
+    if (!x.billNo) continue;
+    const vehicle = x.deliveryNote?.vehicle.number ?? x.vehicleNo;
+    detail.set(x.id, vehicle ? `Bill ${x.billNo} · ${vehicle}` : `Bill ${x.billNo}`);
+  }
   for (const x of purchases) if (x.billNo) detail.set(x.id, `Bill ${x.billNo}`);
   const tripById = new Map(trips.map((t) => [t.id, t]));
   for (const x of expenses) {
