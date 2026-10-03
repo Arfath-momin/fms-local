@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { canEnter, canSuperAdminister, requireSession } from "@/lib/session";
+import { canEdit, canEnter, canSuperAdminister, requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
 import { fmtDate } from "@/lib/format";
 import { VehicleCreateForm } from "./vehicle-create-form";
@@ -17,6 +17,7 @@ import { VehicleActionsCell } from "./vehicle-actions-cell";
 export default async function VehiclesPage() {
   const session = await requireSession();
   const mayManage = canEnter(session.role);
+  const mayEdit = canEdit(session.role);
   const isSuperAdmin = canSuperAdminister(session.role);
   const company = await getActiveCompany();
 
@@ -101,6 +102,9 @@ export default async function VehiclesPage() {
                         archived={v.archivedAt !== null}
                         trips={v._count.trips}
                         isSuperAdmin={isSuperAdmin}
+                        mayEdit={mayEdit}
+                        transporterName={v.transporter.name}
+                        transporters={transporters.map((t) => t.name)}
                       />
                     </td>
                   )}
