@@ -74,7 +74,7 @@ export const SETTLEMENT_PARTY_TYPES: Record<SettlementKind, PartyType[]> = {
   // Purchases are owed to the group (Society, KFDC, …), not to the individual
   // boat, so that is what a payment settles. Offering boats here would build a
   // balance on a ledger no purchase ever posts to.
-  PAYMENT: ["PURCHASE_GROUP", "EXPENSE_VENDOR"],
+  PAYMENT: ["PURCHASE_GROUP", "EXPENSE_VENDOR", "TRANSPORTER", "LINE_MAN"],
   RECEIPT: ["MARKET_BUYER", "FACTORY", "FISH_MILL", "LOCAL_BUYER", "CARE_OF"],
 };
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EXPENSE_SPECS, expensePrepaid } from "@/lib/expense";
+import { SETTLEMENT_PARTY_TYPES } from "@/lib/settlement";
 
 /**
  * Vehicle rent as an expense voucher.
@@ -67,6 +68,13 @@ describe("the Vehicle Rent voucher", () => {
     const total = 20_000;
     const paid = expensePrepaid("RENT", { advance: "5000", paidByMarket: "15000" });
     expect(paid).toBeLessThanOrEqual(total);
+  });
+});
+
+describe("rent settlement eligibility", () => {
+  it("allows payments to transporters and line men", () => {
+    expect(SETTLEMENT_PARTY_TYPES.PAYMENT).toContain("TRANSPORTER");
+    expect(SETTLEMENT_PARTY_TYPES.PAYMENT).toContain("LINE_MAN");
   });
 });
 
