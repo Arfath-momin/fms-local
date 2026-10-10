@@ -100,6 +100,8 @@ export const s = StyleSheet.create({
     // of a month's trading is exactly that, read down.
     paddingVertical: 3.5,
   },
+  statementDebit: { backgroundColor: "#fff3f1" },
+  statementCredit: { backgroundColor: "#f1f8f4" },
   /**
    * An item line belonging to the row above it.
    *

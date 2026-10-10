@@ -278,7 +278,14 @@ export default async function PartyStatementPrintPage({
                 <td className="r num">{fmtMoney(opening)}</td>
               </tr>
               {entries.map((e) => (
-                <tr key={e.id}>
+                <tr
+                  key={e.id}
+                  className={
+                    e.type === "DEBIT"
+                      ? "statement-debit-row"
+                      : "statement-credit-row"
+                  }
+                >
                   <td className="num">{fmtDate(e.date)}</td>
                   <td>
                     {SOURCE_LABELS[e.sourceType] ?? e.sourceType}

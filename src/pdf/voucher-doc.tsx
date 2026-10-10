@@ -35,10 +35,17 @@ export type Column = {
  * lighter, smaller, and without a rule under each one, so a voucher and its
  * lines read as one block rather than five unrelated rows.
  */
-export type Row = string[] | { cells: string[]; muted?: boolean };
+export type StatementRowTone = "debit" | "credit";
+
+export type Row = {
+  cells: string[];
+  muted?: boolean;
+  tone?: StatementRowTone;
+} | string[];
 
 const cellsOf = (r: Row) => (Array.isArray(r) ? r : r.cells);
 const isMuted = (r: Row) => !Array.isArray(r) && r.muted === true;
+const rowTone = (r: Row) => (!Array.isArray(r) ? r.tone : undefined);
 
 export type WorkingRow = {
   label: string;
@@ -195,9 +202,17 @@ export function VoucherDocument({ d }: { d: VoucherDoc }) {
             />
             {d.rows.map((row, i) => {
               const muted = isMuted(row);
+              const tone = rowTone(row);
               return (
                 <View
-                  style={muted ? s.trDetail : s.tr}
+                  style={[
+                    muted ? s.trDetail : s.tr,
+                    tone === "debit"
+                      ? s.statementDebit
+                      : tone === "credit"
+                        ? s.statementCredit
+                        : undefined,
+                  ]}
                   key={i}
                   wrap={false}
                 >

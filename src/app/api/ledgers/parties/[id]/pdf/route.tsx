@@ -135,13 +135,18 @@ export async function GET(
   const rows: Row[] = [["", "Opening balance", "", "", fmtMoney(opening)]];
   for (const e of entries) {
     const d = detail.get(e.sourceId);
-    rows.push([
-      fmtDate(e.date),
-      d ? `${SOURCE_LABELS[e.sourceType]} · ${d}` : SOURCE_LABELS[e.sourceType],
-      e.type === "DEBIT" ? fmtMoney(e.amount) : "",
-      e.type === "CREDIT" ? fmtMoney(e.amount) : "",
-      fmtMoney(e.runningBalance),
-    ]);
+    rows.push({
+      tone: e.type === "DEBIT" ? "debit" : "credit",
+      cells: [
+        fmtDate(e.date),
+        d
+          ? `${SOURCE_LABELS[e.sourceType]} · ${d}`
+          : SOURCE_LABELS[e.sourceType],
+        e.type === "DEBIT" ? fmtMoney(e.amount) : "",
+        e.type === "CREDIT" ? fmtMoney(e.amount) : "",
+        fmtMoney(e.runningBalance),
+      ],
+    });
     // The lines beneath, in the money column their entry used, so they add up
     // to it on the page.
     //

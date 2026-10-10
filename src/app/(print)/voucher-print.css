@@ -149,9 +149,21 @@
   font-weight: 600;
 }
 
-/* No row tint. It was a 4% wash of the company colour, which reads as a smudge
-   on a mono printer and as a colour cast on a colour one. A ruled table with
-   rows this short does not need banding to be followed. */
+/* Statements use restrained semantic tints: the labels and column headings
+   remain explicit, while the row color gives a quick visual distinction. */
+.bill-table .statement-debit-row {
+  background: #fff3f1;
+  color: #8f2d22;
+}
+.bill-table .statement-credit-row {
+  background: #f1f8f4;
+  color: #216e4e;
+}
+.bill-table .statement-debit-row .text-muted,
+.bill-table .statement-credit-row .text-muted {
+  color: inherit;
+  opacity: 0.78;
+}
 
 /* Signature block: who handed over, who received, who it was for. */
 .bill-sign {
@@ -215,6 +227,11 @@
   .bill-table tr {
     page-break-inside: avoid;
     page-break-after: auto;
+  }
+  .bill-table .statement-debit-row,
+  .bill-table .statement-credit-row {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .bill-table tfoot {
     page-break-inside: avoid;
