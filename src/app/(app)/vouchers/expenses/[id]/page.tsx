@@ -34,6 +34,8 @@ export default async function ExpenseDetailPage({
       party: { select: { name: true } },
       category: { select: { id: true, code: true, name: true } },
       lines: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
+      vehicle: { select: { id: true } },
+      deliveryNote: { select: { vehicleId: true } },
       createdBy: { select: { name: true } },
       updatedBy: { select: { name: true } },
     },
@@ -148,6 +150,7 @@ export default async function ExpenseDetailPage({
   const initial = {
     categoryId: expense.categoryId,
     deliveryNoteId: expense.deliveryNoteId,
+    vehicleId: expense.vehicleId ?? expense.deliveryNote?.vehicleId ?? null,
     lines: expense.lines.map((l) => ({
       description: l.description,
       amount: l.amount.toString(),

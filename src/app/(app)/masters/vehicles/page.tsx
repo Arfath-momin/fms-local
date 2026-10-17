@@ -72,7 +72,12 @@ export default async function VehiclesPage() {
               {vehicles.map((v) => (
                 <tr key={v.id} className={v.archivedAt ? "opacity-50" : ""}>
                   <td className="font-medium num">
-                    {v.number}
+                    <Link
+                      href={`/ledgers/expenses/rent?vehicleId=${v.id}`}
+                      className="text-accent underline underline-offset-2"
+                    >
+                      {v.number}
+                    </Link>
                     {v.archivedAt && (
                       <span className="text-muted text-[12px] normal-case">
                         {" "}

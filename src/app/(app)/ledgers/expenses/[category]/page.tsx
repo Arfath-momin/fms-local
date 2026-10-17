@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import { expenseHighlight } from "@/lib/expense";
 import { prisma } from "@/lib/db";
-import { canEnter, requireSession } from "@/lib/session";
+import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { type SearchParams } from "@/lib/paging";
 import { NoCentreNotice } from "../../../no-centre";
 
 const ZERO = new Prisma.Decimal(0);
@@ -27,11 +28,12 @@ const ZERO = new Prisma.Decimal(0);
  */
 export default async function ExpenseCategoryPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ category: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const session = await requireSession();
-  const mayEnter = canEnter(session.role);
+  await requireSession();
   const { company, centre } = await getActiveScope();
   if (!centre) return <NoCentreNotice companyName={company.name} />;
 
@@ -43,6 +45,7 @@ export default async function ExpenseCategoryPage({
     select: { id: true, name: true, kind: true, code: true },
   });
   if (!category) notFound();
+  await searchParams;
 
   const scope = { companyId: company.id, centreId: centre.id };
   const expenses = await prisma.expense.findMany({
@@ -54,23 +57,52 @@ export default async function ExpenseCategoryPage({
       // the row: one transporter runs several vehicles, so "Ahmed · 20,000"
       // twice in a day is unreadable without the number that tells them apart.
       deliveryNote: {
-        select: { id: true, billNo: true, vehicle: { select: { number: true } } },
+        select: {
+          id: true,
+          billNo: true,
+          vehicle: { select: { id: true, number: true } },
+        },
       },
+      vehicle: { select: { id: true, number: true } },
     },
   });
+  const filteredExpenses = expenses;
 
   // Only shown where it exists, so heads that have nothing to do with trips
   // (ice, canteen, salary) do not gain an empty column.
-  const anyTrip = expenses.some((e) => e.deliveryNote);
-  const total = expenses.reduce((acc, e) => acc.add(e.amount), ZERO);
+  const anyTrip = filteredExpenses.some((e) => e.deliveryNote);
+  const anyVehicle =
+    category.code === "RENT" ||
+    filteredExpenses.some(
+      (e) =>
+        e.vehicle ||
+        e.deliveryNote ||
+        (e.details as Record<string, string> | null)?.vehicleNo
+    );
+  const total = filteredExpenses.reduce((acc, e) => acc.add(e.amount), ZERO);
 
   // Spend under this head, per vendor.
-  const spentByVendor = new Map<string, { name: string; amount: Prisma.Decimal }>();
-  for (const e of expenses) {
+  const spentByVendor = new Map<
+    string,
+    { name: string; amount: Prisma.Decimal; vehicles: Set<string> }
+  >();
+  for (const e of filteredExpenses) {
     if (!e.party) continue;
+    const vehicle =
+      e.vehicle?.number ??
+      e.deliveryNote?.vehicle.number ??
+      (e.details as Record<string, string> | null)?.vehicleNo;
     const hit = spentByVendor.get(e.party.id);
-    if (hit) hit.amount = hit.amount.add(e.amount);
-    else spentByVendor.set(e.party.id, { name: e.party.name, amount: e.amount });
+    if (hit) {
+      hit.amount = hit.amount.add(e.amount);
+      if (vehicle) hit.vehicles.add(vehicle);
+    } else {
+      spentByVendor.set(e.party.id, {
+        name: e.party.name,
+        amount: e.amount,
+        vehicles: new Set(vehicle ? [vehicle] : []),
+      });
+    }
   }
 
   // Each vendor's WHOLE position, from the ledger — what has been billed to
@@ -101,6 +133,7 @@ export default async function ExpenseCategoryPage({
         id,
         name: spentByVendor.get(id)!.name,
         spentHere: spentByVendor.get(id)!.amount,
+        vehicles: [...spentByVendor.get(id)!.vehicles].sort(),
         billed: owed,
         paid,
         outstanding: owed.sub(paid),
@@ -112,7 +145,7 @@ export default async function ExpenseCategoryPage({
     );
 
   const outstandingTotal = vendors.reduce((a, v) => a.add(v.outstanding), ZERO);
-  const unvendored = expenses.filter((e) => !e.party);
+  const unvendored = filteredExpenses.filter((e) => !e.party);
 
   return (
     <div className="max-w-3xl">
@@ -160,7 +193,8 @@ export default async function ExpenseCategoryPage({
             <table className="ledger-table">
               <thead>
                 <tr>
-                  <th>Vendor</th>
+                  <th>Transporter</th>
+                  {category.code === "RENT" && <th>Vehicles</th>}
                   <th className="num-col">Under this head</th>
                   <th className="num-col">Billed (all heads)</th>
                   <th className="num-col">Paid</th>
@@ -179,6 +213,11 @@ export default async function ExpenseCategoryPage({
                         {v.name}
                       </Link>
                     </td>
+                    {category.code === "RENT" && (
+                      <td className="text-muted text-[12px]">
+                        {v.vehicles.join(", ") || "—"}
+                      </td>
+                    )}
                     <td className="num-col num">{fmtMoney(v.spentHere)}</td>
                     <td className="num-col num">{fmtMoney(v.billed)}</td>
                     <td className="num-col num text-credit">
@@ -195,21 +234,19 @@ export default async function ExpenseCategoryPage({
                         : "settled"}
                     </td>
                     <td>
-                      {mayEnter && v.outstanding.greaterThan(0) && (
-                        <Link
-                          href={`/vouchers/payments/new?partyId=${v.id}`}
-                          className="text-accent underline underline-offset-2 text-[12px]"
-                        >
-                          Pay
-                        </Link>
-                      )}
+                      <Link
+                        href={`/ledgers/parties/${v.id}`}
+                        className="text-accent underline underline-offset-2 text-[12px]"
+                      >
+                        View
+                      </Link>
                     </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr>
-                  <td colSpan={4} className="text-right font-semibold">
+                  <td colSpan={category.code === "RENT" ? 5 : 4} className="text-right font-semibold">
                     Still owed across these vendors
                   </td>
                   <td className="num-col num font-semibold text-debit">
@@ -224,9 +261,9 @@ export default async function ExpenseCategoryPage({
       )}
 
       <h2 className="heading text-[15px] font-semibold mb-1">Entries</h2>
-      {expenses.length === 0 ? (
+      {filteredExpenses.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3">
-          No {category.name.toLowerCase()} expenses for {company.name} yet.
+          No {category.name.toLowerCase()} expenses match this selection.
         </p>
       ) : (
         <div className="border border-line-strong bg-surface overflow-x-auto">
@@ -234,7 +271,7 @@ export default async function ExpenseCategoryPage({
             <thead>
               <tr>
                 <th>Date</th>
-                {anyTrip && <th>Vehicle</th>}
+                {anyVehicle && <th>Vehicle</th>}
                 {anyTrip && <th>Trip</th>}
                 <th>Vendor</th>
                 <th>Notes</th>
@@ -242,12 +279,15 @@ export default async function ExpenseCategoryPage({
               </tr>
             </thead>
             <tbody>
-              {expenses.map((e) => (
+              {filteredExpenses.map((e) => (
                 <tr key={e.id}>
                   <td className="whitespace-nowrap">{fmtDate(e.date)}</td>
-                  {anyTrip && (
+                  {anyVehicle && (
                     <td className="whitespace-nowrap font-medium">
-                      {e.deliveryNote?.vehicle.number ?? "—"}
+                      {e.vehicle?.number ??
+                        e.deliveryNote?.vehicle.number ??
+                        ((e.details as Record<string, string> | null)?.vehicleNo ??
+                          "—")}
                     </td>
                   )}
                   {anyTrip && (

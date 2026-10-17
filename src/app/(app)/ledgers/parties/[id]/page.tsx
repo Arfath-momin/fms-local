@@ -13,6 +13,7 @@ import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import { DateWindow, Pager } from "../../../list-controls";
 import { NoCentreNotice } from "../../../no-centre";
 import { SettleLink } from "../../settle-link";
+import { normaliseVehicleNumber } from "@/lib/vehicle";
 
 const SOURCE_LABELS: Record<LedgerSourceType, string> = {
   PURCHASE: "Purchase",
@@ -46,6 +47,19 @@ export default async function PartyStatementPage({
 
   const listWindow = parseListWindow(await searchParams);
   const scope = { companyId: company.id, centreId: centre.id, partyId: id };
+  const allSearchParams = await searchParams;
+  const rawVehicleId = allSearchParams.vehicleId;
+  const vehicleId =
+    party.type === "TRANSPORTER" && typeof rawVehicleId === "string"
+      ? rawVehicleId
+      : "";
+  const selectedVehicle = vehicleId
+    ? await prisma.vehicle.findFirst({
+        where: { id: vehicleId, companyId: company.id },
+        select: { id: true, number: true },
+      })
+    : null;
+  const statementPath = `/ledgers/parties/${party.id}`;
 
   // What kind of account this is — the same line the printed statement carries
   // in its head, from the same function, so the paper and the screen cannot
@@ -62,18 +76,65 @@ export default async function PartyStatementPage({
     expenseHeads.map((h) => h.category.name)
   );
   const where = { ...scope, ...dateWhere(listWindow) };
+  let entryWhere: Prisma.LedgerEntryWhereInput = where;
+  if (selectedVehicle) {
+    const [vehicleExpenses, vehicleTrips] = await Promise.all([
+      prisma.expense.findMany({
+        where: {
+          ...scope,
+          partyId: id,
+          category: { code: "RENT" },
+        },
+        select: {
+          id: true,
+          vehicleId: true,
+          details: true,
+          deliveryNote: { select: { vehicleId: true } },
+        },
+      }),
+      prisma.deliveryNote.findMany({
+        where: {
+          companyId: company.id,
+          centreId: centre.id,
+          vehicleId: selectedVehicle.id,
+        },
+        select: { id: true },
+      }),
+    ]);
+    const matchingExpenseIds = vehicleExpenses
+      .filter((e) => {
+        const number = (e.details as Record<string, string> | null)?.vehicleNo;
+        return (
+          e.vehicleId === selectedVehicle.id ||
+          e.deliveryNote?.vehicleId === selectedVehicle.id ||
+          (number &&
+            normaliseVehicleNumber(number) ===
+              normaliseVehicleNumber(selectedVehicle.number))
+        );
+      })
+      .map((e) => e.id);
+    entryWhere = {
+      ...where,
+      sourceId: {
+        in: [
+          ...matchingExpenseIds,
+          ...vehicleTrips.map((t) => t.id),
+        ],
+      },
+    };
+  }
 
   // The statement is windowed, but the headline balance must not be: it is what
   // the party owes *now*, not at the end of whichever month is on screen. So it
   // comes from the newest entry overall rather than from the last row rendered.
   const [entries, total, latest, totals, windowTotals] = await Promise.all([
     prisma.ledgerEntry.findMany({
-      where,
+      where: entryWhere,
       orderBy: [{ date: "asc" }, { seq: "asc" }],
       skip: listWindow.skip,
       take: listWindow.take,
     }),
-    prisma.ledgerEntry.count({ where }),
+    prisma.ledgerEntry.count({ where: entryWhere }),
     prisma.ledgerEntry.findFirst({
       where: scope,
       orderBy: [{ date: "desc" }, { seq: "desc" }],
@@ -90,7 +151,7 @@ export default async function PartyStatementPage({
     }),
     prisma.ledgerEntry.groupBy({
       by: ["type"],
-      where,
+      where: entryWhere,
       _sum: { amount: true },
     }),
   ]);
@@ -116,7 +177,11 @@ export default async function PartyStatementPage({
     }),
     prisma.expense.findMany({
       where: { id: { in: sourceIds } },
-      select: { id: true },
+      select: {
+        id: true,
+        vehicle: { select: { number: true } },
+        deliveryNote: { select: { vehicle: { select: { number: true } } } },
+      },
     }),
     prisma.settlement.findMany({
       where: { id: { in: sourceIds } },
@@ -179,8 +244,15 @@ export default async function PartyStatementPage({
     ...new Set(entries.map((e) => e.sourceId)),
   ]);
   const detailBySource = sources.detail;
+  const vehicleBySource = new Map<string, string>();
+  for (const e of expenses) {
+    if (e.vehicle?.number) vehicleBySource.set(e.id, e.vehicle.number);
+    if (e.deliveryNote?.vehicle.number)
+      vehicleBySource.set(e.id, e.deliveryNote.vehicle.number);
+  }
   for (const t of trips)
     detailBySource.set(t.id, `${t.billNo} · ${t.vehicle.number}`);
+  for (const t of trips) vehicleBySource.set(t.id, t.vehicle.number);
 
 
   const balance = latest?.runningBalance ?? new Prisma.Decimal(0);
@@ -307,9 +379,63 @@ export default async function PartyStatementPage({
       </div>
 
       <DateWindow
-        basePath={`/ledgers/parties/${party.id}`}
+        basePath={statementPath}
         window={listWindow}
+        keep={vehicleId ? { vehicleId } : undefined}
       />
+
+      {party.type === "TRANSPORTER" && (
+        <form
+          method="get"
+          className="border border-line bg-surface px-3 py-3 mb-4"
+        >
+          <label
+            htmlFor="vehicleId"
+            className="block text-[12px] font-semibold uppercase tracking-wide text-muted mb-1"
+          >
+            Vehicle filter
+          </label>
+          <div className="flex items-center gap-2">
+            {(["from", "to", "year", "month", "day", "page"] as const).map(
+              (name) => {
+                const value = allSearchParams[name];
+                return typeof value === "string" ? (
+                  <input key={name} type="hidden" name={name} value={value} />
+                ) : null;
+              }
+            )}
+            <select
+              id="vehicleId"
+              name="vehicleId"
+              defaultValue={vehicleId}
+              className="border border-line-strong bg-surface px-3 py-2 text-sm"
+            >
+              <option value="">All vehicles</option>
+              {(
+                await prisma.vehicle.findMany({
+                  where: { companyId: company.id, transporterId: party.id },
+                  orderBy: { number: "asc" },
+                  select: { id: true, number: true },
+                })
+              ).map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.number}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="bg-accent text-white px-4 py-2 text-[13px] font-semibold"
+            >
+              Filter
+            </button>
+          </div>
+          <p className="text-muted text-[12px] mt-1">
+            This filters statement rows only. Ravi&rsquo;s account totals above
+            remain combined across all vehicles.
+          </p>
+        </form>
+      )}
 
       {entries.length === 0 ? (
         <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 max-w-lg">
@@ -323,6 +449,7 @@ export default async function PartyStatementPage({
             <thead>
               <tr>
                 <th>Date</th>
+                {party.type === "TRANSPORTER" && <th>Vehicle</th>}
                 <th>Particulars</th>
                 {showBoat && <th>Boat</th>}
                 <th className="num-col">Debit</th>
@@ -345,6 +472,11 @@ export default async function PartyStatementPage({
                   <Fragment key={e.id}>
                   <tr>
                     <td className="whitespace-nowrap">{fmtDate(e.date)}</td>
+                    {party.type === "TRANSPORTER" && (
+                      <td className="whitespace-nowrap font-medium">
+                        {vehicleBySource.get(e.sourceId) ?? "—"}
+                      </td>
+                    )}
                     <td>
                       {href ? (
                         <Link
@@ -392,6 +524,7 @@ export default async function PartyStatementPage({
                   {lines.map((item, i) => (
                     <tr key={i} className="text-muted text-[12px]">
                       <td />
+                      {party.type === "TRANSPORTER" && <td />}
                       <td className="pl-6">{item.text}</td>
                       {showBoat && <td />}
                       <td className="num-col num">

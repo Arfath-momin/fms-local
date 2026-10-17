@@ -60,6 +60,7 @@ type Parsed = {
    * related only by looking alike.
    */
   deliveryNoteId: string | null;
+  vehicleId: string | null;
   file: unknown;
 };
 
@@ -181,6 +182,22 @@ async function parse(
     deliveryNoteId = trip.id;
   }
 
+  // A rent voucher may be entered before its trip. Keep the vehicle link
+  // independently of the optional trip link, but only for RENT so a stale
+  // hidden field from a category switch cannot attach another expense.
+  const vehicleIdRaw = String(formData.get("vehicleId") ?? "").trim();
+  let vehicleId: string | null = null;
+  if (vehicleIdRaw && category.code === "RENT") {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleIdRaw, companyId },
+      select: { id: true, number: true, transporter: { select: { name: true } } },
+    });
+    if (!vehicle) return { error: "That vehicle could not be found." };
+    vehicleId = vehicle.id;
+    details.vehicleNo = vehicle.number;
+    details.transporter = vehicle.transporter.name;
+  }
+
   return {
     data: {
       categoryId: category.id,
@@ -196,6 +213,7 @@ async function parse(
       vendorName: expenseVendorName(category.code, category.name, details),
       vendorType: EXPENSE_SPECS[category.code]?.vendorType ?? "EXPENSE_VENDOR",
       deliveryNoteId,
+      vehicleId,
       file,
     },
   };
@@ -274,6 +292,7 @@ export async function createExpense(
           partyId,
           categoryId: d.categoryId,
           deliveryNoteId: d.deliveryNoteId,
+          vehicleId: d.vehicleId,
           amount: d.amount,
           date: d.date,
           spentOn: d.spentOn,
@@ -381,6 +400,7 @@ export async function updateExpense(
           partyId,
           categoryId: d.categoryId,
           deliveryNoteId: d.deliveryNoteId,
+          vehicleId: d.vehicleId,
           lines: { create: d.lines.map((l, i) => ({ ...l, sortOrder: i })) },
           amount: d.amount,
           date: d.date,

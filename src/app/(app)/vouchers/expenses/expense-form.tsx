@@ -68,6 +68,8 @@ export type ExpenseInit = {
   details: Record<string, string>;
   /** The trip this cost was filed against, so an edit keeps it. */
   deliveryNoteId?: string | null;
+  /** The vehicle this rent was filed against, even before a trip existed. */
+  vehicleId?: string | null;
 };
 
 export function ExpenseForm({
@@ -114,7 +116,7 @@ export function ExpenseForm({
   );
   const category = categories.find((c) => c.id === categoryId);
   const [tripId, setTripId] = useState(initial?.deliveryNoteId ?? "");
-  const [vehicleId, setVehicleId] = useState("");
+  const [vehicleId, setVehicleId] = useState(initial?.vehicleId ?? "");
 
   /** Choosing the truck names its owner; neither is typed. */
   function applyVehicle(id: string) {
@@ -303,7 +305,6 @@ export function ExpenseForm({
         </p>
       </div>
 
-
       {/* Vehicle rent knows where it came from. Picking the trip fills the
           vehicle, the transporter, the buying day and the advance already
           handed over at loading, so the merchant types the one figure they
@@ -338,6 +339,7 @@ export function ExpenseForm({
           </p>
         </div>
       )}
+      {isRent && <input type="hidden" name="vehicleId" value={vehicleId} />}
 
       {isTripLinked && trips.length > 0 && (
         <div>
