@@ -149,7 +149,18 @@ export default async function PartyStatementPrintPage({
       }),
       prisma.expense.findMany({
         where: { id: { in: sourceIds } },
-        select: { id: true, category: { select: { name: true } } },
+        select: {
+          id: true,
+          category: { select: { name: true } },
+          vehicle: { select: { number: true } },
+          deliveryNote: {
+            select: {
+              billNo: true,
+              recipient: true,
+              vehicle: { select: { number: true } },
+            },
+          },
+        },
       }),
       prisma.settlement.findMany({
         where: { id: { in: sourceIds } },
@@ -157,7 +168,12 @@ export default async function PartyStatementPrintPage({
       }),
       prisma.deliveryNote.findMany({
         where: { id: { in: sourceIds } },
-        select: { id: true, billNo: true, vehicle: { select: { number: true } } },
+        select: {
+          id: true,
+          billNo: true,
+          recipient: true,
+          vehicle: { select: { number: true } },
+        },
       }),
     ]);
 
@@ -167,7 +183,22 @@ export default async function PartyStatementPrintPage({
     if (x.billNo) detailBySource.set(x.id, `Bill ${x.billNo}`);
   // An expense names its head — "Ice", "Vehicle Rent" — which is what the
   // vendor is being asked about. It carries no bill number of its own.
-  for (const x of srcExpenses) detailBySource.set(x.id, x.category.name);
+  for (const x of srcExpenses)
+    detailBySource.set(
+      x.id,
+      x.deliveryNote
+        ? [
+            x.category.name,
+            x.deliveryNote.billNo,
+            x.deliveryNote.recipient
+              ? `To: ${x.deliveryNote.recipient}`
+              : null,
+            x.vehicle?.number ?? x.deliveryNote.vehicle.number,
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : x.category.name
+    );
   // A payment or receipt has whatever reference was recorded: a cheque number,
   // a UPI id. Nothing to print when none was.
   for (const x of srcSettlements)
@@ -175,7 +206,16 @@ export default async function PartyStatementPrintPage({
   // A trip is identified by its note and the truck that ran it, which is how a
   // transporter will refer to it.
   for (const x of srcTrips)
-    detailBySource.set(x.id, `${x.billNo} · ${x.vehicle.number}`);
+    detailBySource.set(
+      x.id,
+      [
+        x.billNo,
+        x.recipient ? `To: ${x.recipient}` : null,
+        x.vehicle.number,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    );
 
   const balance = latest?.runningBalance ?? ZERO;
   const sum = (t: "DEBIT" | "CREDIT") =>

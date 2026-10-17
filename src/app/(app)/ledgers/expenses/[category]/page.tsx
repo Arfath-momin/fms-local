@@ -60,6 +60,7 @@ export default async function ExpenseCategoryPage({
         select: {
           id: true,
           billNo: true,
+          recipient: true,
           vehicle: { select: { id: true, number: true } },
         },
       },
@@ -297,7 +298,14 @@ export default async function ExpenseCategoryPage({
                           href={`/vouchers/deliveries/${e.deliveryNote.id}`}
                           className="text-accent underline underline-offset-2"
                         >
-                          {e.deliveryNote.billNo}
+                          {[
+                            e.deliveryNote.billNo,
+                            e.deliveryNote.recipient
+                              ? `To: ${e.deliveryNote.recipient}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </Link>
                       ) : (
                         "—"

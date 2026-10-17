@@ -197,6 +197,7 @@ export default async function PartyStatementPage({
         id: true,
         billNo: true,
         date: true,
+        recipient: true,
         vehicle: { select: { number: true } },
       },
     }),
@@ -251,7 +252,12 @@ export default async function PartyStatementPage({
       vehicleBySource.set(e.id, e.deliveryNote.vehicle.number);
   }
   for (const t of trips)
-    detailBySource.set(t.id, `${t.billNo} · ${t.vehicle.number}`);
+    detailBySource.set(
+      t.id,
+      [t.billNo, t.recipient ? `To: ${t.recipient}` : null, t.vehicle.number]
+        .filter(Boolean)
+        .join(" · ")
+    );
   for (const t of trips) vehicleBySource.set(t.id, t.vehicle.number);
 
 

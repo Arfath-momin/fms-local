@@ -153,6 +153,7 @@ export async function statementSources(
       select: {
         id: true,
         billNo: true,
+        recipient: true,
         vehicle: { select: { number: true } },
         lines: {
           orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
@@ -175,11 +176,31 @@ export async function statementSources(
     const t = x.deliveryNoteId ? tripById.get(x.deliveryNoteId) : null;
     detail.set(
       x.id,
-      t ? `${x.category.name} · ${t.billNo} · ${t.vehicle.number}` : x.category.name
+      t
+        ? [
+            x.category.name,
+            t.billNo,
+            t.recipient ? `To: ${t.recipient}` : null,
+            t.vehicle.number,
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : x.category.name
     );
   }
   for (const x of settlements) if (x.reference) detail.set(x.id, x.reference);
-  for (const x of trips) detail.set(x.id, `${x.billNo} · ${x.vehicle.number}`);
+  for (const x of trips) {
+    detail.set(
+      x.id,
+      [
+        x.billNo,
+        x.recipient ? `To: ${x.recipient}` : null,
+        x.vehicle.number,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    );
+  }
 
   for (const p of purchases) {
     items.set(
