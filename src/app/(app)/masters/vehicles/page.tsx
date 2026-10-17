@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Fragment } from "react";
 import { prisma } from "@/lib/db";
 import { canEdit, canEnter, canSuperAdminister, requireSession } from "@/lib/session";
 import { getActiveCompany } from "@/lib/company";
@@ -43,6 +44,25 @@ export default async function VehiclesPage() {
       select: { name: true },
     }),
   ]);
+  const groups = new Map<
+    string,
+    { id: string; name: string; vehicles: typeof vehicles }
+  >();
+  for (const vehicle of vehicles) {
+    const group = groups.get(vehicle.transporter.id);
+    if (group) {
+      group.vehicles.push(vehicle);
+    } else {
+      groups.set(vehicle.transporter.id, {
+        id: vehicle.transporter.id,
+        name: vehicle.transporter.name,
+        vehicles: [vehicle],
+      });
+    }
+  }
+  const transporterGroups = [...groups.values()].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
 
   return (
     <div className="max-w-3xl">
@@ -52,77 +72,93 @@ export default async function VehiclesPage() {
         is owed to the transporter behind it.
       </p>
 
+      {mayManage && (
+        <div className="border border-line bg-surface px-4 py-3 mb-6">
+          <h2 className="heading text-[15px] font-semibold mb-2">
+            Add new vehicle
+          </h2>
+          <VehicleCreateForm transporters={transporters.map((t) => t.name)} />
+        </div>
+      )}
+
       {vehicles.length === 0 ? (
-        <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3 mb-4">
-          {company.name} has no vehicles yet. Add the first one below.
+        <p className="text-[13px] text-muted border border-line bg-surface px-4 py-3">
+          {company.name} has no vehicles yet.
         </p>
       ) : (
-        <div className="border border-line-strong bg-surface mb-4 overflow-x-auto">
+        <div className="border border-line-strong bg-surface overflow-x-auto">
           <table className="ledger-table">
             <thead>
               <tr>
                 <th>Vehicle</th>
-                <th>Transporter</th>
                 <th className="num-col">Trips</th>
                 <th>Added</th>
                 {mayManage && <th className="w-32"></th>}
               </tr>
             </thead>
             <tbody>
-              {vehicles.map((v) => (
-                <tr key={v.id} className={v.archivedAt ? "opacity-50" : ""}>
-                  <td className="font-medium num">
-                    <Link
-                      href={`/ledgers/expenses/rent?vehicleId=${v.id}`}
-                      className="text-accent underline underline-offset-2"
+              {transporterGroups.map((group) => (
+                <Fragment key={group.id}>
+                  <tr className="bg-surface-muted">
+                    <td
+                      colSpan={mayManage ? 4 : 3}
+                      className="font-semibold"
                     >
-                      {v.number}
-                    </Link>
-                    {v.archivedAt && (
-                      <span className="text-muted text-[12px] normal-case">
-                        {" "}
-                        · archived
+                      <Link
+                        href={`/ledgers/parties/${group.id}`}
+                        className="text-accent underline underline-offset-2"
+                      >
+                        {group.name}
+                      </Link>
+                      <span className="text-muted text-[12px] font-normal ml-2">
+                        {group.vehicles.length} vehicle
+                        {group.vehicles.length === 1 ? "" : "s"}
                       </span>
-                    )}
-                  </td>
-                  <td>
-                    {/* Straight to the transporter's statement — the balance
-                        there is the rent still unpaid across every trip. */}
-                    <Link
-                      href={`/ledgers/parties/${v.transporter.id}`}
-                      className="text-accent underline underline-offset-2"
-                    >
-                      {v.transporter.name}
-                    </Link>
-                  </td>
-                  <td className="num-col num">{v._count.trips}</td>
-                  <td className="text-muted text-[12px]">
-                    {fmtDate(v.createdAt)}
-                  </td>
-                  {mayManage && (
-                    <td>
-                      <VehicleActionsCell
-                        vehicleId={v.id}
-                        number={v.number}
-                        archived={v.archivedAt !== null}
-                        trips={v._count.trips}
-                        isSuperAdmin={isSuperAdmin}
-                        mayEdit={mayEdit}
-                        transporterName={v.transporter.name}
-                        transporters={transporters.map((t) => t.name)}
-                      />
                     </td>
-                  )}
-                </tr>
+                  </tr>
+                  {group.vehicles.map((v) => (
+                    <tr
+                      key={v.id}
+                      className={v.archivedAt ? "opacity-50" : ""}
+                    >
+                      <td className="font-medium num pl-8">
+                        <Link
+                          href={`/ledgers/expenses/rent?vehicleId=${v.id}`}
+                          className="text-accent underline underline-offset-2"
+                        >
+                          {v.number}
+                        </Link>
+                        {v.archivedAt && (
+                          <span className="text-muted text-[12px] normal-case">
+                            {" "}
+                            · archived
+                          </span>
+                        )}
+                      </td>
+                      <td className="num-col num">{v._count.trips}</td>
+                      <td className="text-muted text-[12px]">
+                        {fmtDate(v.createdAt)}
+                      </td>
+                      {mayManage && (
+                        <td>
+                          <VehicleActionsCell
+                            vehicleId={v.id}
+                            number={v.number}
+                            archived={v.archivedAt !== null}
+                            trips={v._count.trips}
+                            isSuperAdmin={isSuperAdmin}
+                            mayEdit={mayEdit}
+                            transporterName={v.transporter.name}
+                            transporters={transporters.map((t) => t.name)}
+                          />
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </Fragment>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {mayManage && (
-        <div className="border border-line bg-surface px-4 py-3">
-          <VehicleCreateForm transporters={transporters.map((t) => t.name)} />
         </div>
       )}
     </div>
