@@ -67,6 +67,16 @@ export default async function ExpenseCategoryPage({
       vehicle: { select: { id: true, number: true } },
     },
   });
+  const masterVehicles =
+    category.code === "RENT"
+      ? await prisma.vehicle.findMany({
+          where: { companyId: company.id, archivedAt: null },
+          select: {
+            number: true,
+            transporter: { select: { id: true, name: true } },
+          },
+        })
+      : [];
   const filteredExpenses = expenses;
 
   // Only shown where it exists, so heads that have nothing to do with trips
@@ -102,6 +112,18 @@ export default async function ExpenseCategoryPage({
         name: e.party.name,
         amount: e.amount,
         vehicles: new Set(vehicle ? [vehicle] : []),
+      });
+    }
+  }
+  for (const vehicle of masterVehicles) {
+    const hit = spentByVendor.get(vehicle.transporter.id);
+    if (hit) {
+      hit.vehicles.add(vehicle.number);
+    } else {
+      spentByVendor.set(vehicle.transporter.id, {
+        name: vehicle.transporter.name,
+        amount: ZERO,
+        vehicles: new Set([vehicle.number]),
       });
     }
   }
