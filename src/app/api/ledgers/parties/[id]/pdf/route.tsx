@@ -15,6 +15,7 @@ import { statementLines, statementSources } from "@/lib/statement";
 import { pdfFilename, pdfResponse } from "@/pdf/render";
 import { letterheadFor } from "@/pdf/letterhead";
 import { partyCategory } from "@/lib/party";
+import { normaliseVehicleNumber } from "@/lib/vehicle";
 
 /**
  * A party's statement of account, as a downloadable PDF.
@@ -62,6 +63,64 @@ export async function GET(
     Object.fromEntries(url.searchParams) as SearchParams
   );
   const scope = { companyId: company.id, centreId: centre.id, partyId: id };
+  const rawVehicleId = url.searchParams.get("vehicleId");
+  const selectedVehicle =
+    party.type === "TRANSPORTER" && rawVehicleId
+      ? await prisma.vehicle.findFirst({
+          where: {
+            id: rawVehicleId,
+            companyId: company.id,
+            transporterId: party.id,
+          },
+          select: { id: true, number: true },
+        })
+      : null;
+  let entryWhere: Prisma.LedgerEntryWhereInput = {
+    ...scope,
+    ...dateWhere(listWindow),
+  };
+  if (selectedVehicle) {
+    const [vehicleExpenses, vehicleTrips] = await Promise.all([
+      prisma.expense.findMany({
+        where: {
+          ...scope,
+          category: { code: "RENT" },
+        },
+        select: {
+          id: true,
+          vehicleId: true,
+          details: true,
+          deliveryNote: { select: { vehicleId: true } },
+        },
+      }),
+      prisma.deliveryNote.findMany({
+        where: {
+          companyId: company.id,
+          centreId: centre.id,
+          vehicleId: selectedVehicle.id,
+        },
+        select: { id: true },
+      }),
+    ]);
+    const matchingExpenseIds = vehicleExpenses
+      .filter((e) => {
+        const number = (e.details as Record<string, string> | null)?.vehicleNo;
+        return (
+          e.vehicleId === selectedVehicle.id ||
+          e.deliveryNote?.vehicleId === selectedVehicle.id ||
+          (number &&
+            normaliseVehicleNumber(number) ===
+              normaliseVehicleNumber(selectedVehicle.number))
+        );
+      })
+      .map((e) => e.id);
+    entryWhere = {
+      ...entryWhere,
+      sourceId: {
+        in: [...matchingExpenseIds, ...vehicleTrips.map((t) => t.id)],
+      },
+    };
+  }
 
   /**
    * What kind of account this is, printed under the name and carried into the
@@ -83,14 +142,17 @@ export async function GET(
 
   const [entries, prior] = await Promise.all([
     prisma.ledgerEntry.findMany({
-      where: { ...scope, ...dateWhere(listWindow) },
+      where: entryWhere,
       orderBy: [{ date: "asc" }, { seq: "asc" }],
     }),
     // Where the account stood the day BEFORE this window opened — the last
     // entry strictly earlier than `from`, in the same (date, seq) order the
     // running balance is built in.
     prisma.ledgerEntry.findFirst({
-      where: { ...scope, date: { lt: listWindow.fromDate } },
+      where: {
+        ...entryWhere,
+        date: { lt: listWindow.fromDate },
+      },
       orderBy: [{ date: "desc" }, { seq: "desc" }],
       select: { runningBalance: true },
     }),

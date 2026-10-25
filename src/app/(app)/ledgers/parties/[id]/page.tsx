@@ -308,7 +308,9 @@ export default async function PartyStatementPage({
                 a party querying what they owe. Carries the date window on
                 screen, so both links cover the same period. */}
             <a
-              href={`/api/ledgers/parties/${party.id}/pdf?from=${listWindow.from}&to=${listWindow.to}`}
+              href={`/api/ledgers/parties/${party.id}/pdf?from=${listWindow.from}&to=${listWindow.to}${
+                vehicleId ? `&vehicleId=${encodeURIComponent(vehicleId)}` : ""
+              }`}
               className="text-accent text-[12px] underline underline-offset-2"
             >
               Save as PDF
@@ -451,16 +453,16 @@ export default async function PartyStatementPage({
         </p>
       ) : (
         <div className="border border-line-strong bg-surface overflow-x-auto">
-          <table className="ledger-table">
+          <table className="ledger-table min-w-[760px]">
             <thead>
               <tr>
                 <th>Date</th>
                 {party.type === "TRANSPORTER" && <th>Vehicle</th>}
                 <th>Particulars</th>
                 {showBoat && <th>Boat</th>}
-                <th className="num-col">Debit</th>
-                <th className="num-col">Credit</th>
-                <th className="num-col">Balance</th>
+                <th className="num-col whitespace-nowrap px-5">Debit</th>
+                <th className="num-col whitespace-nowrap px-5">Credit</th>
+                <th className="num-col whitespace-nowrap px-5">Balance</th>
               </tr>
             </thead>
             <tbody>
@@ -513,13 +515,13 @@ export default async function PartyStatementPage({
                         )}
                       </td>
                     )}
-                    <td className="num-col num text-debit">
+                    <td className="num-col num text-debit whitespace-nowrap px-5">
                       {e.type === "DEBIT" ? fmtMoney(e.amount) : ""}
                     </td>
-                    <td className="num-col num text-credit">
+                    <td className="num-col num text-credit whitespace-nowrap px-5">
                       {e.type === "CREDIT" ? fmtMoney(e.amount) : ""}
                     </td>
-                    <td className="num-col num font-semibold">
+                    <td className="num-col num font-semibold whitespace-nowrap px-5">
                       {fmtMoney(e.runningBalance)}
                     </td>
                   </tr>

@@ -8,6 +8,7 @@ import { PARTY_TYPE_LABELS } from "@/lib/party";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { dateWhere, parseListWindow, type SearchParams } from "@/lib/paging";
 import { docTitle, titleDate } from "@/lib/doc-title";
+import { normaliseVehicleNumber } from "@/lib/vehicle";
 import { PrintHeader } from "../../../../letterhead";
 import { PrintToolbar } from "../../../../print-toolbar";
 import "../../../../voucher-print.css";
@@ -102,12 +103,67 @@ export default async function PartyStatementPrintPage({
 
   const listWindow = parseListWindow(await searchParams);
   const scope = { companyId: company.id, centreId: centre.id, partyId: id };
+  const rawVehicleId = (await searchParams).vehicleId;
+  const selectedVehicle =
+    party.type === "TRANSPORTER" && typeof rawVehicleId === "string"
+      ? await prisma.vehicle.findFirst({
+          where: {
+            id: rawVehicleId,
+            companyId: company.id,
+            transporterId: party.id,
+          },
+          select: { id: true, number: true },
+        })
+      : null;
+  let entryWhere: Prisma.LedgerEntryWhereInput = {
+    ...scope,
+    ...dateWhere(listWindow),
+  };
+  if (selectedVehicle) {
+    const [vehicleExpenses, vehicleTrips] = await Promise.all([
+      prisma.expense.findMany({
+        where: { ...scope, category: { code: "RENT" } },
+        select: {
+          id: true,
+          vehicleId: true,
+          details: true,
+          deliveryNote: { select: { vehicleId: true } },
+        },
+      }),
+      prisma.deliveryNote.findMany({
+        where: {
+          companyId: company.id,
+          centreId: centre.id,
+          vehicleId: selectedVehicle.id,
+        },
+        select: { id: true },
+      }),
+    ]);
+    const matchingExpenseIds = vehicleExpenses
+      .filter((e) => {
+        const number = (e.details as Record<string, string> | null)?.vehicleNo;
+        return (
+          e.vehicleId === selectedVehicle.id ||
+          e.deliveryNote?.vehicleId === selectedVehicle.id ||
+          (number &&
+            normaliseVehicleNumber(number) ===
+              normaliseVehicleNumber(selectedVehicle.number))
+        );
+      })
+      .map((e) => e.id);
+    entryWhere = {
+      ...entryWhere,
+      sourceId: {
+        in: [...matchingExpenseIds, ...vehicleTrips.map((t) => t.id)],
+      },
+    };
+  }
 
 
   const [entries, latest, totals] = await Promise.all([
     // No skip/take: the whole window, for the reason in the doc comment above.
     prisma.ledgerEntry.findMany({
-      where: { ...scope, ...dateWhere(listWindow) },
+      where: entryWhere,
       orderBy: [{ date: "asc" }, { seq: "asc" }],
     }),
     prisma.ledgerEntry.findFirst({
