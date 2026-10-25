@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/session";
 import { getActiveScope } from "@/lib/centre";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { type SearchParams } from "@/lib/paging";
+import { normaliseVehicleNumber } from "@/lib/vehicle";
 import { NoCentreNotice } from "../../../no-centre";
 
 const ZERO = new Prisma.Decimal(0);
@@ -45,7 +46,18 @@ export default async function ExpenseCategoryPage({
     select: { id: true, name: true, kind: true, code: true },
   });
   if (!category) notFound();
-  await searchParams;
+  const rawVehicleId = (await searchParams).vehicleId;
+  const selectedVehicle =
+    category.code === "RENT" && typeof rawVehicleId === "string"
+      ? await prisma.vehicle.findFirst({
+          where: { id: rawVehicleId, companyId: company.id },
+          select: {
+            id: true,
+            number: true,
+            transporter: { select: { id: true, name: true } },
+          },
+        })
+      : null;
 
   const scope = { companyId: company.id, centreId: centre.id };
   const expenses = await prisma.expense.findMany({
@@ -67,17 +79,34 @@ export default async function ExpenseCategoryPage({
       vehicle: { select: { id: true, number: true } },
     },
   });
+  const matchingExpenses = selectedVehicle
+    ? expenses.filter((expense) => {
+        const legacyNumber = (expense.details as Record<string, string> | null)
+          ?.vehicleNo;
+        return (
+          expense.vehicle?.id === selectedVehicle.id ||
+          expense.deliveryNote?.vehicle.id === selectedVehicle.id ||
+          (legacyNumber &&
+            normaliseVehicleNumber(legacyNumber) ===
+              normaliseVehicleNumber(selectedVehicle.number))
+        );
+      })
+    : expenses;
   const masterVehicles =
     category.code === "RENT"
       ? await prisma.vehicle.findMany({
-          where: { companyId: company.id, archivedAt: null },
+          where: {
+            companyId: company.id,
+            archivedAt: null,
+            ...(selectedVehicle ? { id: selectedVehicle.id } : {}),
+          },
           select: {
             number: true,
             transporter: { select: { id: true, name: true } },
           },
         })
       : [];
-  const filteredExpenses = expenses;
+  const filteredExpenses = matchingExpenses;
 
   // Only shown where it exists, so heads that have nothing to do with trips
   // (ice, canteen, salary) do not gain an empty column.
